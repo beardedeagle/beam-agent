@@ -1,4 +1,4 @@
-.eunit
+.eunit/
 *.o
 *.beam
 *.plt
@@ -9,9 +9,25 @@ erl_crash.dump
 .rebar
 rel/example_project
 ebin/*.beam
-deps
+deps/
 
 # rebar 3
-.rebar3
+.rebar3/
 _build/
 _checkouts/
+
+# user adds
+rebar3.crashdump
+*.ez
+doc/
+logs/
+.omc/
+.omx/
+.DS_Store
+.claude/
+.backup/
+rule-tests/
+rules/
+utils/
+AGENTS.md
+sgconfig.yml
