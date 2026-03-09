@@ -278,7 +278,8 @@ defmodule CopilotEx do
   def list_server_sessions(session), do: :copilot_client.list_server_sessions(session)
 
   @spec list_server_sessions(pid(), map()) :: {:ok, [map()]} | {:error, term()}
-  def list_server_sessions(session, filter), do: :copilot_client.list_server_sessions(session, filter)
+  def list_server_sessions(session, filter),
+    do: :copilot_client.list_server_sessions(session, filter)
 
   @doc "Get native Copilot session metadata by id."
   @spec get_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}

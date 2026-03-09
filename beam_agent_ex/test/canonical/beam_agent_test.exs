@@ -25,6 +25,7 @@ defmodule BeamAgentTest do
   end
 
   test "session store remains available on canonical root" do
+    :beam_agent_session_store_core.clear()
     assert {:ok, []} = BeamAgent.list_sessions()
   end
 
