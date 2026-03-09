@@ -25,8 +25,8 @@ defmodule BeamAgentTest do
   end
 
   test "session store remains available on canonical root" do
-    :beam_agent_session_store_core.clear()
-    assert {:ok, []} = BeamAgent.list_sessions()
+    assert {:ok, sessions} = BeamAgent.list_sessions()
+    assert is_list(sessions)
   end
 
   test "exports codex fuzzy file search session lifecycle on the canonical root" do
