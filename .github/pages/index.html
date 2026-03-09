@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BEAM Agent</title>
+  <style>
+    :root {
+      --main: hsl(250, 68%, 69%);
+      --mainDark: hsl(250, 68%, 59%);
+      --mainDarkest: hsl(250, 68%, 49%);
+      --mainLight: hsl(250, 68%, 74%);
+      --mainLightest: hsl(250, 68%, 79%);
+      --bg: #f7f7f7;
+      --bg-card: #fff;
+      --bg-code: #f0edf7;
+      --text: #1a1a2e;
+      --text-muted: #555;
+      --border: #e0dce8;
+      --shadow: rgba(0,0,0,0.06);
+      --font: "Lato", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1e26;
+        --bg-card: #252830;
+        --bg-code: #2a2d38;
+        --text: #e8e6f0;
+        --text-muted: #9a97a8;
+        --border: #3a3d4a;
+        --shadow: rgba(0,0,0,0.2);
+      }
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--mainDark); text-decoration: none; transition: color 0.15s; }
+    a:hover { color: var(--mainDarkest); text-decoration: underline; }
+
+    @media (prefers-color-scheme: dark) {
+      a { color: var(--mainLightest); }
+      a:hover { color: #fff; }
+    }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, hsl(250, 50%, 20%) 0%, hsl(250, 60%, 30%) 50%, hsl(270, 50%, 25%) 100%);
+      color: #fff;
+      padding: 4rem 2rem 3.5rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+
+    .hero .accent { color: var(--mainLightest); }
+
+    .hero .tagline {
+      font-size: 1.2rem;
+      opacity: 0.85;
+      max-width: 600px;
+      margin: 0 auto 1.5rem;
+    }
+
+    .hero .badges {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 20px;
+      padding: 0.35rem 0.9rem;
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.9);
+    }
+
+    /* Container */
+    .container {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Section */
+    section { padding: 3rem 0; }
+    section + section { border-top: 1px solid var(--border); }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+
+    .section-desc {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      max-width: 700px;
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .feature {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      box-shadow: 0 1px 3px var(--shadow);
+    }
+
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+
+    .feature p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Package cards */
+    .packages {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .pkg {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px var(--shadow);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .pkg:hover {
+      border-color: var(--mainLight);
+      box-shadow: 0 2px 8px var(--shadow);
+    }
+
+    .pkg-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .pkg-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .pkg-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .pkg-name a { color: var(--text); }
+    .pkg-name a:hover { color: var(--mainDark); text-decoration: none; }
+
+    @media (prefers-color-scheme: dark) {
+      .pkg-name a:hover { color: var(--mainLightest); }
+    }
+
+    .pkg-tag {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      background: var(--bg-code);
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      margin-left: auto;
+    }
+
+    .pkg p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .pkg-links {
+      margin-top: 0.75rem;
+      display: flex;
+      gap: 1rem;
+      font-size: 0.85rem;
+    }
+
+    /* Foundation highlight */
+    .foundation {
+      background: var(--bg-card);
+      border: 2px solid var(--mainLight);
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 1px 3px var(--shadow);
+    }
+
+    .foundation .pkg-header { margin-bottom: 0.5rem; }
+
+    .foundation-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .foundation-tag {
+      font-size: 0.8rem;
+      background: var(--bg-code);
+      color: var(--text-muted);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+    }
+
+    /* Quick start */
+    .code-block {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.875rem;
+      line-height: 1.7;
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+
+    .code-block .comment { color: #6c7086; }
+    .code-block .atom { color: #89b4fa; }
+    .code-block .string { color: #a6e3a1; }
+    .code-block .module { color: #cba6f7; }
+    .code-block .func { color: #f9e2af; }
+    .code-block .keyword { color: #f38ba8; }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-top: 1rem;
+    }
+
+    .tab {
+      padding: 0.5rem 1.25rem;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      background: var(--bg);
+      font-size: 0.875rem;
+      font-family: var(--font);
+      color: var(--text-muted);
+      border-radius: 8px 8px 0 0;
+      transition: background 0.15s;
+    }
+
+    .tab.active {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      border-color: #1e1e2e;
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .tab-content .code-block {
+      margin-top: 0;
+      border-radius: 0 8px 8px 8px;
+    }
+
+    /* Compat table */
+    .compat {
+      margin-top: 1rem;
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    .compat th, .compat td {
+      padding: 0.6rem 1rem;
+      border: 1px solid var(--border);
+      text-align: left;
+    }
+
+    .compat th {
+      background: var(--bg-code);
+      font-weight: 600;
+    }
+
+    .compat td { background: var(--bg-card); }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 0;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    footer a { color: var(--mainDark); }
+
+    @media (prefers-color-scheme: dark) {
+      footer a { color: var(--mainLightest); }
+    }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 1.75rem; }
+      .hero .tagline { font-size: 1rem; }
+      .packages { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1><span class="accent">BEAM</span> Agent SDKs</h1>
+  <p class="tagline">
+    Erlang/OTP and Elixir libraries for AI coding agent wire protocols.
+    OTP-native, fault-tolerant, and production-ready.
+  </p>
+  <div class="badges">
+    <span class="badge">OTP 27+</span>
+    <span class="badge">Elixir 1.17+</span>
+    <span class="badge">5 AI Agents</span>
+    <span class="badge">MIT</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Features -->
+  <section>
+    <h2 class="section-title">Built for the BEAM</h2>
+    <p class="section-desc">
+      Every SDK is a proper OTP application. Supervision trees, telemetry, and
+      fault isolation come standard &mdash; not bolted on.
+    </p>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">&#9881;</div>
+        <h3>OTP Supervision</h3>
+        <p>Each agent session is a supervised gen_statem. Crashes are isolated and recoverable.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#9889;</div>
+        <h3>Telemetry</h3>
+        <p>State changes, queries, buffer overflows &mdash; all instrumented via :telemetry for observability.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128274;</div>
+        <h3>Fail-Closed Permissions</h3>
+        <p>Permission handlers default to deny. Explicit opt-in for tool execution and file access.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128268;</div>
+        <h3>MCP Servers</h3>
+        <p>Define custom tools as Erlang functions. In-process MCP server registry with SDK integration.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128203;</div>
+        <h3>Universal API</h3>
+        <p>Threads, checkpoints, session store, and control protocol &mdash; available on every adapter.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128257;</div>
+        <h3>Content Blocks</h3>
+        <p>Bidirectional conversion between messages and typed content blocks across all protocols.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Foundation -->
+  <section>
+    <h2 class="section-title">Packages</h2>
+    <p class="section-desc">
+      A single canonical SDK with five protocol-specific adapters, documented
+      for both Erlang and Elixir.
+    </p>
+
+    <div class="foundation">
+      <div class="pkg-header">
+        <div class="pkg-icon" style="background: linear-gradient(135deg, hsl(250,60%,55%), hsl(270,60%,50%));">BA</div>
+        <div>
+          <div class="pkg-name">
+            <a href="erlang/">beam_agent</a> /
+            <a href="elixir/">BeamAgent</a>
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-muted);">Canonical SDK</div>
+        </div>
+      </div>
+      <p style="font-size:0.9rem; color:var(--text-muted);">
+        Shared types, JSONL parsing, JSON-RPC, hooks, MCP servers, telemetry,
+        session store, threads, checkpoints, command execution, and the transport behaviour.
+      </p>
+      <div class="foundation-features">
+        <span class="foundation-tag">Types &amp; Normalization</span>
+        <span class="foundation-tag">JSONL / JSON-RPC</span>
+        <span class="foundation-tag">Hooks</span>
+        <span class="foundation-tag">MCP Registry</span>
+        <span class="foundation-tag">Telemetry</span>
+        <span class="foundation-tag">Session Store</span>
+        <span class="foundation-tag">Threads</span>
+        <span class="foundation-tag">Checkpoints</span>
+        <span class="foundation-tag">Commands</span>
+        <span class="foundation-tag">Control Protocol</span>
+        <span class="foundation-tag">Transport Behaviour</span>
+      </div>
+      <div class="pkg-links">
+        <a href="erlang/">Erlang Docs</a>
+        <a href="elixir/">Elixir Docs</a>
+        <a href="https://github.com/beardedeagle/beam-agent">Source</a>
+      </div>
+    </div>
+
+    <div class="packages">
+      <div class="pkg">
+        <div class="pkg-header">
+          <div class="pkg-icon" style="background: linear-gradient(135deg, #da7756, #c9553d);">C</div>
+          <div class="pkg-name"><a href="elixir/ClaudeEx.html">ClaudeEx</a></div>
+          <span class="pkg-tag">Claude Code</span>
+        </div>
+        <p>Anthropic Claude Code agent SDK. Stdio transport, elicitation, session disk store, and native interrupt support.</p>
+        <div class="pkg-links">
+          <a href="erlang/claude_agent_sdk.html">Erlang</a>
+          <a href="elixir/ClaudeEx.html">Elixir</a>
+          <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/claude">Source</a>
+        </div>
+      </div>
+
+      <div class="pkg">
+        <div class="pkg-header">
+          <div class="pkg-icon" style="background: linear-gradient(135deg, #10a37f, #0d8c6d);">X</div>
+          <div class="pkg-name"><a href="elixir/CodexEx.html">CodexEx</a></div>
+          <span class="pkg-tag">OpenAI Codex</span>
+        </div>
+        <p>OpenAI Codex CLI agent SDK. Dual-mode sessions (interactive + exec), port-based transport, and turn management.</p>
+        <div class="pkg-links">
+          <a href="erlang/codex_app_server.html">Erlang</a>
+          <a href="elixir/CodexEx.html">Elixir</a>
+          <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/codex">Source</a>
+        </div>
+      </div>
+
+      <div class="pkg">
+        <div class="pkg-header">
+          <div class="pkg-icon" style="background: linear-gradient(135deg, #1a73e8, #1557b0);">CP</div>
+          <div class="pkg-name"><a href="elixir/CopilotEx.html">CopilotEx</a></div>
+          <span class="pkg-tag">GitHub Copilot</span>
+        </div>
+        <p>GitHub Copilot agent SDK. LSP-style framing, user input requests, and content-length delimited transport.</p>
+        <div class="pkg-links">
+          <a href="erlang/copilot_client.html">Erlang</a>
+          <a href="elixir/CopilotEx.html">Elixir</a>
+          <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/copilot">Source</a>
+        </div>
+      </div>
+
+      <div class="pkg">
+        <div class="pkg-header">
+          <div class="pkg-icon" style="background: linear-gradient(135deg, #4285f4, #34a853);">G</div>
+          <div class="pkg-name"><a href="elixir/GeminiEx.html">GeminiEx</a></div>
+          <span class="pkg-tag">Google Gemini</span>
+        </div>
+        <p>Google Gemini CLI agent SDK. JSONL stdio transport with schema-driven tool definitions.</p>
+        <div class="pkg-links">
+          <a href="erlang/gemini_cli_client.html">Erlang</a>
+          <a href="elixir/GeminiEx.html">Elixir</a>
+          <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/gemini">Source</a>
+        </div>
+      </div>
+
+      <div class="pkg">
+        <div class="pkg-header">
+          <div class="pkg-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">O</div>
+          <div class="pkg-name"><a href="elixir/OpencodeEx.html">OpencodeEx</a></div>
+          <span class="pkg-tag">OpenCode</span>
+        </div>
+        <p>OpenCode agent SDK. HTTP/SSE transport with REST session management and server-sent event streaming.</p>
+        <div class="pkg-links">
+          <a href="erlang/opencode_client.html">Erlang</a>
+          <a href="elixir/OpencodeEx.html">Elixir</a>
+          <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/opencode">Source</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start -->
+  <section>
+    <h2 class="section-title">Quick Start</h2>
+    <p class="section-desc">Add a dependency and start a session in a few lines.</p>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(event, 'elixir')">Elixir</button>
+      <button class="tab" onclick="switchTab(event, 'erlang')">Erlang</button>
+    </div>
+
+    <div id="tab-elixir" class="tab-content active">
+      <div class="code-block">
+<span class="comment"># mix.exs</span>
+{<span class="atom">:claude_ex</span>, <span class="string">"~&gt; 0.1"</span>}
+
+<span class="comment"># Start a session and send a query</span>
+{<span class="atom">:ok</span>, pid} = <span class="module">ClaudeEx</span>.<span class="func">start_session</span>(%{
+  <span class="atom">cli_path:</span> <span class="string">"claude"</span>,
+  <span class="atom">args:</span> [<span class="string">"--model"</span>, <span class="string">"claude-sonnet-4-6"</span>]
+})
+
+<span class="module">ClaudeEx</span>.<span class="func">stream!</span>(pid, <span class="string">"Explain OTP supervision"</span>, <span class="keyword">fn</span> msg <span class="keyword">-&gt;</span>
+  <span class="module">IO</span>.<span class="func">inspect</span>(msg, <span class="atom">label:</span> <span class="string">"event"</span>)
+<span class="keyword">end</span>)
+      </div>
+    </div>
+
+    <div id="tab-erlang" class="tab-content">
+      <div class="code-block">
+<span class="comment">%% rebar.config</span>
+{<span class="atom">deps</span>, [{<span class="atom">claude_agent_sdk</span>, <span class="string">"~> 0.1"</span>}]}.
+
+<span class="comment">%% Start a session and send a query</span>
+{<span class="atom">ok</span>, Pid} = <span class="module">claude_agent_sdk</span>:<span class="func">start_link</span>(#{
+    <span class="atom">cli_path</span> =&gt; &lt;&lt;<span class="string">"claude"</span>&gt;&gt;,
+    <span class="atom">args</span> =&gt; [&lt;&lt;<span class="string">"--model"</span>&gt;&gt;, &lt;&lt;<span class="string">"claude-sonnet-4-6"</span>&gt;&gt;]
+}),
+
+<span class="module">claude_agent_sdk</span>:<span class="func">query</span>(Pid, &lt;&lt;<span class="string">"Explain OTP supervision"</span>&gt;&gt;).
+      </div>
+    </div>
+  </section>
+
+  <!-- Compatibility -->
+  <section>
+    <h2 class="section-title">Compatibility</h2>
+    <table class="compat">
+      <thead>
+        <tr>
+          <th>Runtime</th>
+          <th>Minimum Version</th>
+          <th>Tested Up To</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Erlang/OTP</td><td>27</td><td>28</td></tr>
+        <tr><td>Elixir</td><td>1.17</td><td>1.19</td></tr>
+        <tr><td>Rebar3</td><td>3.x</td><td>latest</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  <div class="container">
+    <p>
+      <a href="https://github.com/beardedeagle/beam-agent">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      MIT License
+      &nbsp;&middot;&nbsp;
+      Built with <a href="https://github.com/elixir-lang/ex_doc">ExDoc</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+function switchTab(e, lang) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('tab-' + lang).classList.add('active');
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  erlang:
+    name: Erlang (OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          rebar3-version: '3'
+
+      - name: Restore rebar3 cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            ~/.cache/rebar3
+          key: erlang-${{ runner.os }}-otp-${{ matrix.otp }}-${{ hashFiles('rebar.lock') }}
+          restore-keys: |
+            erlang-${{ runner.os }}-otp-${{ matrix.otp }}-
+
+      - name: Compile
+        run: rebar3 compile
+
+      - name: Run tests
+        run: rebar3 eunit
+
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          rebar3-version: '3'
+
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            ~/.cache/rebar3
+          key: dialyzer-${{ runner.os }}-otp-28-${{ hashFiles('rebar.lock') }}
+          restore-keys: |
+            dialyzer-${{ runner.os }}-otp-28-
+
+      - name: Run Dialyzer
+        run: |
+          set +e
+          rebar3 dialyzer 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee /tmp/dialyzer.log
+          DIAL_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$DIAL_EXIT" -eq 0 ]; then
+            echo "Dialyzer passed clean."
+            exit 0
+          fi
+          SUPERTYPE=$(grep -cE "is a supertype of the success typing|states that the function might also return" /tmp/dialyzer.log || echo 0)
+          TOTAL=$(sed -n 's/.*Warnings occurred running dialyzer: \([0-9]*\)/\1/p' /tmp/dialyzer.log)
+          TOTAL=${TOTAL:-0}
+          if [ "$SUPERTYPE" -eq "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
+            echo "---"
+            echo "All $TOTAL dialyzer warnings are overspec (intentionally broad specs). Passing."
+            exit 0
+          else
+            echo "---"
+            echo "Found $((TOTAL - SUPERTYPE)) non-overspec warnings. Failing."
+            exit 1
+          fi
+
+  elixir:
+    name: Elixir ${{ matrix.elixir }} (OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Elixir 1.17: OTP 27
+          - elixir: '1.17'
+            otp: '27'
+          # Elixir 1.18: OTP 27
+          - elixir: '1.18'
+            otp: '27'
+          # Elixir 1.19: OTP 27-28
+          - elixir: '1.19'
+            otp: '27'
+          - elixir: '1.19'
+            otp: '28'
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Restore mix cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mix
+            ~/.hex
+          key: mix-${{ runner.os }}-${{ matrix.elixir }}-otp-${{ matrix.otp }}
+
+      - name: Install hex and rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Test Elixir wrapper
+        run: |
+          cd beam_agent_ex
+          mix deps.get
+          mix test
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.19'
+
+      - name: Install hex and rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Check formatting
+        run: |
+          cd beam_agent_ex
+          mix deps.get
+          mix format --check-formatted

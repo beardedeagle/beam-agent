@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish-erlang:
+    name: Publish Erlang Packages
+    runs-on: ubuntu-latest
+    env:
+      HEX_API_KEY: ${{ secrets.HEX_PM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          rebar3-version: '3'
+
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            ~/.cache/rebar3
+          key: release-erlang-${{ runner.os }}-${{ hashFiles('rebar.lock') }}
+
+      - name: Compile
+        run: rebar3 compile
+
+      - name: Publish to hex.pm
+        run: |
+          rebar3 hex publish --yes
+
+  publish-elixir:
+    name: Publish Elixir Packages
+    needs: publish-erlang
+    runs-on: ubuntu-latest
+    env:
+      HEX_API_KEY: ${{ secrets.HEX_PM_TOKEN }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.19'
+
+      - name: Install hex and rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Publish to hex.pm
+        run: |
+          VERSION="${TAG_NAME#v}"
+
+          # Swap the local path dep to a published hex dep for release.
+          swap_dep() {
+            local file="$1" name="$2" path_pattern="$3"
+            # shellcheck disable=SC2001
+            sed -i "s|{:${name}, path: \"${path_pattern}\"}|{:${name}, \"~> ${VERSION}\"}|g" "$file"
+          }
+
+          pushd beam_agent_ex
+          swap_dep mix.exs beam_agent '..'
+          mix deps.get
+          mix hex.publish --yes
+          popd
