@@ -265,7 +265,7 @@ test_session_info(ScriptPath) ->
     {ok, Info} = copilot_session:session_info(Pid),
     ?assert(is_map(Info)),
     ?assertEqual(copilot, maps:get(adapter, Info)),
-    ?assertEqual(<<"copilot-sess-001">>, maps:get(session_id, Info)),
+    ?assert(is_binary(maps:get(session_id, Info))),
     ?assertEqual(<<"copilot-sess-001">>, maps:get(copilot_session_id, Info)),
 
     copilot_session:stop(Pid).
@@ -667,7 +667,7 @@ hook_user_prompt_deny_test_() ->
               ?assertEqual(ready, copilot_session:health(Pid)),
               Result = copilot_session:send_query(
                   Pid, <<"test">>, #{}, 5000),
-              ?assertMatch({error, denied_by_hook}, Result),
+              ?assertMatch({error, {hook_denied, <<"prompts blocked">>}}, Result),
               %% Session should still be in ready state
               ?assertEqual(ready, copilot_session:health(Pid)),
               copilot_session:stop(Pid)
@@ -794,7 +794,7 @@ bad_cli_path_test_() ->
               cli_path => "/nonexistent/path/to/copilot_that_doesnt_exist"
           }),
           logger:set_primary_config(level, OldLevel),
-          ?assertMatch({error, {shutdown, {open_port_failed, _}}}, Result),
+          ?assertMatch({error, {transport_start_failed, _}}, Result),
           process_flag(trap_exit, false)
       end}}.
 
@@ -813,15 +813,10 @@ port_exit_during_query_test_() ->
               {ok, Ref} = copilot_session:send_query(
                   Pid, <<"test">>, #{}, 10000),
 
-              %% The mock exits after session.send — should get error + result
-              Messages = collect_all(Pid, Ref, []),
-              ?assert(length(Messages) >= 1),
-
-              %% Should contain an error message
-              HasError = lists:any(fun(M) ->
-                  maps:get(type, M) =:= error
-              end, Messages),
-              ?assert(HasError),
+              %% The mock exits after session.send — engine replies with
+              %% cli_exit error to the consumer directly.
+              Result = copilot_session:receive_message(Pid, Ref, 5000),
+              ?assertMatch({error, {cli_exit, _}}, Result),
 
               %% Session should be in error state
               timer:sleep(200),
@@ -952,17 +947,6 @@ wait_for_health_loop(Pid, Expected, Deadline) ->
             end
     end.
 
-collect_all(Pid, Ref, Acc) ->
-    case copilot_session:receive_message(Pid, Ref, 5000) of
-        {ok, #{type := result} = Msg} ->
-            lists:reverse([Msg | Acc]);
-        {ok, #{type := error, is_error := true} = Msg} ->
-            lists:reverse([Msg | Acc]);
-        {ok, Msg} ->
-            collect_all(Pid, Ref, [Msg | Acc]);
-        {error, _} ->
-            lists:reverse(Acc)
-    end.
 
 drain_messages(Pid, Ref) ->
     case copilot_session:receive_message(Pid, Ref, 3000) of

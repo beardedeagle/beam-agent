@@ -279,7 +279,8 @@ test_env_vars(ScriptPath) ->
 test_session_info(ScriptPath) ->
     %% session_info/1 should return parsed system init metadata
     {ok, Pid} = claude_agent_session:start_link(#{
-        cli_path => ScriptPath
+        cli_path => ScriptPath,
+        session_id => <<"test-session-123">>
     }),
     timer:sleep(1000),
 
@@ -384,7 +385,7 @@ bad_cli_path_test_() ->
               cli_path => "/nonexistent/path/to/claude_that_doesnt_exist"
           }),
           logger:set_primary_config(level, OldLevel),
-          ?assertMatch({error, {shutdown, {open_port_failed, _}}}, Result),
+          ?assertMatch({error, {transport_start_failed, _}}, Result),
           process_flag(trap_exit, false)
       end}}.
 

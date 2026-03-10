@@ -163,7 +163,7 @@ parse_start_result(Result) when is_map(Result) ->
 
 -spec start_session_id(map()) -> binary() | undefined.
 start_session_id(Opts) ->
-    case maps:get(session_id, Opts, maps:get(resume, Opts, undefined)) of
+    case maps:get(resume, Opts, undefined) of
         true ->
             <<"latest">>;
         latest ->

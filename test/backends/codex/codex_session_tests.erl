@@ -364,7 +364,7 @@ bad_cli_path_test_() ->
               cli_path => "/nonexistent/path/to/codex_that_doesnt_exist"
           }),
           logger:set_primary_config(level, OldLevel),
-          ?assertMatch({error, {shutdown, {open_port_failed, _}}}, Result),
+          ?assertMatch({error, {transport_start_failed, _}}, Result),
           process_flag(trap_exit, false)
       end}}.
 

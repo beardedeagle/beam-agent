@@ -31,3 +31,7 @@ rules/
 utils/
 AGENTS.md
 sgconfig.yml
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

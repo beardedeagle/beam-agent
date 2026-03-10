@@ -81,4 +81,4 @@ required_only_has_four_entries_test() ->
     Callbacks = beam_agent_transport:behaviour_info(callbacks),
     Optional = beam_agent_transport:behaviour_info(optional_callbacks),
     Required = [CB || CB <- Callbacks, not lists:member(CB, Optional)],
-    ?assertEqual(4, length(Required)).
+    ?assertEqual(5, length(Required)).

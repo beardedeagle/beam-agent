@@ -53,15 +53,6 @@ defmodule GeminiExTest do
     end
   end
 
-  # ── send_control delegates supported native controls ──────────────
-
-  describe "send_control" do
-    test "unsupported control still returns an error" do
-      assert {:error, :not_supported} =
-               :gemini_cli_session.send_control(self(), "method", %{})
-    end
-  end
-
   # ── Stream functions are exported ────────────────────────────────
 
   describe "stream functions" do
@@ -259,6 +250,17 @@ defmodule GeminiExTest do
       assert :ok == wait_until_ready(session)
       {:ok, model} = GeminiEx.set_model(session, "gemini-1.5-pro")
       assert model == "gemini-1.5-pro"
+      GeminiEx.stop(session)
+    end
+
+    test "send_control rejects unknown methods", %{script_path: script_path} do
+      :application.ensure_all_started(:telemetry)
+      {:ok, session} = GeminiEx.start_session(cli_path: script_path)
+      assert :ok == wait_until_ready(session)
+
+      assert {:error, {:unknown_method, "unknown_method"}} =
+               GeminiEx.send_control(session, "unknown_method", %{})
+
       GeminiEx.stop(session)
     end
   end

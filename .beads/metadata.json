@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "beam_agent",
+  "project_id": "ae2bdc3e-d35b-489f-b0fa-63099ee5cb89"
+}
