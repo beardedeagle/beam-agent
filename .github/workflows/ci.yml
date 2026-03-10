@@ -25,7 +25,7 @@ jobs:
           rebar3-version: '3'
 
       - name: Restore rebar3 cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
@@ -52,7 +52,7 @@ jobs:
           rebar3-version: '3'
 
       - name: Restore cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
@@ -113,7 +113,7 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
 
       - name: Restore mix cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.mix
@@ -147,7 +147,7 @@ jobs:
         run: mix local.hex --force
 
       - name: Restore rebar3 cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
