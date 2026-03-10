@@ -14,7 +14,7 @@ defmodule ClaudeExTest do
     test "fails with bad CLI path" do
       Process.flag(:trap_exit, true)
 
-      assert {:error, {:shutdown, {:open_port_failed, _}}} =
+      assert {:error, {:transport_start_failed, _}} =
                ClaudeEx.start_session(cli_path: "/nonexistent/path/to/claude")
 
       Process.flag(:trap_exit, false)
@@ -49,7 +49,7 @@ defmodule ClaudeExTest do
   describe "with mock CLI" do
     setup do
       script_path = create_mock_cli()
-      {:ok, session} = ClaudeEx.start_session(cli_path: script_path)
+      {:ok, session} = ClaudeEx.start_session(cli_path: script_path, session_id: "test-elixir-123")
       # Wait for initialization (system greeting + control_response handshake)
       Process.sleep(1500)
 
@@ -212,7 +212,7 @@ defmodule ClaudeExTest do
   describe "ClaudeEx.Session" do
     setup do
       script_path = create_mock_cli()
-      {:ok, session} = ClaudeEx.start_session(cli_path: script_path)
+      {:ok, session} = ClaudeEx.start_session(cli_path: script_path, session_id: "test-elixir-123")
       Process.sleep(1500)
 
       on_exit(fn ->

@@ -52,7 +52,10 @@
         beam_agent_telemetry_core,
         beam_agent_threads_core,
         beam_agent_todo,
+        beam_agent_session_engine,
+        beam_agent_session_handler,
         beam_agent_transport,
+        beam_agent_transport_ws,
         beam_agent_account_core,
         beam_agent_app_core,
         beam_agent_file_core,
@@ -67,11 +70,14 @@
         codex_protocol,
         codex_realtime_protocol,
         codex_realtime_session,
+        codex_realtime_session_handler,
         codex_session,
+        codex_session_handler,
         copilot_client,
         copilot_frame,
         copilot_protocol,
         copilot_session,
+        copilot_session_handler,
         beam_agent_gemini_reverse_requests,
         beam_agent_gemini_translate,
         beam_agent_gemini_wire,
@@ -82,6 +88,8 @@
         opencode_http,
         opencode_protocol,
         opencode_session,
-        opencode_sse
+        opencode_session_handler,
+        opencode_sse,
+        beam_agent_transport_http
     ]}
 ]}.

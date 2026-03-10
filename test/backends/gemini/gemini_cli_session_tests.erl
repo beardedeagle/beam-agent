@@ -1,5 +1,8 @@
 %%%-------------------------------------------------------------------
 %%% @doc EUnit tests for the Gemini ACP-backed session adapter.
+%%%
+%%% Tests the engine-based gemini_cli_session thin wrapper with
+%%% gemini_session_handler providing all Gemini-specific logic.
 %%%-------------------------------------------------------------------
 -module(gemini_cli_session_tests).
 
@@ -16,8 +19,16 @@ child_spec_test() ->
     ?assertEqual([#{cli_path => "/usr/bin/gemini"}], Args).
 
 send_control_not_supported_test() ->
+    %% send_control now goes through the engine. Since the handler does
+    %% not implement handle_control/4, the engine returns not_supported.
+    %% We need a real process to call — spawn a session.
+    ScriptPath = write_mock_script(),
+    {ok, Pid} = gemini_cli_session:start_link(#{cli_path => ScriptPath}),
+    wait_ready(Pid),
     ?assertEqual({error, not_supported},
-                 gemini_cli_session:send_control(self(), <<"noop">>, #{})).
+                 gemini_cli_session:send_control(Pid, <<"noop">>, #{})),
+    gemini_cli_session:stop(Pid),
+    file:delete(ScriptPath).
 
 mock_session_test_() ->
     {"gemini_cli_session lifecycle with mock ACP server",
@@ -43,7 +54,7 @@ mock_session_test_() ->
            {timeout, 10, fun() -> test_set_model(ScriptPath) end}},
           {"set_permission_mode drives session/set_mode",
            {timeout, 10, fun() -> test_set_permission_mode(ScriptPath) end}},
-          {"interrupt maps to session/cancel and yields cancelled stop reason",
+          {"interrupt maps to session/cancel and yields interrupted error",
            {timeout, 10, fun() -> test_interrupt(ScriptPath) end}},
           {"wrong ref is rejected",
            {timeout, 10, fun() -> test_wrong_ref(ScriptPath) end}},
@@ -57,15 +68,19 @@ mock_session_test_() ->
 
 setup_mock_session() ->
     _ = application:ensure_all_started(telemetry),
+    ScriptPath = write_mock_script(),
+    ScriptPath.
+
+cleanup_mock(ScriptPath) ->
+    file:delete(ScriptPath).
+
+write_mock_script() ->
     ScriptPath =
         "/tmp/mock_gemini_acp_" ++
         integer_to_list(erlang:unique_integer([positive])),
     ok = file:write_file(ScriptPath, mock_acp_server_script()),
     os:cmd("chmod +x " ++ ScriptPath),
     ScriptPath.
-
-cleanup_mock(ScriptPath) ->
-    file:delete(ScriptPath).
 
 mock_acp_server_script() ->
     [
@@ -260,7 +275,9 @@ test_session_info(ScriptPath) ->
     _ = collect_all(Pid, Ref, []),
     {ok, Info} = gemini_cli_session:session_info(Pid),
     ?assertEqual(gemini_cli, maps:get(transport, Info)),
-    ?assertEqual(<<"gemini-acp-001">>, maps:get(session_id, Info)),
+    %% The engine generates its own session_id; the Gemini ACP session ID
+    %% is available in gemini_session_id.
+    ?assertEqual(<<"gemini-acp-001">>, maps:get(gemini_session_id, Info)),
     ?assertEqual(<<"Gemini mock session">>, maps:get(title, Info)),
     gemini_cli_session:stop(Pid).
 
@@ -288,9 +305,10 @@ test_interrupt(ScriptPath) ->
     {ok, Ref} = gemini_cli_session:send_query(Pid, <<"slow">>, #{}, 10000),
     timer:sleep(100),
     ?assertEqual(ok, gemini_cli_session:interrupt(Pid)),
-    Messages = collect_all(Pid, Ref, []),
-    Result = find_last_type(result, Messages),
-    ?assertEqual(<<"cancelled">>, maps:get(stop_reason, Result)),
+    %% The engine transitions to ready immediately on interrupt,
+    %% replying {error, interrupted} to the consumer.
+    ?assertMatch({error, interrupted},
+                 gemini_cli_session:receive_message(Pid, Ref, 3000)),
     gemini_cli_session:stop(Pid).
 
 test_wrong_ref(ScriptPath) ->
@@ -351,6 +369,8 @@ collect_all(Pid, Ref, Acc) ->
         {ok, Msg} ->
             collect_all(Pid, Ref, [Msg | Acc]);
         {error, complete} ->
+            lists:reverse(Acc);
+        {error, interrupted} ->
             lists:reverse(Acc)
     end.
 
@@ -358,9 +378,6 @@ find_first_type(Type, [#{type := Type} = Msg | _]) ->
     Msg;
 find_first_type(Type, [_ | Rest]) ->
     find_first_type(Type, Rest).
-
-find_last_type(Type, Messages) ->
-    lists:last([Msg || #{type := T} = Msg <- Messages, T =:= Type]).
 
 init_argv(Info) ->
     Init = maps:get(init_response, Info, #{}),

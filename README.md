@@ -24,37 +24,56 @@ The parity closure implementation spec that drove this work is
 
 ## Architecture
 
+All five backends share a three-layer architecture:
+
+```
+Consumer → beam_agent / BeamAgent (canonical public API)
+         → beam_agent_session_engine (gen_statem — lifecycle, queue, telemetry)
+         → beam_agent_session_handler callbacks (per-backend protocol logic)
+         → beam_agent_transport (byte I/O — port, HTTP, WebSocket)
+```
+
+Each backend implements `beam_agent_session_handler` with ~6 required callbacks.
+The engine provides all shared orchestration (state machine, consumer/queue,
+telemetry, error recovery) so handlers focus only on what is unique to their
+backend's wire protocol. Zero additional processes — the engine gen_statem IS
+the session process.
+
 ```
                      +----------------------+
                      |      beam_agent      |
                      | canonical Erlang SDK |
                      +----------+-----------+
                                 |
-                     +----------+-----------+
-                     |      BeamAgent       |
-                     | canonical Elixir API |
-                     +----------+-----------+
+               +----------------+----------------+
+               |  beam_agent_session_engine      |
+               |  (gen_statem: lifecycle/queue/   |
+               |   telemetry/error recovery)     |
+               +----------------+----------------+
                                 |
        +-------------+----------+----------+-------------+-------------+
        |             |                     |             |             |
  +-----+-----+ +-----+-----+         +-----+-----+ +-----+-----+ +-----+-----+
  | Claude    | | Codex     |         | Gemini    | | OpenCode  | | Copilot   |
- | adapter    | | adapter   |         | adapter    | | adapter   | | adapter   |
- | stdio/jsonl| | rpc/jsonl |         | stdio/rpc  | | http/sse  | | clrpc     |
+ | handler   | | handler   |         | handler   | | handler   | | handler   |
+ | port/jsonl| | port/rpc  |         | port/rpc  | | http/sse  | | port/clrpc|
  +-----------+ +-----------+         +-----------+ +-----------+ +-----------+
 ```
 
-Those backend adapters are internal implementation modules inside the single
+Those backend handlers are internal implementation modules inside the single
 `beam_agent` project, not separate SDK packages.
 
-All five adapters normalize messages into `beam_agent:message()` — a common map
+All five handlers normalize messages into `beam_agent:message()` — a common map
 type you can pattern-match on regardless of which agent you're talking to.
 
 `beam_agent` is not only shared plumbing. It is the union-capability layer the
 repo is building and verifying toward: when a backend supports a feature
-natively, the adapter can route to that implementation; when it does not,
+natively, the handler can route to that implementation; when it does not,
 `beam_agent` provides the universal fallback recorded in the architecture
 matrices.
+
+To add a new backend, implement a `beam_agent_session_handler` callback module.
+See the moduledoc in `beam_agent_session_handler.erl` for a complete example.
 
 ## Quick Start
 
@@ -391,7 +410,7 @@ mix test
 - Elixir 1.17+ (for wrappers)
 - `telemetry` ~> 1.3
 - `gun` ~> 2.1 (only for `opencode_client`)
-- Test deps: `proper` ~> 1.4, `meck` ~> 0.9
+- Test deps: `proper` ~> 1.4
 
 ## Package Documentation
 
