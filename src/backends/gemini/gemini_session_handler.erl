@@ -1032,7 +1032,7 @@ maybe_send_sigint(undefined) ->
 maybe_send_sigint(Port) when is_port(Port) ->
     case erlang:port_info(Port, os_pid) of
         {os_pid, OsPid} ->
-            os:cmd("kill -INT " ++ integer_to_list(OsPid)),
+            _ = os:cmd("kill -INT " ++ integer_to_list(OsPid)),
             ok;
         undefined ->
             ok
