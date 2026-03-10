@@ -88,45 +88,49 @@ terminate_handler(_Reason, _State) -> ok.
     NewHandlerState :: term()
 }.
 
+-doc """
+The 5-tuple variant passes leftover buffer data to the engine.
+Use this when transitioning to ready from connecting or
+initializing with accumulated buffer data that the engine
+should continue processing.
+""".
 -type phase_result() ::
     {next_state, initializing | ready, [handler_action()], term()}
   | {next_state, initializing | ready, [handler_action()], term(),
      LeftoverBuffer :: binary()}
   | {keep_state, [handler_action()], term()}
   | {error_state, Reason :: term(), term()}.
-%% The 5-tuple variant passes leftover buffer data to the engine.
-%% Use this when transitioning to `ready` from `connecting` or
-%% `initializing` with accumulated buffer data that the engine
-%% should continue processing.
 
+-doc """
+Result type for send_control/3 handler callbacks.
+
+The reply variant causes the engine to reply {ok, Result} to the
+caller immediately. The noreply variant defers the reply — the handler
+must store From and call gen_statem:reply/2 later (e.g., when a
+protocol response arrives in handle_data/2). The error variant causes
+the engine to reply {error, Reason} to the caller.
+""".
 -type control_result() ::
     {reply, Result :: term(), [handler_action()], term()}
   | {noreply, [handler_action()], term()}
   | {error, term()}.
-%% `{reply, Result, Actions, NewState}` — engine replies `{ok, Result}`
-%% to the caller immediately.
-%%
-%% `{noreply, Actions, NewState}` — handler defers the reply. The handler
-%% must store `From` and call `gen_statem:reply/2` later (e.g., when a
-%% protocol response arrives in `handle_data/2`).
-%%
-%% `{error, Reason}` — engine replies `{error, Reason}` to the caller.
 
+-doc """
+Return type for handle_info/3.
+
+The messages variant delivers messages to the consumer (or queue if no
+active query), executes send actions, and updates handler state. No
+buffer involvement — this bypasses the engine's buffer management.
+
+A phase_result() triggers a state transition (e.g., connecting to
+initializing when a gun_up arrives for an HTTP transport).
+
+The ignore atom means the handler does not handle this message either.
+""".
 -type info_result() ::
     {messages, [beam_agent_core:message()], [handler_action()], term()}
   | phase_result()
   | ignore.
-%% Return type for `handle_info/3`.
-%%
-%% `{messages, Msgs, Actions, NewHState}` — deliver messages to the
-%% consumer (or queue if no active query), execute send actions, and
-%% update handler state. No buffer involvement — this bypasses the
-%% engine's buffer management.
-%%
-%% `phase_result()` — trigger a state transition (e.g., connecting →
-%% initializing when a gun_up arrives for an HTTP transport).
-%%
-%% `ignore` — the handler does not handle this message either.
 
 -export_type([init_result/0, data_result/0, phase_result/0,
               control_result/0, info_result/0]).
