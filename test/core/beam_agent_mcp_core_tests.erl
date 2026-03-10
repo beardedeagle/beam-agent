@@ -97,7 +97,8 @@ initialize_test() ->
     ?assertEqual(<<"2.0">>, maps:get(<<"jsonrpc">>, Response)),
     ?assertEqual(1, maps:get(<<"id">>, Response)),
     Result = maps:get(<<"result">>, Response),
-    ?assertEqual(<<"2024-11-05">>, maps:get(<<"protocolVersion">>, Result)),
+    ?assertEqual(beam_agent_mcp_protocol:protocol_version(),
+                 maps:get(<<"protocolVersion">>, Result)),
     ServerInfo = maps:get(<<"serverInfo">>, Result),
     ?assertEqual(<<"test-server">>, maps:get(<<"name">>, ServerInfo)).
 

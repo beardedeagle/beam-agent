@@ -436,7 +436,7 @@ dispatch_jsonrpc(#{<<"method">> := <<"initialize">>} = Msg, Server, _Timeout) ->
         <<"jsonrpc">> => <<"2.0">>,
         <<"id">> => Id,
         <<"result">> => #{
-            <<"protocolVersion">> => <<"2024-11-05">>,
+            <<"protocolVersion">> => beam_agent_mcp_protocol:protocol_version(),
             <<"capabilities">> => #{<<"tools">> => #{}},
             <<"serverInfo">> => #{
                 <<"name">> => Name,
