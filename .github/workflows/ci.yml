@@ -131,6 +131,34 @@ jobs:
           mix deps.get
           mix test
 
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.19'
+          rebar3-version: '3'
+
+      - name: Install hex
+        run: mix local.hex --force
+
+      - name: Restore rebar3 cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            ~/.cache/rebar3
+          key: docs-${{ runner.os }}-otp-28-${{ hashFiles('rebar.lock') }}
+          restore-keys: |
+            docs-${{ runner.os }}-otp-28-
+
+      - name: Build docs
+        run: rebar3 ex_doc
+
   format:
     name: Format
     runs-on: ubuntu-latest
