@@ -767,7 +767,8 @@ defmodule ClaudeEx do
   def fork_session(session, opts), do: :claude_agent_sdk.fork_session(session, opts)
 
   @doc "Revert the visible session history to a prior boundary."
-  @spec revert_session(pid(), map()) :: {:ok, session_info_map()} | {:error, :invalid_selector | :not_found}
+  @spec revert_session(pid(), map()) ::
+          {:ok, session_info_map()} | {:error, :invalid_selector | :not_found}
   def revert_session(session, selector),
     do: :claude_agent_sdk.revert_session(session, selector)
 
@@ -893,7 +894,8 @@ defmodule ClaudeEx do
   def thread_read(session, thread_id),
     do: :claude_agent_sdk.thread_read(session, thread_id)
 
-  @spec thread_read(pid(), binary(), map()) :: {:ok, thread_read_info_map()} | {:error, :not_found}
+  @spec thread_read(pid(), binary(), map()) ::
+          {:ok, thread_read_info_map()} | {:error, :not_found}
   def thread_read(session, thread_id, opts),
     do: :claude_agent_sdk.thread_read(session, thread_id, opts)
 
@@ -908,7 +910,8 @@ defmodule ClaudeEx do
     do: :claude_agent_sdk.thread_unarchive(session, thread_id)
 
   @doc "Rollback the visible thread history."
-  @spec thread_rollback(pid(), binary(), map()) :: {:ok, thread_info_map()} | {:error, :invalid_selector | :not_found}
+  @spec thread_rollback(pid(), binary(), map()) ::
+          {:ok, thread_info_map()} | {:error, :invalid_selector | :not_found}
   def thread_rollback(session, thread_id, selector),
     do: :claude_agent_sdk.thread_rollback(session, thread_id, selector)
 
@@ -1152,7 +1155,10 @@ defmodule ClaudeEx do
 
   Returns a map like `%{pending: 2, in_progress: 1, completed: 3, total: 6}`.
   """
-  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
+  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{
+          :total => non_neg_integer(),
+          atom() => non_neg_integer()
+        }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ─────────────────────────────────────────────────────

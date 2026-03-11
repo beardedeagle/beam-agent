@@ -236,8 +236,7 @@ defmodule CodexEx do
   @typedoc "Server health status map."
   @type server_health_info :: %{
           :adapter => :codex,
-          :health =>
-            :active_query | :active_turn | :connecting | :error | :initializing | :ready
+          :health => :active_query | :active_turn | :connecting | :error | :initializing | :ready
         }
 
   @typedoc "Todo item extracted from messages."
@@ -1067,7 +1066,10 @@ defmodule CodexEx do
   defdelegate filter_todos(todos, status), to: BeamAgent.Todo, as: :filter_by_status
 
   @doc "Get a summary of todo counts by status."
-  @spec todo_summary([todo_item()]) :: %{required(:total) => non_neg_integer(), atom() => non_neg_integer()}
+  @spec todo_summary([todo_item()]) :: %{
+          required(:total) => non_neg_integer(),
+          atom() => non_neg_integer()
+        }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ───────────────────────────────────────────────────────

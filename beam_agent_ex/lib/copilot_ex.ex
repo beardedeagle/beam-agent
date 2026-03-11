@@ -182,7 +182,12 @@ defmodule CopilotEx do
           optional(:summary) => binary(),
           optional(:system) => binary() | map(),
           optional(:system_prompt) =>
-            binary() | %{required(:preset) => binary(), required(:type) => :preset, required(:append) => binary()},
+            binary()
+            | %{
+                required(:preset) => binary(),
+                required(:type) => :preset,
+                required(:append) => binary()
+              },
           optional(:thinking) => map(),
           optional(:timeout) => timeout(),
           optional(:tools) => [any()] | map()
@@ -573,7 +578,10 @@ defmodule CopilotEx do
       {:ok, session} = CopilotEx.start_session(sdk_hooks: [hook])
   """
   @spec sdk_hook(atom(), (hook_context() -> :ok | {:deny, binary()})) ::
-          %{required(:callback) => (hook_context() -> :ok | {:deny, binary()}), required(:event) => atom()}
+          %{
+            required(:callback) => (hook_context() -> :ok | {:deny, binary()}),
+            required(:event) => atom()
+          }
   def sdk_hook(event, callback) do
     :beam_agent_hooks_core.hook(event, callback)
   end
@@ -674,7 +682,14 @@ defmodule CopilotEx do
   @doc "Create an in-process MCP server definition."
   @spec mcp_server(
           binary(),
-          [%{required(:description) => binary(), required(:handler) => (map() -> {term(), term()}), required(:input_schema) => map(), required(:name) => binary()}]
+          [
+            %{
+              required(:description) => binary(),
+              required(:handler) => (map() -> {term(), term()}),
+              required(:input_schema) => map(),
+              required(:name) => binary()
+            }
+          ]
         ) :: mcp_server_def()
   def mcp_server(name, tools) do
     :beam_agent_tool_registry.server(name, tools)
@@ -758,7 +773,8 @@ defmodule CopilotEx do
   def get_session_messages(session_id), do: :copilot_client.get_session_messages(session_id)
 
   @doc "Get messages with options."
-  @spec get_session_messages(binary(), message_filter_opts()) :: {:error, :not_found} | {:ok, [message()]}
+  @spec get_session_messages(binary(), message_filter_opts()) ::
+          {:error, :not_found} | {:ok, [message()]}
   def get_session_messages(session_id, opts),
     do: :copilot_client.get_session_messages(session_id, opts)
 
@@ -775,7 +791,8 @@ defmodule CopilotEx do
   def fork_session(session, opts), do: :copilot_client.fork_session(session, opts)
 
   @doc "Revert the visible session history to a prior boundary."
-  @spec revert_session(pid(), map()) :: {:error, :invalid_selector | :not_found} | {:ok, session_info()}
+  @spec revert_session(pid(), map()) ::
+          {:error, :invalid_selector | :not_found} | {:ok, session_info()}
   def revert_session(session, selector),
     do: :copilot_client.revert_session(session, selector)
 
@@ -823,7 +840,8 @@ defmodule CopilotEx do
   def thread_fork(session, thread_id),
     do: :copilot_client.thread_fork(session, thread_id)
 
-  @spec thread_fork(pid(), binary(), thread_start_opts()) :: {:error, :not_found} | {:ok, thread_info()}
+  @spec thread_fork(pid(), binary(), thread_start_opts()) ::
+          {:error, :not_found} | {:ok, thread_info()}
   def thread_fork(session, thread_id, opts),
     do: :copilot_client.thread_fork(session, thread_id, opts)
 
@@ -847,7 +865,8 @@ defmodule CopilotEx do
     do: :copilot_client.thread_unarchive(session, thread_id)
 
   @doc "Rollback the visible thread history."
-  @spec thread_rollback(pid(), binary(), map()) :: {:error, :invalid_selector | :not_found} | {:ok, thread_info()}
+  @spec thread_rollback(pid(), binary(), map()) ::
+          {:error, :invalid_selector | :not_found} | {:ok, thread_info()}
   def thread_rollback(session, thread_id, selector),
     do: :copilot_client.thread_rollback(session, thread_id, selector)
 
@@ -858,18 +877,26 @@ defmodule CopilotEx do
   def mcp_server_status(session), do: :copilot_client.mcp_server_status(session)
 
   @doc "Replace MCP server configurations."
-  @spec set_mcp_servers(pid(), [%{required(:name) => binary(), required(:tools) => [map()], required(:version) => binary()}]) ::
+  @spec set_mcp_servers(pid(), [
+          %{
+            required(:name) => binary(),
+            required(:tools) => [map()],
+            required(:version) => binary()
+          }
+        ]) ::
           {:error, :not_found} | {:ok, %{binary() => binary()}}
   def set_mcp_servers(session, servers),
     do: :copilot_client.set_mcp_servers(session, servers)
 
   @doc "Reconnect a failed MCP server."
-  @spec reconnect_mcp_server(pid(), binary()) :: {:error, :not_found} | {:ok, %{binary() => binary()}}
+  @spec reconnect_mcp_server(pid(), binary()) ::
+          {:error, :not_found} | {:ok, %{binary() => binary()}}
   def reconnect_mcp_server(session, server_name),
     do: :copilot_client.reconnect_mcp_server(session, server_name)
 
   @doc "Enable or disable an MCP server."
-  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:error, :not_found} | {:ok, %{binary() => binary()}}
+  @spec toggle_mcp_server(pid(), binary(), boolean()) ::
+          {:error, :not_found} | {:ok, %{binary() => binary()}}
   def toggle_mcp_server(session, server_name, enabled),
     do: :copilot_client.toggle_mcp_server(session, server_name, enabled)
 
@@ -900,13 +927,15 @@ defmodule CopilotEx do
   end
 
   @doc "Set maximum thinking tokens via universal control."
-  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, %{required(:max_thinking_tokens) => pos_integer()}}
+  @spec set_max_thinking_tokens(pid(), pos_integer()) ::
+          {:ok, %{required(:max_thinking_tokens) => pos_integer()}}
   def set_max_thinking_tokens(session, max_tokens) do
     :copilot_client.set_max_thinking_tokens(session, max_tokens)
   end
 
   @doc "Revert file changes to a checkpoint via universal checkpointing."
-  @spec rewind_files(pid(), binary()) :: :ok | {:error, :not_found | {:restore_failed, binary(), atom()}}
+  @spec rewind_files(pid(), binary()) ::
+          :ok | {:error, :not_found | {:restore_failed, binary(), atom()}}
   def rewind_files(session, checkpoint_uuid) do
     :copilot_client.rewind_files(session, checkpoint_uuid)
   end
@@ -945,7 +974,11 @@ defmodule CopilotEx do
 
   @doc "Check server health. Maps to session health for Copilot."
   @spec server_health(pid()) ::
-          {:ok, %{required(:adapter) => :copilot, required(:health) => :active_query | :connecting | :error | :initializing | :ready}}
+          {:ok,
+           %{
+             required(:adapter) => :copilot,
+             required(:health) => :active_query | :connecting | :error | :initializing | :ready
+           }}
   def server_health(session), do: :copilot_client.server_health(session)
 
   # ── Todo Extraction ──────────────────────────────────────────────
@@ -959,7 +992,10 @@ defmodule CopilotEx do
   defdelegate filter_todos(todos, status), to: BeamAgent.Todo, as: :filter_by_status
 
   @doc "Get a summary of todo counts by status."
-  @spec todo_summary([todo_item()]) :: %{required(:total) => non_neg_integer(), atom() => non_neg_integer()}
+  @spec todo_summary([todo_item()]) :: %{
+          required(:total) => non_neg_integer(),
+          atom() => non_neg_integer()
+        }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ─────────────────────────────────────────────────────
