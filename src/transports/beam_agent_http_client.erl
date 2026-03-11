@@ -203,7 +203,7 @@ handle_info({http, {ReqId, {{_, Status, _}, RawHeaders, Body}}},
         StreamRef ->
             Headers = translate_headers(RawHeaders),
             Owner = State#state.owner,
-            case Body of
+            _ = case Body of
                 [] ->
                     Owner !
                         {http_response, self(), StreamRef,
