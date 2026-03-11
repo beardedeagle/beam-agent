@@ -79,7 +79,7 @@ instructions.
 %%====================================================================
 
 -doc "Encode a WebSocket frame with client masking.".
--spec encode(text | binary | close | ping | pong, binary()) -> iodata().
+-spec encode(text | binary | close | ping | pong, binary()) -> [binary(), ...].
 encode(Type, Payload) ->
     Opcode = type_to_opcode(Type),
     Len     = byte_size(Payload),
@@ -92,7 +92,7 @@ encode(Type, Payload) ->
     [Header, MaskKey, Masked].
 
 -doc "Encode a close frame with a status code and UTF-8 reason.".
--spec encode_close(non_neg_integer(), binary()) -> iodata().
+-spec encode_close(non_neg_integer(), binary()) -> [binary(), ...].
 encode_close(Code, Reason) ->
     encode(close, <<Code:16, Reason/binary>>).
 
@@ -100,9 +100,19 @@ encode_close(Code, Reason) ->
 %% Decoding (server → client, MUST NOT be masked)
 %%====================================================================
 
+-type decode_error() ::
+    control_frame_too_large |
+    fragmented_control_frame |
+    frame_too_large |
+    interleaved_data_frame |
+    server_frame_masked |
+    unexpected_continuation |
+    {reserved_opcode, 1..255} |
+    {unexpected_rsv_bits, 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}.
+
 -doc "Decode frames from a buffer. Shorthand for `decode/3` with no fragmentation state.".
 -spec decode(binary(), pos_integer()) ->
-    {ok, [frame()], binary(), frag_state()} | {error, term()}.
+    {ok, [frame()], binary(), frag_state()} | {error, decode_error()}.
 decode(Buffer, MaxFrameSize) ->
     decode(Buffer, MaxFrameSize, undefined).
 
@@ -114,7 +124,7 @@ Returns `{ok, Frames, Remaining, NewFragState}` on success, where
 in-progress fragmented message.
 """.
 -spec decode(binary(), pos_integer(), frag_state()) ->
-    {ok, [frame()], binary(), frag_state()} | {error, term()}.
+    {ok, [frame()], binary(), frag_state()} | {error, decode_error()}.
 decode(Buffer, MaxFrameSize, FragState) ->
     decode_loop(Buffer, MaxFrameSize, FragState, []).
 
@@ -142,7 +152,7 @@ mask(Data, <<K1, K2, K3, K4>>) ->
 %% Internal: encoding helpers
 %%====================================================================
 
--spec encode_header(non_neg_integer(), non_neg_integer()) -> binary().
+-spec encode_header(1 | 2 | 8 | 9 | 10, non_neg_integer()) -> <<_:16, _:_*16>>.
 encode_header(Opcode, Len) when Len < 126 ->
     <<1:1, 0:3, Opcode:4, 1:1, Len:7>>;
 encode_header(Opcode, Len) when Len < 65536 ->
@@ -151,7 +161,7 @@ encode_header(Opcode, Len) ->
     <<1:1, 0:3, Opcode:4, 1:1, 127:7, Len:64>>.
 
 -spec type_to_opcode(text | binary | close | ping | pong) ->
-    non_neg_integer().
+    1 | 2 | 8 | 9 | 10.
 type_to_opcode(text)   -> ?OP_TEXT;
 type_to_opcode(binary) -> ?OP_BINARY;
 type_to_opcode(close)  -> ?OP_CLOSE;
@@ -285,7 +295,8 @@ assemble(_, Op, _Payload, {_, _}) when Op > 0, Op < 8 ->
 assemble(_, ?OP_CONT, _Payload, undefined) ->
     {error, unexpected_continuation}.
 
--spec make_frame(non_neg_integer(), binary()) -> frame().
+-spec make_frame(1 | 2 | 8 | 9 | 10, binary()) ->
+    {text, binary()} | {binary, binary()} | {ping, binary()} | {pong, binary()} | {close, char(), binary()}.
 make_frame(?OP_TEXT, Payload) ->
     {text, Payload};
 make_frame(?OP_BINARY, Payload) ->

@@ -16,6 +16,6 @@ defmodule BeamAgent.Todo do
   @spec filter_by_status([todo_item()], todo_status()) :: [todo_item()]
   defdelegate filter_by_status(todos, status), to: :beam_agent_todo
 
-  @spec todo_summary([todo_item()]) :: %{atom() => non_neg_integer()}
+  @spec todo_summary([todo_item()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
   defdelegate todo_summary(todos), to: :beam_agent_todo
 end

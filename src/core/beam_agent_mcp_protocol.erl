@@ -176,6 +176,10 @@ resolves advertised capabilities into a session capability set.
     progress_token/0,
     cursor/0,
     protocol_version/0,
+    %% JSON-RPC envelope return types
+    jsonrpc_id_msg/0,
+    jsonrpc_notif/0,
+    jsonrpc_notif_params/0,
     %% Capability types
     server_capabilities/0,
     client_capabilities/0,
@@ -227,7 +231,23 @@ resolves advertised capabilities into a session capability set.
 -type request_id() :: binary() | integer() | null.
 -type progress_token() :: binary() | integer().
 -type cursor() :: binary().
--type protocol_version() :: binary().
+-type protocol_version() :: <<_:80>>.
+
+%%--------------------------------------------------------------------
+%% Types — JSON-RPC Envelope Return Types
+%%--------------------------------------------------------------------
+
+%% Return type for JSON-RPC messages containing an <<"id">> field
+%% (requests, responses, error responses). The 16-bit minimum key size
+%% reflects <<"id">> being the shortest key at 2 bytes.
+-type jsonrpc_id_msg() :: #{<<_:16, _:_*8>> => term()}.
+
+%% Return type for JSON-RPC notifications (no <<"id">> field).
+%% The 48-bit minimum reflects <<"method">> being the shortest key at 6 bytes.
+-type jsonrpc_notif() :: #{<<_:48, _:_*8>> => binary()}.
+
+%% Return type for JSON-RPC notifications carrying a params map.
+-type jsonrpc_notif_params() :: #{<<_:48, _:_*8>> => binary() | map()}.
 
 %%--------------------------------------------------------------------
 %% Types — JSON-RPC Message Classification
@@ -477,27 +497,27 @@ resolves advertised capabilities into a session capability set.
 %%--------------------------------------------------------------------
 
 -doc "JSON-RPC 2.0 parse error (-32700).".
--spec error_parse() -> integer().
+-spec error_parse() -> -32700.
 error_parse() -> -32700.
 
 -doc "JSON-RPC 2.0 invalid request (-32600).".
--spec error_invalid_request() -> integer().
+-spec error_invalid_request() -> -32600.
 error_invalid_request() -> -32600.
 
 -doc "JSON-RPC 2.0 method not found (-32601).".
--spec error_method_not_found() -> integer().
+-spec error_method_not_found() -> -32601.
 error_method_not_found() -> -32601.
 
 -doc "JSON-RPC 2.0 invalid params (-32602).".
--spec error_invalid_params() -> integer().
+-spec error_invalid_params() -> -32602.
 error_invalid_params() -> -32602.
 
 -doc "JSON-RPC 2.0 internal error (-32603).".
--spec error_internal() -> integer().
+-spec error_internal() -> -32603.
 error_internal() -> -32603.
 
 -doc "MCP resource not found (-32002).".
--spec error_resource_not_found() -> integer().
+-spec error_resource_not_found() -> -32002.
 error_resource_not_found() -> -32002.
 
 %%--------------------------------------------------------------------
@@ -517,7 +537,7 @@ Construct a JSON-RPC 2.0 request (no params).
 
 Always includes `"jsonrpc": "2.0"` as required by the MCP spec.
 """.
--spec request(request_id(), binary(), map()) -> map().
+-spec request(request_id(), binary(), map()) -> jsonrpc_id_msg().
 request(Id, Method, Params) when is_map(Params) ->
     #{<<"jsonrpc">> => <<"2.0">>,
       <<"id">> => Id,
@@ -525,28 +545,28 @@ request(Id, Method, Params) when is_map(Params) ->
       <<"params">> => Params}.
 
 -doc "Construct a JSON-RPC 2.0 request with `_meta` progress token.".
--spec request(request_id(), binary(), map(), progress_token()) -> map().
+-spec request(request_id(), binary(), map(), progress_token()) -> jsonrpc_id_msg().
 request(Id, Method, Params, ProgressToken) when is_map(Params) ->
     Meta = #{<<"progressToken">> => ProgressToken},
     ParamsWithMeta = Params#{<<"_meta">> => Meta},
     request(Id, Method, ParamsWithMeta).
 
 -doc "Construct a JSON-RPC 2.0 successful response.".
--spec response(request_id(), term()) -> map().
+-spec response(request_id(), term()) -> jsonrpc_id_msg().
 response(Id, Result) ->
     #{<<"jsonrpc">> => <<"2.0">>,
       <<"id">> => Id,
       <<"result">> => Result}.
 
 -doc "Construct a JSON-RPC 2.0 error response (without data).".
--spec error_response(request_id(), integer(), binary()) -> map().
+-spec error_response(request_id(), integer(), binary()) -> jsonrpc_id_msg().
 error_response(Id, Code, Message) when is_integer(Code), is_binary(Message) ->
     #{<<"jsonrpc">> => <<"2.0">>,
       <<"id">> => Id,
       <<"error">> => #{<<"code">> => Code, <<"message">> => Message}}.
 
 -doc "Construct a JSON-RPC 2.0 error response (with data).".
--spec error_response(request_id(), integer(), binary(), term()) -> map().
+-spec error_response(request_id(), integer(), binary(), term()) -> jsonrpc_id_msg().
 error_response(Id, Code, Message, Data)
   when is_integer(Code), is_binary(Message) ->
     #{<<"jsonrpc">> => <<"2.0">>,
@@ -556,13 +576,13 @@ error_response(Id, Code, Message, Data)
                        <<"data">> => Data}}.
 
 -doc "Construct a JSON-RPC 2.0 notification (no params).".
--spec notification(binary()) -> map().
+-spec notification(binary()) -> jsonrpc_notif().
 notification(Method) when is_binary(Method) ->
     #{<<"jsonrpc">> => <<"2.0">>,
       <<"method">> => Method}.
 
 -doc "Construct a JSON-RPC 2.0 notification with params.".
--spec notification(binary(), map()) -> map().
+-spec notification(binary(), map()) -> jsonrpc_notif_params().
 notification(Method, Params) when is_binary(Method), is_map(Params) ->
     #{<<"jsonrpc">> => <<"2.0">>,
       <<"method">> => Method,
@@ -579,7 +599,7 @@ Sent by the client to begin the MCP session. Includes client capabilities,
 implementation info, and the requested protocol version.
 """.
 -spec initialize_request(request_id(), implementation_info(),
-                         client_capabilities()) -> map().
+                         client_capabilities()) -> jsonrpc_id_msg().
 initialize_request(Id, ClientInfo, ClientCapabilities)
   when is_map(ClientInfo), is_map(ClientCapabilities) ->
     request(Id, <<"initialize">>, #{
@@ -596,7 +616,7 @@ server capabilities, implementation info, protocol version, and optional
 instructions.
 """.
 -spec initialize_response(request_id(), implementation_info(),
-                          server_capabilities()) -> map().
+                          server_capabilities()) -> jsonrpc_id_msg().
 initialize_response(Id, ServerInfo, ServerCapabilities)
   when is_map(ServerInfo), is_map(ServerCapabilities) ->
     response(Id, #{
@@ -606,17 +626,17 @@ initialize_response(Id, ServerInfo, ServerCapabilities)
     }).
 
 -doc "Construct the `notifications/initialized` notification.".
--spec initialized_notification() -> map().
+-spec initialized_notification() -> jsonrpc_notif().
 initialized_notification() ->
     notification(<<"notifications/initialized">>).
 
 -doc "Construct a `ping` request.".
--spec ping_request(request_id()) -> map().
+-spec ping_request(request_id()) -> jsonrpc_id_msg().
 ping_request(Id) ->
     request(Id, <<"ping">>, #{}).
 
 -doc "Construct a `ping` response (empty result).".
--spec ping_response(request_id()) -> map().
+-spec ping_response(request_id()) -> jsonrpc_id_msg().
 ping_response(Id) ->
     response(Id, #{}).
 
@@ -625,22 +645,22 @@ ping_response(Id) ->
 %%====================================================================
 
 -doc "Construct a `tools/list` request (no cursor).".
--spec tools_list_request(request_id()) -> map().
+-spec tools_list_request(request_id()) -> jsonrpc_id_msg().
 tools_list_request(Id) ->
     request(Id, <<"tools/list">>, #{}).
 
 -doc "Construct a `tools/list` request with pagination cursor.".
--spec tools_list_request(request_id(), cursor()) -> map().
+-spec tools_list_request(request_id(), cursor()) -> jsonrpc_id_msg().
 tools_list_request(Id, Cursor) when is_binary(Cursor) ->
     request(Id, <<"tools/list">>, #{<<"cursor">> => Cursor}).
 
 -doc "Construct a `tools/list` response (no pagination).".
--spec tools_list_response(request_id(), [tool()]) -> map().
+-spec tools_list_response(request_id(), [tool()]) -> jsonrpc_id_msg().
 tools_list_response(Id, Tools) when is_list(Tools) ->
     response(Id, #{<<"tools">> => [encode_tool(T) || T <- Tools]}).
 
 -doc "Construct a `tools/list` response with next cursor.".
--spec tools_list_response(request_id(), [tool()], cursor()) -> map().
+-spec tools_list_response(request_id(), [tool()], cursor()) -> jsonrpc_id_msg().
 tools_list_response(Id, Tools, NextCursor)
   when is_list(Tools), is_binary(NextCursor) ->
     response(Id, #{
@@ -649,7 +669,7 @@ tools_list_response(Id, Tools, NextCursor)
     }).
 
 -doc "Construct a `tools/call` request.".
--spec tools_call_request(request_id(), binary(), map()) -> map().
+-spec tools_call_request(request_id(), binary(), map()) -> jsonrpc_id_msg().
 tools_call_request(Id, ToolName, Arguments)
   when is_binary(ToolName), is_map(Arguments) ->
     request(Id, <<"tools/call">>, #{
@@ -659,7 +679,7 @@ tools_call_request(Id, ToolName, Arguments)
 
 -doc "Construct a `tools/call` request with progress token.".
 -spec tools_call_request(request_id(), binary(), map(),
-                         progress_token()) -> map().
+                         progress_token()) -> jsonrpc_id_msg().
 tools_call_request(Id, ToolName, Arguments, ProgressToken)
   when is_binary(ToolName), is_map(Arguments) ->
     request(Id, <<"tools/call">>, #{
@@ -668,12 +688,12 @@ tools_call_request(Id, ToolName, Arguments, ProgressToken)
     }, ProgressToken).
 
 -doc "Construct a `tools/call` response.".
--spec tools_call_response(request_id(), call_tool_result()) -> map().
+-spec tools_call_response(request_id(), call_tool_result()) -> jsonrpc_id_msg().
 tools_call_response(Id, Result) when is_map(Result) ->
     response(Id, encode_call_tool_result(Result)).
 
 -doc "Construct a `tools/call` error response (isError=true).".
--spec tools_call_response(request_id(), [content()], boolean()) -> map().
+-spec tools_call_response(request_id(), [content()], boolean()) -> jsonrpc_id_msg().
 tools_call_response(Id, Content, IsError)
   when is_list(Content), is_boolean(IsError) ->
     response(Id, #{
@@ -682,7 +702,7 @@ tools_call_response(Id, Content, IsError)
     }).
 
 -doc "Construct a `notifications/tools/list_changed` notification.".
--spec tools_list_changed_notification() -> map().
+-spec tools_list_changed_notification() -> jsonrpc_notif().
 tools_list_changed_notification() ->
     notification(<<"notifications/tools/list_changed">>).
 
@@ -691,24 +711,24 @@ tools_list_changed_notification() ->
 %%====================================================================
 
 -doc "Construct a `resources/list` request (no cursor).".
--spec resources_list_request(request_id()) -> map().
+-spec resources_list_request(request_id()) -> jsonrpc_id_msg().
 resources_list_request(Id) ->
     request(Id, <<"resources/list">>, #{}).
 
 -doc "Construct a `resources/list` request with pagination cursor.".
--spec resources_list_request(request_id(), cursor()) -> map().
+-spec resources_list_request(request_id(), cursor()) -> jsonrpc_id_msg().
 resources_list_request(Id, Cursor) when is_binary(Cursor) ->
     request(Id, <<"resources/list">>, #{<<"cursor">> => Cursor}).
 
 -doc "Construct a `resources/list` response (no pagination).".
--spec resources_list_response(request_id(), [resource()]) -> map().
+-spec resources_list_response(request_id(), [resource()]) -> jsonrpc_id_msg().
 resources_list_response(Id, Resources) when is_list(Resources) ->
     response(Id, #{
         <<"resources">> => [encode_resource(R) || R <- Resources]
     }).
 
 -doc "Construct a `resources/list` response with next cursor.".
--spec resources_list_response(request_id(), [resource()], cursor()) -> map().
+-spec resources_list_response(request_id(), [resource()], cursor()) -> jsonrpc_id_msg().
 resources_list_response(Id, Resources, NextCursor)
   when is_list(Resources), is_binary(NextCursor) ->
     response(Id, #{
@@ -717,31 +737,31 @@ resources_list_response(Id, Resources, NextCursor)
     }).
 
 -doc "Construct a `resources/read` request.".
--spec resources_read_request(request_id(), binary()) -> map().
+-spec resources_read_request(request_id(), binary()) -> jsonrpc_id_msg().
 resources_read_request(Id, Uri) when is_binary(Uri) ->
     request(Id, <<"resources/read">>, #{<<"uri">> => Uri}).
 
 -doc "Construct a `resources/read` response.".
--spec resources_read_response(request_id(), [resource_contents()]) -> map().
+-spec resources_read_response(request_id(), [resource_contents()]) -> jsonrpc_id_msg().
 resources_read_response(Id, Contents) when is_list(Contents) ->
     response(Id, #{
         <<"contents">> => [encode_resource_contents(C) || C <- Contents]
     }).
 
 -doc "Construct a `resources/templates/list` request (no cursor).".
--spec resources_templates_list_request(request_id()) -> map().
+-spec resources_templates_list_request(request_id()) -> jsonrpc_id_msg().
 resources_templates_list_request(Id) ->
     request(Id, <<"resources/templates/list">>, #{}).
 
 -doc "Construct a `resources/templates/list` request with cursor.".
--spec resources_templates_list_request(request_id(), cursor()) -> map().
+-spec resources_templates_list_request(request_id(), cursor()) -> jsonrpc_id_msg().
 resources_templates_list_request(Id, Cursor) when is_binary(Cursor) ->
     request(Id, <<"resources/templates/list">>,
             #{<<"cursor">> => Cursor}).
 
 -doc "Construct a `resources/templates/list` response (no pagination).".
 -spec resources_templates_list_response(request_id(),
-                                        [resource_template()]) -> map().
+                                        [resource_template()]) -> jsonrpc_id_msg().
 resources_templates_list_response(Id, Templates)
   when is_list(Templates) ->
     response(Id, #{
@@ -752,7 +772,7 @@ resources_templates_list_response(Id, Templates)
 -doc "Construct a `resources/templates/list` response with next cursor.".
 -spec resources_templates_list_response(request_id(),
                                         [resource_template()],
-                                        cursor()) -> map().
+                                        cursor()) -> jsonrpc_id_msg().
 resources_templates_list_response(Id, Templates, NextCursor)
   when is_list(Templates), is_binary(NextCursor) ->
     response(Id, #{
@@ -762,22 +782,22 @@ resources_templates_list_response(Id, Templates, NextCursor)
     }).
 
 -doc "Construct a `resources/subscribe` request.".
--spec resources_subscribe_request(request_id(), binary()) -> map().
+-spec resources_subscribe_request(request_id(), binary()) -> jsonrpc_id_msg().
 resources_subscribe_request(Id, Uri) when is_binary(Uri) ->
     request(Id, <<"resources/subscribe">>, #{<<"uri">> => Uri}).
 
 -doc "Construct a `resources/unsubscribe` request.".
--spec resources_unsubscribe_request(request_id(), binary()) -> map().
+-spec resources_unsubscribe_request(request_id(), binary()) -> jsonrpc_id_msg().
 resources_unsubscribe_request(Id, Uri) when is_binary(Uri) ->
     request(Id, <<"resources/unsubscribe">>, #{<<"uri">> => Uri}).
 
 -doc "Construct a `notifications/resources/list_changed` notification.".
--spec resources_list_changed_notification() -> map().
+-spec resources_list_changed_notification() -> jsonrpc_notif().
 resources_list_changed_notification() ->
     notification(<<"notifications/resources/list_changed">>).
 
 -doc "Construct a `notifications/resources/updated` notification.".
--spec resource_updated_notification(binary()) -> map().
+-spec resource_updated_notification(binary()) -> jsonrpc_notif_params().
 resource_updated_notification(Uri) when is_binary(Uri) ->
     notification(<<"notifications/resources/updated">>,
                  #{<<"uri">> => Uri}).
@@ -787,24 +807,24 @@ resource_updated_notification(Uri) when is_binary(Uri) ->
 %%====================================================================
 
 -doc "Construct a `prompts/list` request (no cursor).".
--spec prompts_list_request(request_id()) -> map().
+-spec prompts_list_request(request_id()) -> jsonrpc_id_msg().
 prompts_list_request(Id) ->
     request(Id, <<"prompts/list">>, #{}).
 
 -doc "Construct a `prompts/list` request with pagination cursor.".
--spec prompts_list_request(request_id(), cursor()) -> map().
+-spec prompts_list_request(request_id(), cursor()) -> jsonrpc_id_msg().
 prompts_list_request(Id, Cursor) when is_binary(Cursor) ->
     request(Id, <<"prompts/list">>, #{<<"cursor">> => Cursor}).
 
 -doc "Construct a `prompts/list` response (no pagination).".
--spec prompts_list_response(request_id(), [prompt()]) -> map().
+-spec prompts_list_response(request_id(), [prompt()]) -> jsonrpc_id_msg().
 prompts_list_response(Id, Prompts) when is_list(Prompts) ->
     response(Id, #{
         <<"prompts">> => [encode_prompt(P) || P <- Prompts]
     }).
 
 -doc "Construct a `prompts/list` response with next cursor.".
--spec prompts_list_response(request_id(), [prompt()], cursor()) -> map().
+-spec prompts_list_response(request_id(), [prompt()], cursor()) -> jsonrpc_id_msg().
 prompts_list_response(Id, Prompts, NextCursor)
   when is_list(Prompts), is_binary(NextCursor) ->
     response(Id, #{
@@ -813,12 +833,12 @@ prompts_list_response(Id, Prompts, NextCursor)
     }).
 
 -doc "Construct a `prompts/get` request (no arguments).".
--spec prompts_get_request(request_id(), binary()) -> map().
+-spec prompts_get_request(request_id(), binary()) -> jsonrpc_id_msg().
 prompts_get_request(Id, Name) when is_binary(Name) ->
     request(Id, <<"prompts/get">>, #{<<"name">> => Name}).
 
 -doc "Construct a `prompts/get` request with arguments.".
--spec prompts_get_request(request_id(), binary(), map()) -> map().
+-spec prompts_get_request(request_id(), binary(), map()) -> jsonrpc_id_msg().
 prompts_get_request(Id, Name, Arguments)
   when is_binary(Name), is_map(Arguments) ->
     request(Id, <<"prompts/get">>, #{
@@ -827,7 +847,7 @@ prompts_get_request(Id, Name, Arguments)
     }).
 
 -doc "Construct a `prompts/get` response.".
--spec prompts_get_response(request_id(), [prompt_message()]) -> map().
+-spec prompts_get_response(request_id(), [prompt_message()]) -> jsonrpc_id_msg().
 prompts_get_response(Id, Messages) when is_list(Messages) ->
     response(Id, #{
         <<"messages">> => [encode_prompt_message(M) || M <- Messages]
@@ -835,7 +855,7 @@ prompts_get_response(Id, Messages) when is_list(Messages) ->
 
 -doc "Construct a `prompts/get` response with description.".
 -spec prompts_get_response(request_id(), [prompt_message()],
-                           binary()) -> map().
+                           binary()) -> jsonrpc_id_msg().
 prompts_get_response(Id, Messages, Description)
   when is_list(Messages), is_binary(Description) ->
     response(Id, #{
@@ -844,7 +864,7 @@ prompts_get_response(Id, Messages, Description)
     }).
 
 -doc "Construct a `notifications/prompts/list_changed` notification.".
--spec prompts_list_changed_notification() -> map().
+-spec prompts_list_changed_notification() -> jsonrpc_notif().
 prompts_list_changed_notification() ->
     notification(<<"notifications/prompts/list_changed">>).
 
@@ -854,7 +874,7 @@ prompts_list_changed_notification() ->
 
 -doc "Construct a `completion/complete` request.".
 -spec completion_complete_request(request_id(), completion_ref(),
-                                  map()) -> map().
+                                  map()) -> jsonrpc_id_msg().
 completion_complete_request(Id, Ref, Argument)
   when is_map(Ref), is_map(Argument) ->
     request(Id, <<"completion/complete">>, #{
@@ -864,7 +884,7 @@ completion_complete_request(Id, Ref, Argument)
 
 -doc "Construct a `completion/complete` request with context.".
 -spec completion_complete_request(request_id(), completion_ref(),
-                                  map(), map()) -> map().
+                                  map(), map()) -> jsonrpc_id_msg().
 completion_complete_request(Id, Ref, Argument, Context)
   when is_map(Ref), is_map(Argument), is_map(Context) ->
     request(Id, <<"completion/complete">>, #{
@@ -875,7 +895,7 @@ completion_complete_request(Id, Ref, Argument, Context)
 
 -doc "Construct a `completion/complete` response.".
 -spec completion_complete_response(request_id(),
-                                   completion_result()) -> map().
+                                   completion_result()) -> jsonrpc_id_msg().
 completion_complete_response(Id, CompletionResult)
   when is_map(CompletionResult) ->
     response(Id, #{
@@ -887,7 +907,7 @@ completion_complete_response(Id, CompletionResult)
 %%====================================================================
 
 -doc "Construct a `logging/setLevel` request.".
--spec logging_set_level_request(request_id(), log_level()) -> map().
+-spec logging_set_level_request(request_id(), log_level()) -> jsonrpc_id_msg().
 logging_set_level_request(Id, Level)
   when Level =:= debug; Level =:= info; Level =:= notice;
        Level =:= warning; Level =:= error; Level =:= critical;
@@ -897,7 +917,7 @@ logging_set_level_request(Id, Level)
     }).
 
 -doc "Construct a `logging/setLevel` response (empty result).".
--spec logging_set_level_response(request_id()) -> map().
+-spec logging_set_level_response(request_id()) -> jsonrpc_id_msg().
 logging_set_level_response(Id) ->
     response(Id, #{}).
 
@@ -906,7 +926,7 @@ Construct a `notifications/message` logging notification.
 
 `Data` is arbitrary JSON-serializable data.
 """.
--spec logging_message_notification(log_level(), binary(), term()) -> map().
+-spec logging_message_notification(log_level(), binary(), term()) -> jsonrpc_notif_params().
 logging_message_notification(Level, Logger, Data)
   when is_atom(Level), is_binary(Logger) ->
     notification(<<"notifications/message">>, #{
@@ -924,13 +944,13 @@ Construct a `sampling/createMessage` request.
 
 Sent by a server to request LLM sampling from the client.
 """.
--spec sampling_create_message_request(request_id(), map()) -> map().
+-spec sampling_create_message_request(request_id(), map()) -> jsonrpc_id_msg().
 sampling_create_message_request(Id, Params) when is_map(Params) ->
     request(Id, <<"sampling/createMessage">>, Params).
 
 -doc "Construct a `sampling/createMessage` response.".
 -spec sampling_create_message_response(request_id(),
-                                       create_message_result()) -> map().
+                                       create_message_result()) -> jsonrpc_id_msg().
 sampling_create_message_response(Id, Result) when is_map(Result) ->
     response(Id, encode_create_message_result(Result)).
 
@@ -943,7 +963,7 @@ Construct an `elicitation/create` request.
 
 Sent by a server to request structured user input from the client.
 """.
--spec elicitation_create_request(request_id(), binary(), map()) -> map().
+-spec elicitation_create_request(request_id(), binary(), map()) -> jsonrpc_id_msg().
 elicitation_create_request(Id, Message, RequestedSchema)
   when is_binary(Message), is_map(RequestedSchema) ->
     request(Id, <<"elicitation/create">>, #{
@@ -953,7 +973,7 @@ elicitation_create_request(Id, Message, RequestedSchema)
 
 -doc "Construct an `elicitation/create` response.".
 -spec elicitation_create_response(request_id(),
-                                  elicitation_result()) -> map().
+                                  elicitation_result()) -> jsonrpc_id_msg().
 elicitation_create_response(Id, Result) when is_map(Result) ->
     response(Id, encode_elicitation_result(Result)).
 
@@ -962,17 +982,17 @@ elicitation_create_response(Id, Result) when is_map(Result) ->
 %%====================================================================
 
 -doc "Construct a `roots/list` request.".
--spec roots_list_request(request_id()) -> map().
+-spec roots_list_request(request_id()) -> jsonrpc_id_msg().
 roots_list_request(Id) ->
     request(Id, <<"roots/list">>, #{}).
 
 -doc "Construct a `roots/list` response.".
--spec roots_list_response(request_id(), [root()]) -> map().
+-spec roots_list_response(request_id(), [root()]) -> jsonrpc_id_msg().
 roots_list_response(Id, Roots) when is_list(Roots) ->
     response(Id, #{<<"roots">> => [encode_root(R) || R <- Roots]}).
 
 -doc "Construct a `notifications/roots/list_changed` notification.".
--spec roots_list_changed_notification() -> map().
+-spec roots_list_changed_notification() -> jsonrpc_notif().
 roots_list_changed_notification() ->
     notification(<<"notifications/roots/list_changed">>).
 
@@ -981,7 +1001,7 @@ roots_list_changed_notification() ->
 %%====================================================================
 
 -doc "Construct a `notifications/progress` notification (progress only).".
--spec progress_notification(progress_token(), number()) -> map().
+-spec progress_notification(progress_token(), number()) -> jsonrpc_notif_params().
 progress_notification(Token, Progress) when is_number(Progress) ->
     notification(<<"notifications/progress">>, #{
         <<"progressToken">> => Token,
@@ -989,7 +1009,7 @@ progress_notification(Token, Progress) when is_number(Progress) ->
     }).
 
 -doc "Construct a `notifications/progress` notification with total.".
--spec progress_notification(progress_token(), number(), number()) -> map().
+-spec progress_notification(progress_token(), number(), number()) -> jsonrpc_notif_params().
 progress_notification(Token, Progress, Total)
   when is_number(Progress), is_number(Total) ->
     notification(<<"notifications/progress">>, #{
@@ -1000,7 +1020,7 @@ progress_notification(Token, Progress, Total)
 
 -doc "Construct a `notifications/progress` notification with total and message.".
 -spec progress_notification(progress_token(), number(), number(),
-                            binary()) -> map().
+                            binary()) -> jsonrpc_notif_params().
 progress_notification(Token, Progress, Total, Message)
   when is_number(Progress), is_number(Total), is_binary(Message) ->
     notification(<<"notifications/progress">>, #{
@@ -1011,14 +1031,14 @@ progress_notification(Token, Progress, Total, Message)
     }).
 
 -doc "Construct a `notifications/cancelled` notification (no reason).".
--spec cancelled_notification(request_id()) -> map().
+-spec cancelled_notification(request_id()) -> jsonrpc_notif_params().
 cancelled_notification(RequestId) ->
     notification(<<"notifications/cancelled">>, #{
         <<"requestId">> => RequestId
     }).
 
 -doc "Construct a `notifications/cancelled` notification with reason.".
--spec cancelled_notification(request_id(), binary()) -> map().
+-spec cancelled_notification(request_id(), binary()) -> jsonrpc_notif_params().
 cancelled_notification(RequestId, Reason) when is_binary(Reason) ->
     notification(<<"notifications/cancelled">>, #{
         <<"requestId">> => RequestId,
@@ -1030,18 +1050,18 @@ cancelled_notification(RequestId, Reason) when is_binary(Reason) ->
 %%====================================================================
 
 -doc "Create a text content block.".
--spec text_content(binary()) -> text_content().
+-spec text_content(binary()) -> #{type := text, text := binary()}.
 text_content(Text) when is_binary(Text) ->
     #{type => text, text => Text}.
 
 -doc "Create an image content block (base64-encoded data + MIME type).".
--spec image_content(binary(), binary()) -> image_content().
+-spec image_content(binary(), binary()) -> #{type := image, data := binary(), mimeType := binary()}.
 image_content(Data, MimeType)
   when is_binary(Data), is_binary(MimeType) ->
     #{type => image, data => Data, mimeType => MimeType}.
 
 -doc "Create an audio content block (base64-encoded data + MIME type).".
--spec audio_content(binary(), binary()) -> audio_content().
+-spec audio_content(binary(), binary()) -> #{type := audio, data := binary(), mimeType := binary()}.
 audio_content(Data, MimeType)
   when is_binary(Data), is_binary(MimeType) ->
     #{type => audio, data => Data, mimeType => MimeType}.
@@ -1052,7 +1072,7 @@ resource_content(Resource) when is_map(Resource) ->
     #{type => resource, resource => Resource}.
 
 -doc "Create a resource link content block.".
--spec resource_link_content(binary(), binary()) -> resource_link_content().
+-spec resource_link_content(binary(), binary()) -> #{type := resource_link, uri := binary(), mimeType := binary()}.
 resource_link_content(Uri, MimeType)
   when is_binary(Uri), is_binary(MimeType) ->
     #{type => resource_link, uri => Uri, mimeType => MimeType}.
@@ -1075,20 +1095,20 @@ resource_link_content(Uri, MimeType, Opts)
 %%====================================================================
 
 -doc "Create implementation info (name + version).".
--spec implementation_info(binary(), binary()) -> implementation_info().
+-spec implementation_info(binary(), binary()) -> #{name := binary(), version := binary()}.
 implementation_info(Name, Version)
   when is_binary(Name), is_binary(Version) ->
     #{name => Name, version => Version}.
 
 -doc "Create implementation info (name + version + title).".
 -spec implementation_info(binary(), binary(), binary()) ->
-    implementation_info().
+    #{name := binary(), version := binary(), title := binary()}.
 implementation_info(Name, Version, Title)
   when is_binary(Name), is_binary(Version), is_binary(Title) ->
     #{name => Name, version => Version, title => Title}.
 
 -doc "Create an empty tool annotation (all hints default to spec values).".
--spec tool_annotation() -> tool_annotation().
+-spec tool_annotation() -> #{}.
 tool_annotation() -> #{}.
 
 -doc """
@@ -1104,7 +1124,7 @@ tool_annotation(Hints) when is_map(Hints) ->
     maps:with(ValidKeys, Hints).
 
 -doc "Create an empty resource annotation.".
--spec resource_annotation() -> resource_annotation().
+-spec resource_annotation() -> #{}.
 resource_annotation() -> #{}.
 
 -doc """
@@ -1119,7 +1139,7 @@ resource_annotation(Fields) when is_map(Fields) ->
     maps:with(ValidKeys, Fields).
 
 -doc "Create empty model preferences.".
--spec model_preferences() -> model_preferences().
+-spec model_preferences() -> #{}.
 model_preferences() -> #{}.
 
 -doc """
@@ -1155,12 +1175,12 @@ negotiate_capabilities(ServerCaps, ClientCaps)
       protocol_version => protocol_version()}.
 
 -doc "Return default server capabilities (tools with listChanged).".
--spec default_server_capabilities() -> server_capabilities().
+-spec default_server_capabilities() -> #{tools := #{listChanged := true}}.
 default_server_capabilities() ->
     #{tools => #{listChanged => true}}.
 
 -doc "Return default client capabilities (roots with listChanged).".
--spec default_client_capabilities() -> client_capabilities().
+-spec default_client_capabilities() -> #{roots := #{listChanged := true}}.
 default_client_capabilities() ->
     #{roots => #{listChanged => true}}.
 
@@ -1338,7 +1358,7 @@ encode_call_tool_result(#{content := Content} = Result) ->
               maps:get(structuredContent, Result, undefined), B1).
 
 %% Encode content for the wire.
--spec encode_content(content()) -> map().
+-spec encode_content(content()) -> #{<<_:24, _:_*8>> => _}.
 encode_content(#{type := text, text := Text} = C) ->
     Base = #{<<"type">> => <<"text">>, <<"text">> => Text},
     maybe_encode_content_annotations(C, Base);
@@ -1490,7 +1510,7 @@ encode_elicitation_result(#{action := Action} = Result)
 %%--------------------------------------------------------------------
 
 %% Add a key-value pair to a map only if Value is not `undefined`.
--spec maybe_put(binary(), term(), map()) -> map().
+-spec maybe_put(<<_:32, _:_*8>>, term(), #{<<_:24, _:_*8>> => _}) -> #{<<_:24, _:_*8>> => _}.
 maybe_put(_Key, undefined, Map) -> Map;
 maybe_put(Key, Value, Map) -> Map#{Key => Value}.
 

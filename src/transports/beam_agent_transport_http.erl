@@ -63,7 +63,7 @@ directly using the stored connection ref. The engine's send pathway
 is unused for HTTP transports.
 """.
 -spec send(beam_agent_transport:transport_ref(), term()) ->
-    ok | {error, term()}.
+    ok | {error, invalid_send_format}.
 send(_, noop) ->
     ok;
 send(_, _) ->
@@ -83,7 +83,7 @@ is_ready({ConnPid, _, _}) ->
 
 -doc "Return `running` if the HTTP client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
-    running | {exited, non_neg_integer()}.
+    running | {exited, 0}.
 status({ConnPid, _, _}) ->
     case erlang:is_process_alive(ConnPid) of
         true  -> running;

@@ -32,7 +32,7 @@ defmodule CodexEx.Session do
   @doc """
   Send a query and get a reference for manual message pulling.
   """
-  @spec send_query(pid(), binary(), map(), timeout()) ::
+  @spec send_query(pid(), binary(), CodexEx.query_params(), timeout()) ::
           {:ok, reference()} | {:error, term()}
   def send_query(session, prompt, params \\ %{}, timeout \\ 120_000) do
     :codex_session.send_query(session, prompt, params, timeout)
@@ -42,7 +42,7 @@ defmodule CodexEx.Session do
   Pull the next message from an active query (demand-driven).
   """
   @spec receive_message(pid(), reference(), timeout()) ::
-          {:ok, map()} | {:error, term()}
+          {:ok, CodexEx.message()} | {:error, term()}
   def receive_message(session, ref, timeout \\ 120_000) do
     :codex_session.receive_message(session, ref, timeout)
   end

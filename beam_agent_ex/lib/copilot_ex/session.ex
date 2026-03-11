@@ -15,8 +15,8 @@ defmodule CopilotEx.Session do
   This is the low-level interface. For most use cases, prefer
   `CopilotEx.query/3` or `CopilotEx.stream!/3`.
   """
-  @spec send_query(pid(), binary(), map(), timeout()) ::
-          {:ok, reference()} | {:error, term()}
+  @spec send_query(pid(), binary(), CopilotEx.query_opts(), timeout()) ::
+          {:error, term()} | {:ok, reference()}
   def send_query(session, prompt, params \\ %{}, timeout \\ 120_000) do
     :copilot_session.send_query(session, prompt, params, timeout)
   end
@@ -25,7 +25,7 @@ defmodule CopilotEx.Session do
   Pull the next message from an active query (demand-driven).
   """
   @spec receive_message(pid(), reference(), timeout()) ::
-          {:ok, map()} | {:error, term()}
+          {:error, term()} | {:ok, CopilotEx.message()}
   def receive_message(session, ref, timeout \\ 120_000) do
     :copilot_session.receive_message(session, ref, timeout)
   end

@@ -241,7 +241,7 @@ ensure_registry_table() ->
 %%====================================================================
 
 -doc "See `beam_agent_mcp_protocol:protocol_version/0`.".
--spec protocol_version() -> binary().
+-spec protocol_version() -> <<_:80>>.
 protocol_version() ->
     beam_agent_mcp_protocol:protocol_version().
 

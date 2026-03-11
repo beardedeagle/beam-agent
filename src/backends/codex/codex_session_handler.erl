@@ -537,7 +537,7 @@ handle_error_response(Id, Msg, #hstate{pending = Pending} = HState) ->
 %%====================================================================
 
 -spec do_encode_query(binary(), map(), #hstate{}) ->
-    {ok, iodata(), #hstate{}} | {error, term()}.
+    {ok, iodata(), #hstate{}}.
 do_encode_query(Prompt, Params, HState) ->
     MergedOpts = merge_turn_opts(Params, HState),
     case HState#hstate.thread_id of
@@ -795,7 +795,9 @@ queue_pending_server_request(Id, RequestId, Request, HState) ->
     _ = track_message(Msg, HState1),
     {HState1, [], [Msg]}.
 
--spec request_subtype(map()) -> binary().
+-spec request_subtype(#{kind := auth_refresh | dynamic_tool_call | user_input,
+                        method := <<_:64, _:_*8>>, params := map()}) ->
+    <<_:64, _:_*8>>.
 request_subtype(#{kind := user_input}) -> <<"user_input">>;
 request_subtype(#{kind := dynamic_tool_call}) -> <<"dynamic_tool_call">>;
 request_subtype(#{kind := auth_refresh}) -> <<"auth_refresh">>.
@@ -974,14 +976,14 @@ dynamic_tool_content_item(Other) ->
       <<"text">> =>
           unicode:characters_to_binary(io_lib:format("~p", [Other]))}.
 
--spec encode_approval_policy(atom() | binary() | undefined) ->
+-spec encode_approval_policy(never | on_failure | on_request | reject | untrusted | binary() | undefined) ->
     binary() | undefined.
 encode_approval_policy(undefined) -> undefined;
 encode_approval_policy(AP) when is_atom(AP) ->
     codex_protocol:encode_ask_for_approval(AP);
 encode_approval_policy(AP) when is_binary(AP) -> AP.
 
--spec encode_sandbox_mode(atom() | binary() | undefined) ->
+-spec encode_sandbox_mode(danger_full_access | read_only | workspace_write | binary() | undefined) ->
     binary() | undefined.
 encode_sandbox_mode(undefined) -> undefined;
 encode_sandbox_mode(SM) when is_atom(SM) ->

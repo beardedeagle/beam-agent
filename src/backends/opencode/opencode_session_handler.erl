@@ -125,6 +125,9 @@ opencode_session (thin wrapper)
             {maybe_reply, 2},
             {build_summarize_body, 2}]}).
 -dialyzer({nowarn_function, [{handle_permission, 3}]}).
+%% Dialyzer: recursive JSON value types cannot be precisely expressed
+%% in Erlang type specs.
+-dialyzer({nowarn_function, [decode_json_result/1]}).
 
 %%====================================================================
 %% Required callbacks
@@ -208,7 +211,7 @@ encode_query(Prompt, Params, #hstate{opts = Opts} = HState) ->
             {ok, noop, HState1}
     end.
 
--spec build_session_info(term()) -> map().
+-spec build_session_info(#hstate{}) -> map().
 build_session_info(#hstate{} = HState) ->
     #{session_id  => HState#hstate.session_id,
       adapter     => opencode,
@@ -222,7 +225,7 @@ build_session_info(#hstate{} = HState) ->
       port        => HState#hstate.port,
       transport   => http}.
 
--spec terminate_handler(term(), term()) -> ok.
+-spec terminate_handler(_, #hstate{}) -> ok.
 terminate_handler(Reason, #hstate{} = HState) ->
     _ = fire_hook(session_end,
                   #{event => session_end, reason => Reason},
@@ -233,8 +236,8 @@ terminate_handler(Reason, #hstate{} = HState) ->
 %% Optional callbacks
 %%====================================================================
 
--spec transport_started(beam_agent_transport:transport_ref(), term()) ->
-    term().
+-spec transport_started(beam_agent_transport:transport_ref(), #hstate{}) ->
+    #hstate{}.
 transport_started({ConnPid, _MonRef, ClientMod}, #hstate{} = HState) ->
     HState#hstate{conn_pid = ConnPid, client_module = ClientMod}.
 
@@ -274,8 +277,8 @@ handle_initializing({exit, _}, HState) ->
     {error_state, client_process_crash,
      HState#hstate{conn_pid = undefined, sse_ref = undefined}}.
 
--spec encode_interrupt(term()) ->
-    {ok, [beam_agent_session_handler:handler_action()], term()} |
+-spec encode_interrupt(_) ->
+    {ok, [beam_agent_session_handler:handler_action()], #hstate{}} |
     not_supported.
 encode_interrupt(#hstate{session_id = SessionId} = HState)
   when is_binary(SessionId) ->
@@ -285,9 +288,8 @@ encode_interrupt(#hstate{session_id = SessionId} = HState)
 encode_interrupt(_HState) ->
     not_supported.
 
--spec handle_set_model(binary(), term()) ->
-    {ok, term(), [beam_agent_session_handler:handler_action()], term()} |
-    {error, term()}.
+-spec handle_set_model(binary(), #hstate{}) ->
+    {ok, 'undefined' | binary() | map(), [], #hstate{}}.
 handle_set_model(Model, #hstate{} = HState) ->
     {ok, Model, [], HState#hstate{model = Model}}.
 
@@ -983,7 +985,7 @@ dispatch_rest_endpoint(_Unknown, _From, _HState) ->
 %% Internal: general helpers
 %%====================================================================
 
--spec decode_json_result(binary()) -> {ok, term()} | {error, decode_failed}.
+-spec decode_json_result(binary()) -> {ok, false | null | true | binary() | [any()] | number() | #{binary() => _}} | {error, decode_failed}.
 decode_json_result(<<>>) ->
     {ok, #{}};
 decode_json_result(Body) ->

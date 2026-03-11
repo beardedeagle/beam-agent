@@ -287,8 +287,7 @@ If the mode is available on the server, sends a JSON-RPC request and
 defers the reply until the response arrives in handle_data.
 """.
 -spec handle_set_permission_mode(binary(), #hstate{}) ->
-    {ok, term(), [beam_agent_session_handler:handler_action()], #hstate{}} |
-    {error, term()}.
+    {ok, 'undefined' | binary(), [beam_agent_session_handler:handler_action()], #hstate{}}.
 handle_set_permission_mode(Mode, HState) ->
     RequestedMode = normalize_approval_mode(Mode),
     case {HState#hstate.session_id,

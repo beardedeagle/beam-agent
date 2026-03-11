@@ -25,6 +25,227 @@ defmodule CodexEx do
       {:ok, messages} = CodexEx.query(session, "Follow-up question")
   """
 
+  # Dialyzer infers impractically narrow binary sizes for small status maps
+  # and expands type aliases more aggressively than the spec references.
+  @dialyzer {:nowarn_function, reconnect_mcp_server: 2}
+  @dialyzer {:nowarn_function, toggle_mcp_server: 3}
+  @dialyzer {:nowarn_function, sdk_hook: 2}
+  @dialyzer {:nowarn_function, get_session_messages: 2}
+  @dialyzer {:nowarn_function, extract_todos: 1}
+
+  # ── Shared Types ────────────────────────────────────────────────────
+
+  @typedoc "Stop reason atoms returned by the backend."
+  @type stop_reason ::
+          :end_turn
+          | :max_tokens
+          | :refusal
+          | :stop_sequence
+          | :tool_use_stop
+          | :unknown_stop
+
+  @typedoc "A message map as returned by `beam_agent_core`."
+  @type message :: %{
+          required(:type) => atom(),
+          optional(:content) => binary(),
+          optional(:content_blocks) => [any()],
+          optional(:duration_api_ms) => non_neg_integer(),
+          optional(:duration_ms) => non_neg_integer(),
+          optional(:error_info) => map(),
+          optional(:errors) => [any()],
+          optional(:event_type) => binary(),
+          optional(:fast_mode_state) => map(),
+          optional(:is_error) => boolean(),
+          optional(:is_replay) => boolean(),
+          optional(:is_using_overage) => boolean(),
+          optional(:message_id) => binary(),
+          optional(:model) => binary(),
+          optional(:model_usage) => map(),
+          optional(:num_turns) => non_neg_integer(),
+          optional(:overage_disabled_reason) => binary(),
+          optional(:overage_resets_at) => number(),
+          optional(:overage_status) => binary(),
+          optional(:parent_tool_use_id) => :null | binary(),
+          optional(:permission_denials) => [any()],
+          optional(:rate_limit_status) => binary(),
+          optional(:rate_limit_type) => binary(),
+          optional(:raw) => map(),
+          optional(:request) => map(),
+          optional(:request_id) => binary(),
+          optional(:resets_at) => number(),
+          optional(:response) => map(),
+          optional(:session_id) => binary(),
+          optional(:stop_reason) => binary(),
+          optional(:stop_reason_atom) => stop_reason(),
+          optional(:structured_output) => term(),
+          optional(:subtype) => binary(),
+          optional(:surpassed_threshold) => number(),
+          optional(:system_info) => map(),
+          optional(:thread_id) => binary(),
+          optional(:timestamp) => integer(),
+          optional(:tool_input) => map(),
+          optional(:tool_name) => binary(),
+          optional(:tool_use_id) => binary(),
+          optional(:total_cost_usd) => number(),
+          optional(:usage) => map(),
+          optional(:utilization) => number(),
+          optional(:uuid) => binary()
+        }
+
+  @typedoc "Query parameter map accepted by `query/3` and `send_query/4`."
+  @type query_params :: %{
+          optional(:agent) => binary(),
+          optional(:allowed_tools) => [binary()],
+          optional(:approval_policy) => binary(),
+          optional(:attachments) => [map()],
+          optional(:cwd) => binary(),
+          optional(:disallowed_tools) => [binary()],
+          optional(:effort) => binary(),
+          optional(:max_budget_usd) => number(),
+          optional(:max_tokens) => pos_integer(),
+          optional(:max_turns) => pos_integer(),
+          optional(:mode) => binary(),
+          optional(:model) => binary(),
+          optional(:model_id) => binary(),
+          optional(:output_format) => :json_schema | :text | binary() | map(),
+          optional(:permission_mode) =>
+            :accept_edits | :bypass_permissions | :default | :dont_ask | :plan | binary(),
+          optional(:provider) => map(),
+          optional(:provider_id) => binary(),
+          optional(:sandbox_mode) => binary(),
+          optional(:summary) => binary(),
+          optional(:system) => binary() | map(),
+          optional(:system_prompt) =>
+            binary() | %{:preset => binary(), :type => :preset, :append => binary()},
+          optional(:thinking) => map(),
+          optional(:timeout) => timeout(),
+          optional(:tools) => [any()] | map()
+        }
+
+  @typedoc "A content block used in message-to-block conversions."
+  @type content_block :: %{
+          required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
+          optional(:content) => binary(),
+          optional(:id) => binary(),
+          optional(:input) => map(),
+          optional(:name) => binary(),
+          optional(:raw) => map(),
+          optional(:text) => binary(),
+          optional(:thinking) => binary(),
+          optional(:tool_use_id) => binary()
+        }
+
+  @typedoc "A flat message produced from a content block."
+  @type flat_message :: %{
+          required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
+          optional(:content) => term(),
+          optional(:raw) => term(),
+          optional(:tool_input) => term(),
+          optional(:tool_name) => term(),
+          optional(:tool_use_id) => term()
+        }
+
+  @typedoc "Session store entry map."
+  @type session_store_entry :: %{
+          :session_id => binary(),
+          :adapter => atom(),
+          :created_at => integer(),
+          :cwd => binary(),
+          :extra => map(),
+          :message_count => non_neg_integer(),
+          :model => binary(),
+          :updated_at => integer()
+        }
+
+  @typedoc "Session filter options for `list_sessions/1`."
+  @type session_filter_opts :: %{
+          optional(:adapter) => atom(),
+          optional(:cwd) => binary(),
+          optional(:limit) => pos_integer(),
+          optional(:model) => binary(),
+          optional(:since) => integer()
+        }
+
+  @typedoc "Share state information."
+  @type share_info :: %{
+          :created_at => integer(),
+          :session_id => binary(),
+          :share_id => binary(),
+          :status => :active
+        }
+
+  @typedoc "Session summary information."
+  @type summary_info :: %{
+          :content => binary(),
+          :generated_at => integer(),
+          :generated_by => binary(),
+          :message_count => non_neg_integer(),
+          :session_id => binary()
+        }
+
+  @typedoc "Hook context map passed to SDK lifecycle hook callbacks."
+  @type hook_context :: %{
+          optional(:event) => atom(),
+          optional(:agent_id) => binary(),
+          optional(:agent_transcript_path) => binary(),
+          optional(:agent_type) => binary(),
+          optional(:content) => binary(),
+          optional(:duration_ms) => non_neg_integer(),
+          optional(:interrupt) => boolean(),
+          optional(:params) => map(),
+          optional(:permission_prompt_tool_name) => binary(),
+          optional(:permission_suggestions) => [any()],
+          optional(:prompt) => binary(),
+          optional(:reason) => term(),
+          optional(:session_id) => binary(),
+          optional(:stop_hook_active) => boolean(),
+          optional(:stop_reason) => atom() | binary(),
+          optional(:system_info) => map(),
+          optional(:tool_input) => map(),
+          optional(:tool_name) => binary(),
+          optional(:tool_use_id) => binary(),
+          optional(:updated_permissions) => map()
+        }
+
+  @typedoc "Hook callback function type."
+  @type hook_callback :: (hook_context() -> :ok | {:deny, binary()})
+
+  @typedoc "SDK hook definition returned by `sdk_hook/2,3`."
+  @type hook_def :: %{
+          :callback => hook_callback(),
+          :event => atom(),
+          optional(:matcher) => %{:tool_name => binary()},
+          optional(:compiled_re) => {:re_pattern, term(), term(), term(), term()}
+        }
+
+  @typedoc "MCP tool definition map."
+  @type mcp_tool_def :: %{
+          :description => binary(),
+          :handler => (map() -> {:error, binary()} | {:ok, [any()]}),
+          :input_schema => map(),
+          :name => binary()
+        }
+
+  @typedoc "MCP server definition map."
+  @type mcp_server_def :: %{
+          :name => binary(),
+          :tools => [mcp_tool_def()],
+          :version => binary()
+        }
+
+  @typedoc "Server health status map."
+  @type server_health_info :: %{
+          :adapter => :codex,
+          :health => :active_query | :active_turn | :connecting | :error | :initializing | :ready
+        }
+
+  @typedoc "Todo item extracted from messages."
+  @type todo_item :: %{
+          required(:content) => binary(),
+          required(:status) => :completed | :in_progress | :pending,
+          optional(:active_form) => binary()
+        }
+
   # ── Session Lifecycle ──────────────────────────────────────────────
 
   @doc "Start a Codex app-server session (full bidirectional JSON-RPC)."
@@ -71,7 +292,7 @@ defmodule CodexEx do
 
     * `:timeout` - total query timeout in ms (default: 120_000)
   """
-  @spec query(pid(), binary(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec query(pid(), binary(), query_params()) :: {:ok, [message()]} | {:error, term()}
   def query(session, prompt, params \\ %{}) do
     BeamAgent.query(session, prompt, params)
   end
@@ -127,7 +348,7 @@ defmodule CodexEx do
   end
 
   @doc "List all threads."
-  @spec thread_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec thread_list(pid()) :: {:ok, map()} | {:error, term()}
   def thread_list(session) do
     :codex_app_server.thread_list(session)
   end
@@ -202,13 +423,13 @@ defmodule CodexEx do
   end
 
   @doc "Steer an in-flight turn with additional input."
-  @spec turn_steer(pid(), binary(), binary(), binary() | [map()]) ::
+  @spec turn_steer(pid(), binary(), binary(), binary() | [%{binary() => term()}]) ::
           {:ok, map()} | {:error, term()}
   def turn_steer(session, thread_id, turn_id, input) do
     :codex_app_server.turn_steer(session, thread_id, turn_id, input)
   end
 
-  @spec turn_steer(pid(), binary(), binary(), binary() | [map()], map()) ::
+  @spec turn_steer(pid(), binary(), binary(), binary() | [%{binary() => term()}], map()) ::
           {:ok, map()} | {:error, term()}
   def turn_steer(session, thread_id, turn_id, input, opts) do
     :codex_app_server.turn_steer(session, thread_id, turn_id, input, opts)
@@ -487,13 +708,13 @@ defmodule CodexEx do
   # ── SDK Hook Constructors ──────────────────────────────────────────
 
   @doc "Create an SDK lifecycle hook."
-  @spec sdk_hook(atom(), function()) :: map()
+  @spec sdk_hook(atom(), hook_callback()) :: hook_def()
   def sdk_hook(event, callback) do
     :beam_agent_hooks_core.hook(event, callback)
   end
 
   @doc "Create an SDK lifecycle hook with a matcher."
-  @spec sdk_hook(atom(), function(), map()) :: map()
+  @spec sdk_hook(atom(), hook_callback(), %{:tool_name => binary()}) :: hook_def()
   def sdk_hook(event, callback, matcher) do
     :beam_agent_hooks_core.hook(event, callback, matcher)
   end
@@ -542,15 +763,15 @@ defmodule CodexEx do
   def flatten_assistant(message), do: :beam_agent_content_core.flatten_assistant(message)
 
   @doc "Convert a list of flat messages into content_block format."
-  @spec messages_to_blocks([map()]) :: [map()]
+  @spec messages_to_blocks([map()]) :: [content_block()]
   def messages_to_blocks(messages), do: :beam_agent_content_core.messages_to_blocks(messages)
 
   @doc "Convert a single content_block into a flat message."
-  @spec block_to_message(map()) :: map()
+  @spec block_to_message(content_block()) :: flat_message()
   def block_to_message(block), do: :beam_agent_content_core.block_to_message(block)
 
   @doc "Convert a single flat message into a content_block."
-  @spec message_to_block(map()) :: map()
+  @spec message_to_block(map()) :: content_block()
   def message_to_block(message), do: :beam_agent_content_core.message_to_block(message)
 
   # ── Additional Session Control ──────────────────────────────────────
@@ -616,14 +837,14 @@ defmodule CodexEx do
   # ── SDK MCP Server Constructors ─────────────────────────────────────
 
   @doc "Create an in-process MCP tool definition."
-  @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, list()} | {:error, binary()})) ::
-          map()
+  @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, [map()]} | {:error, binary()})) ::
+          mcp_tool_def()
   def mcp_tool(name, description, input_schema, handler) do
     :beam_agent_tool_registry.tool(name, description, input_schema, handler)
   end
 
   @doc "Create an in-process MCP server definition."
-  @spec mcp_server(binary(), [map()]) :: map()
+  @spec mcp_server(binary(), [mcp_tool_def()]) :: mcp_server_def()
   def mcp_server(name, tools) do
     :beam_agent_tool_registry.server(name, tools)
   end
@@ -711,24 +932,24 @@ defmodule CodexEx do
   # ── Universal: Session Store (beam_agent_core) ──────────────────────────
 
   @doc "List all tracked sessions."
-  @spec list_sessions() :: {:ok, [map()]}
+  @spec list_sessions() :: {:ok, [session_store_entry()]}
   def list_sessions, do: :codex_app_server.list_sessions()
 
   @doc "List sessions with filters."
-  @spec list_sessions(map()) :: {:ok, [map()]}
+  @spec list_sessions(session_filter_opts()) :: {:ok, [session_store_entry()]}
   def list_sessions(opts) when is_map(opts), do: :codex_app_server.list_sessions(opts)
 
   @doc "Get messages for a session."
-  @spec get_session_messages(binary()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary()) :: {:ok, [message()]} | {:error, :not_found}
   def get_session_messages(session_id), do: :codex_app_server.get_session_messages(session_id)
 
   @doc "Get messages with options."
-  @spec get_session_messages(binary(), map()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary(), map()) :: {:ok, [message()]} | {:error, :not_found}
   def get_session_messages(session_id, opts),
     do: :codex_app_server.get_session_messages(session_id, opts)
 
   @doc "Get session metadata by ID."
-  @spec get_session(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_session(binary()) :: {:ok, session_store_entry()} | {:error, :not_found}
   def get_session(session_id), do: :codex_app_server.get_session(session_id)
 
   @doc "Delete a session and its messages."
@@ -736,23 +957,24 @@ defmodule CodexEx do
   def delete_session(session_id), do: :codex_app_server.delete_session(session_id)
 
   @doc "Fork a tracked session into a new session ID."
-  @spec fork_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec fork_session(pid(), map()) :: {:ok, session_store_entry()} | {:error, :not_found}
   def fork_session(session, opts), do: :codex_app_server.fork_session(session, opts)
 
   @doc "Revert the visible session history to a prior boundary."
-  @spec revert_session(pid(), map()) :: {:ok, map()} | {:error, term()}
+  @spec revert_session(pid(), map()) ::
+          {:ok, session_store_entry()} | {:error, :invalid_selector | :not_found}
   def revert_session(session, selector),
     do: :codex_app_server.revert_session(session, selector)
 
   @doc "Clear any stored session revert state."
-  @spec unrevert_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec unrevert_session(pid()) :: {:ok, session_store_entry()} | {:error, :not_found}
   def unrevert_session(session), do: :codex_app_server.unrevert_session(session)
 
   @doc "Create or replace share state for the current session."
-  @spec share_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid()) :: {:ok, share_info()} | {:error, :not_found}
   def share_session(session), do: :codex_app_server.share_session(session)
 
-  @spec share_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid(), map()) :: {:ok, share_info()} | {:error, :not_found}
   def share_session(session, opts), do: :codex_app_server.share_session(session, opts)
 
   @doc "Revoke share state for the current session."
@@ -760,31 +982,31 @@ defmodule CodexEx do
   def unshare_session(session), do: :codex_app_server.unshare_session(session)
 
   @doc "Generate and store a summary for the current session."
-  @spec summarize_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid()) :: {:ok, summary_info()} | {:error, :not_found}
   def summarize_session(session), do: :codex_app_server.summarize_session(session)
 
-  @spec summarize_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid(), map()) :: {:ok, summary_info()} | {:error, :not_found}
   def summarize_session(session, opts),
     do: :codex_app_server.summarize_session(session, opts)
 
   # ── Universal: MCP Management (beam_agent_core) ─────────────────────────
 
   @doc "Get status of all MCP servers."
-  @spec mcp_server_status(pid()) :: {:ok, map()}
+  @spec mcp_server_status(pid()) :: {:ok, %{binary() => map()}}
   def mcp_server_status(session), do: :codex_app_server.mcp_server_status(session)
 
   @doc "Replace MCP server configurations."
-  @spec set_mcp_servers(pid(), [map()]) :: {:ok, term()} | {:error, term()}
+  @spec set_mcp_servers(pid(), [mcp_server_def()]) :: {:ok, map()} | {:error, :not_found}
   def set_mcp_servers(session, servers),
     do: :codex_app_server.set_mcp_servers(session, servers)
 
   @doc "Reconnect a failed MCP server."
-  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
   def reconnect_mcp_server(session, server_name),
     do: :codex_app_server.reconnect_mcp_server(session, server_name)
 
   @doc "Enable or disable an MCP server."
-  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, map()} | {:error, :not_found}
   def toggle_mcp_server(session, server_name, enabled),
     do: :codex_app_server.toggle_mcp_server(session, server_name, enabled)
 
@@ -809,13 +1031,15 @@ defmodule CodexEx do
   # ── Universal: Session Control (beam_agent_core) ───────────────────────
 
   @doc "Set maximum thinking tokens via universal control."
-  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, map()}
+  @spec set_max_thinking_tokens(pid(), pos_integer()) ::
+          {:ok, %{:max_thinking_tokens => pos_integer()}}
   def set_max_thinking_tokens(session, max_tokens) do
     :codex_app_server.set_max_thinking_tokens(session, max_tokens)
   end
 
   @doc "Revert file changes to a checkpoint via universal checkpointing."
-  @spec rewind_files(pid(), binary()) :: :ok | {:error, :not_found | term()}
+  @spec rewind_files(pid(), binary()) ::
+          :ok | {:error, :not_found | {:restore_failed, binary(), atom()}}
   def rewind_files(session, checkpoint_uuid) do
     :codex_app_server.rewind_files(session, checkpoint_uuid)
   end
@@ -827,13 +1051,13 @@ defmodule CodexEx do
   end
 
   @doc "Check server health. Maps to session health for Codex."
-  @spec server_health(pid()) :: {:ok, map()}
+  @spec server_health(pid()) :: {:ok, server_health_info()}
   def server_health(session), do: :codex_app_server.server_health(session)
 
   # ── Todo Extraction ─────────────────────────────────────────────────
 
   @doc "Extract all TodoWrite items from a list of messages."
-  @spec extract_todos([map()]) :: [BeamAgent.Todo.todo_item()]
+  @spec extract_todos([message()]) :: [todo_item()]
   defdelegate extract_todos(messages), to: BeamAgent.Todo
 
   @doc "Filter todo items by status."
@@ -842,7 +1066,10 @@ defmodule CodexEx do
   defdelegate filter_todos(todos, status), to: BeamAgent.Todo, as: :filter_by_status
 
   @doc "Get a summary of todo counts by status."
-  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{atom() => non_neg_integer()}
+  @spec todo_summary([todo_item()]) :: %{
+          required(:total) => non_neg_integer(),
+          atom() => non_neg_integer()
+        }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ───────────────────────────────────────────────────────

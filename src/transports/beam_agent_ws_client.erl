@@ -55,6 +55,11 @@ expects:
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2]).
 
+%% Dialyzer: transport_send/3 uses gen_tcp:socket()/ssl:sslsocket()/iodata()
+%% which are the idiomatic Erlang types, broader than what dialyzer infers
+%% from the two concrete call-sites.
+-dialyzer({nowarn_function, [transport_send/3]}).
+
 %%====================================================================
 %% Types
 %%====================================================================
@@ -379,7 +384,7 @@ merge_tls_opts(_Defaults, Custom) ->
 %%====================================================================
 
 -spec build_upgrade_request(string(), string(), binary(),
-                            [{binary(), binary()}]) -> iodata().
+                            [{binary(), binary()}]) -> [[[any(), ...] | char()], ...].
 build_upgrade_request(Path, HostHeader, WsKey, ExtraHeaders) ->
     ExtraLines = [[binary_to_list(K), ": ", binary_to_list(V), "\r\n"]
                   || {K, V} <- ExtraHeaders],
@@ -431,7 +436,7 @@ read_response_lines(Transport, Socket, Buffer, Timeout) ->
     end.
 
 -spec parse_response(binary()) ->
-    {ok, [{binary(), binary()}]} | {error, term()}.
+    {ok, [{binary(), binary()}]} | {error, {unexpected_status, binary()}}.
 parse_response(Block) ->
     [StatusLine | HeaderLines] = binary:split(Block, <<"\r\n">>,
                                               [global]),
@@ -455,7 +460,7 @@ parse_headers(Lines) ->
     end, Lines).
 
 -spec validate_accept(binary(), [{binary(), binary()}]) ->
-    ok | {error, term()}.
+    ok | {error, {invalid_accept, binary() | undefined}}.
 validate_accept(WsKey, Headers) ->
     Expected = base64:encode(
         crypto:hash(sha, [WsKey, <<?WS_GUID>>])),
@@ -470,7 +475,7 @@ validate_accept(WsKey, Headers) ->
 
 -spec transport_send(gen_tcp | ssl,
                      gen_tcp:socket() | ssl:sslsocket(),
-                     iodata()) -> ok | {error, term()}.
+                     iodata()) -> ok | {error, _}.
 transport_send(gen_tcp, Socket, Data) -> gen_tcp:send(Socket, Data);
 transport_send(ssl, Socket, Data)     -> ssl:send(Socket, Data).
 

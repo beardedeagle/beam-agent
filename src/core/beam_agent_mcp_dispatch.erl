@@ -55,6 +55,11 @@ State = beam_agent_mcp_dispatch:new(ServerInfo, ServerCaps, #{
     dispatch_result/0
 ]).
 
+%% method_error/2 is an internal helper designed for any error message,
+%% but currently has a single call site with a literal binary, so
+%% dialyzer infers an impractically narrow type.
+-dialyzer({nowarn_function, method_error/2}).
+
 %%--------------------------------------------------------------------
 %% Provider Behaviour
 %%--------------------------------------------------------------------
@@ -665,7 +670,7 @@ core_content_to_proto(#{type := image, data := Data,
 %%--------------------------------------------------------------------
 
 -spec method_not_found(beam_agent_mcp_protocol:request_id(),
-                       binary()) -> map().
+                       binary()) -> beam_agent_mcp_protocol:jsonrpc_id_msg().
 method_not_found(Id, Method) ->
     beam_agent_mcp_protocol:error_response(
         Id,
@@ -673,7 +678,7 @@ method_not_found(Id, Method) ->
         <<"Method not found: ", Method/binary>>).
 
 -spec method_error(beam_agent_mcp_protocol:request_id(),
-                   binary()) -> map().
+                   binary()) -> beam_agent_mcp_protocol:jsonrpc_id_msg().
 method_error(Id, Msg) ->
     beam_agent_mcp_protocol:error_response(
         Id,
@@ -704,6 +709,7 @@ safe_log_level(<<"emergency">>) -> emergency;
 safe_log_level(_) -> info.
 
 %% Add a key-value pair to a map only if Value is not `undefined`.
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(description, _, #{inputSchema := map(), name := binary()}) ->
+    #{inputSchema := map(), name := binary(), description => _}.
 maybe_put(_Key, undefined, Map) -> Map;
 maybe_put(Key, Value, Map) -> Map#{Key => Value}.

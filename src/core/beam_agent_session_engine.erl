@@ -865,7 +865,7 @@ handle_transport_exit(Status, Data) ->
     maybe_span_exception(Data, {transport_exit, Status}),
     enter_error({transport_exit, Status}, Data).
 
--spec maybe_span_exception(#engine{}, term()) -> ok.
+-spec maybe_span_exception(#engine{}, {transport_exit, non_neg_integer()}) -> ok.
 maybe_span_exception(#engine{query_start_time = undefined}, _Reason) ->
     ok;
 maybe_span_exception(#engine{handler_mod = H}, Reason) ->
@@ -875,13 +875,14 @@ maybe_span_exception(#engine{handler_mod = H}, Reason) ->
 %% Internal: consumer management helpers
 %%====================================================================
 
--spec reply_consumer_error(term(), #engine{}) -> ok.
+-spec reply_consumer_error(buffer_overflow | session_error | {cli_exit, non_neg_integer()} | {disconnected, _}, #engine{}) -> ok.
 reply_consumer_error(_Reason, #engine{consumer = undefined}) ->
     ok;
 reply_consumer_error(Reason, #engine{consumer = From}) ->
     gen_statem:reply(From, {error, Reason}).
 
--spec consumer_error_actions(term(), #engine{}) -> [gen_statem:action()].
+-spec consumer_error_actions(cancelled | interrupted, #engine{}) ->
+    [{reply, {pid(), gen_statem:reply_tag()}, {error, cancelled | interrupted}}].
 consumer_error_actions(_Reason, #engine{consumer = undefined}) ->
     [];
 consumer_error_actions(Reason, #engine{consumer = Consumer}) ->
@@ -902,7 +903,8 @@ queue_messages([Msg | Rest], Data) ->
 %% Internal: session info builder
 %%====================================================================
 
--spec build_engine_session_info(state_name(), #engine{}) -> map().
+-spec build_engine_session_info(state_name(), #engine{}) ->
+    #{backend := _, session_id := binary(), state := state_name(), _ => _}.
 build_engine_session_info(StateName,
                           #engine{handler_mod = H,
                                   handler_state = HState,
@@ -942,7 +944,7 @@ ensure_session_id(undefined) ->
 ensure_session_id(Id) when is_binary(Id) ->
     Id.
 
--spec make_session_id() -> binary().
+-spec make_session_id() -> <<_:64, _:_*8>>.
 make_session_id() ->
     Bytes = crypto:strong_rand_bytes(16),
     Hex = binary:encode_hex(Bytes, lowercase),
@@ -958,7 +960,11 @@ timeout_action(initializing, Opts) ->
 timeout_action(_State, _Opts) ->
     [].
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(model | permission_mode, undefined | binary(),
+    #{backend := _, session_id := binary(), state := state_name(),
+      model => binary(), permission_mode => binary()}) ->
+    #{backend := _, session_id := binary(), state := state_name(),
+      model => binary(), permission_mode => binary()}.
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->

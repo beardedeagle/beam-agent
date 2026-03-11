@@ -54,6 +54,11 @@ beam_agent_mcp_transport_http:start(#{
 
 -export([start/1, send/2, close/1, is_ready/1, status/1, classify_message/2]).
 
+%% Dialyzer: send/2 intentionally uses the behaviour type
+%% beam_agent_transport:transport_ref() which is broader than the
+%% concrete 4-tuple this module constructs.
+-dialyzer({nowarn_function, [send/2]}).
+
 %%====================================================================
 %% beam_agent_transport callbacks
 %%====================================================================
@@ -91,7 +96,7 @@ The response is handled asynchronously via the session handler's
 `handle_info/3`.
 """.
 -spec send(beam_agent_transport:transport_ref(), map()) ->
-    ok | {error, term()}.
+    ok | {error, {send_failed, _}}.
 send({ConnPid, _MonRef, ClientMod, SessionState}, Data) when is_map(Data) ->
     Path     = maps:get(path, SessionState, <<"/mcp">>),
     SessId   = maps:get(session_id, SessionState, undefined),
@@ -136,7 +141,7 @@ is_ready({ConnPid, _, _, _}) ->
 
 -doc "Return `running` if the HTTP client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
-    running | {exited, non_neg_integer()}.
+    running | {exited, 0}.
 status({ConnPid, _, _, _}) ->
     case erlang:is_process_alive(ConnPid) of
         true  -> running;

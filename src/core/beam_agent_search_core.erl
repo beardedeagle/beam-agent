@@ -248,7 +248,7 @@ fuzzy_score_chars(QChars, CChars) ->
     [byte()], [byte()],
     non_neg_integer(), float(), float(),
     byte()
-) -> {non_neg_integer(), float(), non_neg_integer()} | no_match.
+) -> {non_neg_integer(), float(), 1} | no_match.
 match_chars_with_prev([], _CRest, Consec, Boundary, _Prev, _PrevC) ->
     {Consec, Boundary, 1};
 match_chars_with_prev(_QRest, [], _Consec, _Boundary, _Prev, _PrevC) ->

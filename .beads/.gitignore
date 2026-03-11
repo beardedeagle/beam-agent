@@ -34,6 +34,10 @@ dolt-server.port
 dolt-server.activity
 dolt-monitor.pid
 
+# Build tool artifacts (stray rebar3/mix files)
+rebar.lock
+_build/
+
 # Backup data (auto-exported JSONL, local-only)
 backup/
 

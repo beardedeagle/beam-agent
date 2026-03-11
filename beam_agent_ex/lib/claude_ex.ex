@@ -84,6 +84,103 @@ defmodule ClaudeEx do
 
   @type session :: pid()
 
+  @type session_info_map :: %{
+          :session_id => binary(),
+          :adapter => atom(),
+          :created_at => integer(),
+          :cwd => binary(),
+          :extra => map(),
+          :message_count => non_neg_integer(),
+          :model => binary(),
+          :updated_at => integer()
+        }
+
+  @type share_info_map :: %{
+          :created_at => integer(),
+          :session_id => binary(),
+          :share_id => binary(),
+          :status => :active
+        }
+
+  @type summary_info_map :: %{
+          :content => binary(),
+          :generated_at => integer(),
+          :generated_by => binary(),
+          :message_count => non_neg_integer(),
+          :session_id => binary()
+        }
+
+  @type thread_info_map :: %{
+          :created_at => integer(),
+          :message_count => non_neg_integer(),
+          :session_id => binary(),
+          :status => :active | :archived | :completed | :paused,
+          :thread_id => binary(),
+          :updated_at => integer(),
+          :visible_message_count => non_neg_integer(),
+          :archived => boolean(),
+          :archived_at => integer(),
+          :metadata => map(),
+          :name => binary(),
+          :parent_thread_id => binary(),
+          :summary => map()
+        }
+
+  @type thread_read_info_map :: %{
+          :thread => thread_info_map(),
+          :messages => [map()]
+        }
+
+  @type mcp_tool_map :: %{
+          :description => binary(),
+          :handler => (map() -> {:error, binary()} | {:ok, [any()]}),
+          :input_schema => map(),
+          :name => binary()
+        }
+
+  @type mcp_server_map :: %{
+          :name => binary(),
+          :tools => [mcp_tool_map()],
+          :version => binary()
+        }
+
+  @type hook_context :: %{
+          :event => atom(),
+          :agent_id => binary(),
+          :agent_transcript_path => binary(),
+          :agent_type => binary(),
+          :content => binary(),
+          :duration_ms => non_neg_integer(),
+          :interrupt => boolean(),
+          :params => map(),
+          :permission_prompt_tool_name => binary(),
+          :permission_suggestions => [any()],
+          :prompt => binary(),
+          :reason => term(),
+          :session_id => binary(),
+          :stop_hook_active => boolean(),
+          :stop_reason => atom() | binary(),
+          :system_info => map(),
+          :tool_input => map(),
+          :tool_name => binary(),
+          :tool_use_id => binary(),
+          :updated_permissions => map()
+        }
+
+  @type hook_callback :: (hook_context() -> :ok | {:deny, binary()})
+
+  @type hook_map :: %{
+          :callback => hook_callback(),
+          :event => atom()
+        }
+
+  @type hook_with_matcher_map :: %{
+          :callback => hook_callback(),
+          :event => atom(),
+          :matcher => %{:tool_name => binary()},
+          :compiled_re => {:re_pattern, term(), term(), term(), term()}
+        }
+
   @type content_block :: %{
           required(:type) => :text | :thinking | :tool_use | :tool_result | :raw,
           optional(:text) => binary(),
@@ -558,8 +655,8 @@ defmodule ClaudeEx do
         fn input -> {:ok, [%{type: :text, text: input["text"]}]} end
       )
   """
-  @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, list()} | {:error, binary()})) ::
-          map()
+  @spec mcp_tool(binary(), binary(), map(), (map() -> {:error, binary()} | {:ok, [map()]})) ::
+          mcp_tool_map()
   def mcp_tool(name, description, input_schema, handler) do
     :beam_agent_tool_registry.tool(name, description, input_schema, handler)
   end
@@ -578,7 +675,7 @@ defmodule ClaudeEx do
       server = ClaudeEx.mcp_server("my-tools", [tool])
       {:ok, session} = ClaudeEx.start_session(sdk_mcp_servers: [server])
   """
-  @spec mcp_server(binary(), [map()]) :: map()
+  @spec mcp_server(binary(), [mcp_tool_map()]) :: mcp_server_map()
   def mcp_server(name, tools) do
     :beam_agent_tool_registry.server(name, tools)
   end
@@ -606,7 +703,7 @@ defmodule ClaudeEx do
       end)
       {:ok, session} = ClaudeEx.start_session(sdk_hooks: [hook])
   """
-  @spec sdk_hook(atom(), (map() -> :ok | {:deny, binary()})) :: map()
+  @spec sdk_hook(atom(), hook_callback()) :: hook_map()
   def sdk_hook(event, callback) do
     :beam_agent_hooks_core.hook(event, callback)
   end
@@ -629,7 +726,7 @@ defmodule ClaudeEx do
         fn _ctx -> :ok end,
         %{tool_name: "Read.*"})
   """
-  @spec sdk_hook(atom(), (map() -> :ok | {:deny, binary()}), map()) :: map()
+  @spec sdk_hook(atom(), hook_callback(), %{:tool_name => binary()}) :: hook_with_matcher_map()
   def sdk_hook(event, callback, matcher) do
     :beam_agent_hooks_core.hook(event, callback, matcher)
   end
@@ -641,24 +738,24 @@ defmodule ClaudeEx do
   # ── Universal: Session Store (beam_agent_core) ─────────────────────────
 
   @doc "List all tracked sessions."
-  @spec list_sessions() :: {:ok, [map()]}
+  @spec list_sessions() :: {:ok, [session_info_map()]}
   def list_sessions, do: :claude_agent_sdk.list_sessions()
 
   @doc "List sessions with filters."
-  @spec list_sessions(map()) :: {:ok, [map()]}
+  @spec list_sessions(map()) :: {:ok, [session_info_map()]}
   def list_sessions(opts) when is_map(opts), do: :claude_agent_sdk.list_sessions(opts)
 
   @doc "Get messages for a session."
-  @spec get_session_messages(binary()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary()) :: {:ok, [message()]} | {:error, :not_found}
   def get_session_messages(session_id), do: :claude_agent_sdk.get_session_messages(session_id)
 
   @doc "Get messages with options."
-  @spec get_session_messages(binary(), map()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary(), map()) :: {:ok, [message()]} | {:error, :not_found}
   def get_session_messages(session_id, opts),
     do: :claude_agent_sdk.get_session_messages(session_id, opts)
 
   @doc "Get session metadata by ID."
-  @spec get_session(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_session(binary()) :: {:ok, session_info_map()} | {:error, :not_found}
   def get_session(session_id), do: :claude_agent_sdk.get_session(session_id)
 
   @doc "Delete a session and its messages."
@@ -666,23 +763,24 @@ defmodule ClaudeEx do
   def delete_session(session_id), do: :claude_agent_sdk.delete_session(session_id)
 
   @doc "Fork a tracked session into a new session ID."
-  @spec fork_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec fork_session(pid(), map()) :: {:ok, session_info_map()} | {:error, :not_found}
   def fork_session(session, opts), do: :claude_agent_sdk.fork_session(session, opts)
 
   @doc "Revert the visible session history to a prior boundary."
-  @spec revert_session(pid(), map()) :: {:ok, map()} | {:error, term()}
+  @spec revert_session(pid(), map()) ::
+          {:ok, session_info_map()} | {:error, :invalid_selector | :not_found}
   def revert_session(session, selector),
     do: :claude_agent_sdk.revert_session(session, selector)
 
   @doc "Clear any stored session revert state."
-  @spec unrevert_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec unrevert_session(pid()) :: {:ok, session_info_map()} | {:error, :not_found}
   def unrevert_session(session), do: :claude_agent_sdk.unrevert_session(session)
 
   @doc "Create or replace share state for the current session."
-  @spec share_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid()) :: {:ok, share_info_map()} | {:error, :not_found}
   def share_session(session), do: :claude_agent_sdk.share_session(session)
 
-  @spec share_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid(), map()) :: {:ok, share_info_map()} | {:error, :not_found}
   def share_session(session, opts), do: :claude_agent_sdk.share_session(session, opts)
 
   @doc "Revoke share state for the current session."
@@ -690,10 +788,10 @@ defmodule ClaudeEx do
   def unshare_session(session), do: :claude_agent_sdk.unshare_session(session)
 
   @doc "Generate and store a summary for the current session."
-  @spec summarize_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid()) :: {:ok, summary_info_map()} | {:error, :not_found}
   def summarize_session(session), do: :claude_agent_sdk.summarize_session(session)
 
-  @spec summarize_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid(), map()) :: {:ok, summary_info_map()} | {:error, :not_found}
   def summarize_session(session, opts),
     do: :claude_agent_sdk.summarize_session(session, opts)
 
@@ -719,7 +817,16 @@ defmodule ClaudeEx do
   @spec list_native_sessions([
           {:config_dir, binary()} | {:cwd, binary()} | {:limit, pos_integer()}
         ]) ::
-          {:ok, [map()]} | {:error, term()}
+          {:ok,
+           [
+             %{
+               :file_path => binary(),
+               :modified_at => integer(),
+               :session_id => binary(),
+               :cwd => binary(),
+               :model => binary()
+             }
+           ]}
   def list_native_sessions(opts \\ []) do
     :claude_session_store.list_sessions(opts_to_map(opts))
   end
@@ -746,56 +853,74 @@ defmodule ClaudeEx do
   # ── Universal: Thread Management (beam_agent_core) ────────────────────
 
   @doc "Start a new conversation thread."
-  @spec thread_start(pid(), map()) :: {:ok, map()}
+  @spec thread_start(pid(), map()) ::
+          {:ok,
+           %{
+             :archived => false,
+             :created_at => integer(),
+             :message_count => 0,
+             :metadata => map(),
+             :name => binary(),
+             :session_id => binary(),
+             :status => :active,
+             :thread_id => binary(),
+             :updated_at => integer(),
+             :visible_message_count => 0,
+             :parent_thread_id => binary()
+           }}
   def thread_start(session, opts \\ %{}),
     do: :claude_agent_sdk.thread_start(session, opts)
 
   @doc "Resume an existing thread."
-  @spec thread_resume(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_resume(pid(), binary()) :: {:ok, thread_info_map()} | {:error, :not_found}
   def thread_resume(session, thread_id),
     do: :claude_agent_sdk.thread_resume(session, thread_id)
 
   @doc "List all threads for this session."
-  @spec thread_list(pid()) :: {:ok, [map()]}
+  @spec thread_list(pid()) :: {:ok, [thread_info_map()]}
   def thread_list(session), do: :claude_agent_sdk.thread_list(session)
 
   @doc "Fork an existing thread."
-  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_fork(pid(), binary()) :: {:ok, thread_info_map()} | {:error, :not_found}
   def thread_fork(session, thread_id),
     do: :claude_agent_sdk.thread_fork(session, thread_id)
 
-  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_fork(pid(), binary(), map()) :: {:ok, thread_info_map()} | {:error, :not_found}
   def thread_fork(session, thread_id, opts),
     do: :claude_agent_sdk.thread_fork(session, thread_id, opts)
 
   @doc "Read thread metadata, optionally including visible messages."
-  @spec thread_read(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_read(pid(), binary()) :: {:ok, thread_read_info_map()} | {:error, :not_found}
   def thread_read(session, thread_id),
     do: :claude_agent_sdk.thread_read(session, thread_id)
 
-  @spec thread_read(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_read(pid(), binary(), map()) ::
+          {:ok, thread_read_info_map()} | {:error, :not_found}
   def thread_read(session, thread_id, opts),
     do: :claude_agent_sdk.thread_read(session, thread_id, opts)
 
   @doc "Archive a thread."
-  @spec thread_archive(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_archive(pid(), binary()) :: {:ok, thread_info_map()} | {:error, :not_found}
   def thread_archive(session, thread_id),
     do: :claude_agent_sdk.thread_archive(session, thread_id)
 
   @doc "Unarchive a thread."
-  @spec thread_unarchive(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_unarchive(pid(), binary()) :: {:ok, thread_info_map()} | {:error, :not_found}
   def thread_unarchive(session, thread_id),
     do: :claude_agent_sdk.thread_unarchive(session, thread_id)
 
   @doc "Rollback the visible thread history."
-  @spec thread_rollback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_rollback(pid(), binary(), map()) ::
+          {:ok, thread_info_map()} | {:error, :invalid_selector | :not_found}
   def thread_rollback(session, thread_id, selector),
     do: :claude_agent_sdk.thread_rollback(session, thread_id, selector)
 
   # ── Universal: Session Control (beam_agent_core) ──────────────────────
 
   @doc "Run a command via universal command execution."
-  @spec command_run(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec command_run(pid(), binary(), map()) ::
+          {:ok, %{:exit_code => integer(), :output => binary()}}
+          | {:error, {:port_exit, term()} | {:port_failed, term()} | {:timeout, timeout()}}
   def command_run(session, command, opts \\ %{}) do
     :claude_agent_sdk.command_run(session, command, opts)
   end
@@ -813,7 +938,12 @@ defmodule ClaudeEx do
   end
 
   @doc "Check server health. Maps to session health + adapter info for Claude."
-  @spec server_health(pid()) :: {:ok, map()}
+  @spec server_health(pid()) ::
+          {:ok,
+           %{
+             :adapter => :claude,
+             :health => :active_query | :connecting | :error | :initializing | :ready
+           }}
   def server_health(session), do: :claude_agent_sdk.server_health(session)
 
   @doc """
@@ -885,7 +1015,14 @@ defmodule ClaudeEx do
   @doc """
   Convert a single content_block into a flat message.
   """
-  @spec block_to_message(content_block()) :: map()
+  @spec block_to_message(content_block()) :: %{
+          :type => :raw | :text | :thinking | :tool_result | :tool_use,
+          :content => term(),
+          :raw => term(),
+          :tool_input => term(),
+          :tool_name => term(),
+          :tool_use_id => term()
+        }
   def block_to_message(block) do
     :beam_agent_content_core.block_to_message(block)
   end
@@ -1001,7 +1138,7 @@ defmodule ClaudeEx do
   a flat list of todo items with `:content`, `:status`, and optional
   `:active_form` fields.
   """
-  @spec extract_todos([map()]) :: [BeamAgent.Todo.todo_item()]
+  @spec extract_todos([message()]) :: [BeamAgent.Todo.todo_item()]
   defdelegate extract_todos(messages), to: BeamAgent.Todo
 
   @doc """
@@ -1018,7 +1155,10 @@ defmodule ClaudeEx do
 
   Returns a map like `%{pending: 2, in_progress: 1, completed: 3, total: 6}`.
   """
-  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{atom() => non_neg_integer()}
+  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{
+          :total => non_neg_integer(),
+          atom() => non_neg_integer()
+        }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ─────────────────────────────────────────────────────
