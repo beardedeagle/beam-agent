@@ -16,6 +16,10 @@ defmodule BeamAgentEx.MixProject do
       description: "Canonical Elixir wrapper for the consolidated beam_agent SDK",
       elixirc_paths: elixirc_paths(Mix.env()),
       elixirc_options: [warnings_as_errors: true],
+      dialyzer: [
+        flags: [:error_handling, :underspecs, :unmatched_returns],
+        plt_add_apps: [:telemetry]
+      ],
       test_coverage: [summary: [threshold: 80]]
     ]
   end
@@ -31,6 +35,7 @@ defmodule BeamAgentEx.MixProject do
   defp deps do
     [
       {:beam_agent, path: ".."},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false}
     ]
   end

@@ -248,14 +248,14 @@ terminate(_Reason, #state{pending = Pending}) ->
 %% Internal helpers
 %%====================================================================
 
--spec start_dependencies() -> ok | {error, term()}.
+-spec start_dependencies() -> ok | {error, {app_start_failed, inets | ssl, {atom(), _}}}.
 start_dependencies() ->
     case ensure_started(inets) of
         ok -> ensure_started(ssl);
         {error, _} = Err -> Err
     end.
 
--spec ensure_started(atom()) -> ok | {error, term()}.
+-spec ensure_started(inets | ssl) -> ok | {error, {app_start_failed, inets | ssl, {atom(), _}}}.
 ensure_started(App) ->
     case application:ensure_all_started(App) of
         {ok, _}                       -> ok;

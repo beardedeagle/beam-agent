@@ -77,6 +77,249 @@ defmodule CopilotEx do
       )
   """
 
+  # Dialyzer infers impractically narrow binary sizes for small status maps.
+  @dialyzer {:nowarn_function, reconnect_mcp_server: 2}
+  @dialyzer {:nowarn_function, toggle_mcp_server: 3}
+
+  # ── Types ──────────────────────────────────────────────────────────
+
+  @type stop_reason ::
+          :end_turn
+          | :max_tokens
+          | :stop_sequence
+          | :refusal
+          | :tool_use_stop
+          | :unknown_stop
+
+  @type message :: %{
+          required(:type) => atom(),
+          required(:content) => binary(),
+          required(:content_blocks) => [any()],
+          required(:duration_api_ms) => non_neg_integer(),
+          required(:duration_ms) => non_neg_integer(),
+          required(:error_info) => map(),
+          required(:errors) => [any()],
+          required(:event_type) => binary(),
+          required(:fast_mode_state) => map(),
+          required(:is_error) => boolean(),
+          required(:is_replay) => boolean(),
+          required(:is_using_overage) => boolean(),
+          required(:message_id) => binary(),
+          required(:model) => binary(),
+          required(:model_usage) => map(),
+          required(:num_turns) => non_neg_integer(),
+          required(:overage_disabled_reason) => binary(),
+          required(:overage_resets_at) => number(),
+          required(:overage_status) => binary(),
+          required(:parent_tool_use_id) => :null | binary(),
+          required(:permission_denials) => [any()],
+          required(:rate_limit_status) => binary(),
+          required(:rate_limit_type) => binary(),
+          required(:raw) => map(),
+          required(:request) => map(),
+          required(:request_id) => binary(),
+          required(:resets_at) => number(),
+          required(:response) => map(),
+          required(:session_id) => binary(),
+          required(:stop_reason) => binary(),
+          required(:stop_reason_atom) => stop_reason(),
+          required(:structured_output) => term(),
+          required(:subtype) => binary(),
+          required(:surpassed_threshold) => number(),
+          required(:system_info) => map(),
+          required(:thread_id) => binary(),
+          required(:timestamp) => integer(),
+          required(:tool_input) => map(),
+          required(:tool_name) => binary(),
+          required(:tool_use_id) => binary(),
+          required(:total_cost_usd) => number(),
+          required(:usage) => map(),
+          required(:utilization) => number(),
+          required(:uuid) => binary()
+        }
+
+  @type content_block :: %{
+          required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
+          required(:content) => binary(),
+          required(:id) => binary(),
+          required(:input) => map(),
+          required(:name) => binary(),
+          required(:raw) => map(),
+          required(:text) => binary(),
+          required(:thinking) => binary(),
+          required(:tool_use_id) => binary()
+        }
+
+  @type flat_message :: %{
+          required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
+          required(:content) => term(),
+          required(:raw) => term(),
+          required(:tool_input) => term(),
+          required(:tool_name) => term(),
+          required(:tool_use_id) => term()
+        }
+
+  @type query_opts :: %{
+          optional(:agent) => binary(),
+          optional(:allowed_tools) => [binary()],
+          optional(:approval_policy) => binary(),
+          optional(:attachments) => [map()],
+          optional(:cwd) => binary(),
+          optional(:disallowed_tools) => [binary()],
+          optional(:effort) => binary(),
+          optional(:max_budget_usd) => number(),
+          optional(:max_tokens) => pos_integer(),
+          optional(:max_turns) => pos_integer(),
+          optional(:mode) => binary(),
+          optional(:model) => binary(),
+          optional(:model_id) => binary(),
+          optional(:output_format) => :json_schema | :text | binary() | map(),
+          optional(:permission_mode) =>
+            :accept_edits | :bypass_permissions | :default | :dont_ask | :plan | binary(),
+          optional(:provider) => map(),
+          optional(:provider_id) => binary(),
+          optional(:sandbox_mode) => binary(),
+          optional(:summary) => binary(),
+          optional(:system) => binary() | map(),
+          optional(:system_prompt) =>
+            binary() | %{required(:preset) => binary(), required(:type) => :preset, required(:append) => binary()},
+          optional(:thinking) => map(),
+          optional(:timeout) => timeout(),
+          optional(:tools) => [any()] | map()
+        }
+
+  @type hook_context :: %{
+          required(:event) => atom(),
+          required(:agent_id) => binary(),
+          required(:agent_transcript_path) => binary(),
+          required(:agent_type) => binary(),
+          required(:content) => binary(),
+          required(:duration_ms) => non_neg_integer(),
+          required(:interrupt) => boolean(),
+          required(:params) => map(),
+          required(:permission_prompt_tool_name) => binary(),
+          required(:permission_suggestions) => [any()],
+          required(:prompt) => binary(),
+          required(:reason) => term(),
+          required(:session_id) => binary(),
+          required(:stop_hook_active) => boolean(),
+          required(:stop_reason) => atom() | binary(),
+          required(:system_info) => map(),
+          required(:tool_input) => map(),
+          required(:tool_name) => binary(),
+          required(:tool_use_id) => binary(),
+          required(:updated_permissions) => map()
+        }
+
+  @type session_info :: %{
+          required(:session_id) => binary(),
+          required(:adapter) => atom(),
+          required(:created_at) => integer(),
+          required(:cwd) => binary(),
+          required(:extra) => map(),
+          required(:message_count) => non_neg_integer(),
+          required(:model) => binary(),
+          required(:updated_at) => integer()
+        }
+
+  @type session_list_opts :: %{
+          optional(:adapter) => atom(),
+          optional(:cwd) => binary(),
+          optional(:limit) => pos_integer(),
+          optional(:model) => binary(),
+          optional(:since) => integer()
+        }
+
+  @type message_filter_opts :: %{
+          optional(:include_hidden) => boolean(),
+          optional(:limit) => pos_integer(),
+          optional(:offset) => non_neg_integer(),
+          optional(:types) => [atom()]
+        }
+
+  @type share_info :: %{
+          required(:created_at) => integer(),
+          required(:session_id) => binary(),
+          required(:share_id) => binary(),
+          required(:status) => :active
+        }
+
+  @type summary_info :: %{
+          required(:content) => binary(),
+          required(:generated_at) => integer(),
+          required(:generated_by) => binary(),
+          required(:message_count) => non_neg_integer(),
+          required(:session_id) => binary()
+        }
+
+  @type thread_start_opts :: %{
+          optional(:metadata) => map(),
+          optional(:name) => binary(),
+          optional(:parent_thread_id) => binary(),
+          optional(:thread_id) => binary()
+        }
+
+  @type thread_info :: %{
+          required(:created_at) => integer(),
+          required(:message_count) => non_neg_integer(),
+          required(:session_id) => binary(),
+          required(:status) => :active | :archived | :completed | :paused,
+          required(:thread_id) => binary(),
+          required(:updated_at) => integer(),
+          required(:visible_message_count) => non_neg_integer(),
+          required(:archived) => boolean(),
+          required(:archived_at) => integer(),
+          required(:metadata) => map(),
+          required(:name) => binary(),
+          required(:parent_thread_id) => binary(),
+          required(:summary) => map()
+        }
+
+  @type thread_start_result :: %{
+          required(:archived) => false,
+          required(:created_at) => integer(),
+          required(:message_count) => 0,
+          required(:metadata) => map(),
+          required(:name) => binary(),
+          required(:session_id) => binary(),
+          required(:status) => :active,
+          required(:thread_id) => binary(),
+          required(:updated_at) => integer(),
+          required(:visible_message_count) => 0,
+          required(:parent_thread_id) => binary()
+        }
+
+  @type thread_read_result :: %{
+          required(:thread) => thread_info(),
+          required(:messages) => [map()]
+        }
+
+  @type mcp_tool_def :: %{
+          required(:description) => binary(),
+          required(:handler) => (map() -> {:error, binary()} | {:ok, [any()]}),
+          required(:input_schema) => map(),
+          required(:name) => binary()
+        }
+
+  @type mcp_server_def :: %{
+          required(:name) => binary(),
+          required(:tools) => [
+            %{
+              required(:description) => binary(),
+              required(:handler) => (term() -> any()),
+              required(:input_schema) => map(),
+              required(:name) => binary()
+            }
+          ],
+          required(:version) => binary()
+        }
+
+  @type todo_item :: %{
+          required(:content) => binary(),
+          required(:status) => :completed | :in_progress | :pending,
+          required(:active_form) => binary()
+        }
+
   # ── Session Lifecycle ────────────────────────────────────────────
 
   @doc """
@@ -126,7 +369,7 @@ defmodule CopilotEx do
       last = List.last(messages)
       IO.puts(last.content)
   """
-  @spec query(pid(), binary(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec query(pid(), binary(), query_opts()) :: {:error, term()} | {:ok, [message()]}
   def query(session, prompt, params \\ %{}) do
     BeamAgent.query(session, prompt, params)
   end
@@ -329,7 +572,8 @@ defmodule CopilotEx do
       end)
       {:ok, session} = CopilotEx.start_session(sdk_hooks: [hook])
   """
-  @spec sdk_hook(atom(), function()) :: map()
+  @spec sdk_hook(atom(), (hook_context() -> :ok | {:deny, binary()})) ::
+          %{required(:callback) => (hook_context() -> :ok | {:deny, binary()}), required(:event) => atom()}
   def sdk_hook(event, callback) do
     :beam_agent_hooks_core.hook(event, callback)
   end
@@ -343,7 +587,16 @@ defmodule CopilotEx do
         fn _ctx -> {:deny, "blocked"} end,
         %{tool_name: "Bash"})
   """
-  @spec sdk_hook(atom(), function(), map()) :: map()
+  @spec sdk_hook(
+          atom(),
+          (hook_context() -> :ok | {:deny, binary()}),
+          %{required(:tool_name) => binary()}
+        ) :: %{
+          required(:callback) => (hook_context() -> :ok | {:deny, binary()}),
+          required(:event) => atom(),
+          required(:matcher) => %{required(:tool_name) => binary()},
+          required(:compiled_re) => {:re_pattern, term(), term(), term(), term()}
+        }
   def sdk_hook(event, callback, matcher) do
     :beam_agent_hooks_core.hook(event, callback, matcher)
   end
@@ -398,28 +651,31 @@ defmodule CopilotEx do
   def flatten_assistant(message), do: :beam_agent_content_core.flatten_assistant(message)
 
   @doc "Convert a list of flat messages into content_block format."
-  @spec messages_to_blocks([map()]) :: [map()]
+  @spec messages_to_blocks([map()]) :: [content_block()]
   def messages_to_blocks(messages), do: :beam_agent_content_core.messages_to_blocks(messages)
 
   @doc "Convert a single content_block into a flat message."
-  @spec block_to_message(map()) :: map()
+  @spec block_to_message(content_block()) :: flat_message()
   def block_to_message(block), do: :beam_agent_content_core.block_to_message(block)
 
   @doc "Convert a single flat message into a content_block."
-  @spec message_to_block(map()) :: map()
+  @spec message_to_block(map()) :: content_block()
   def message_to_block(message), do: :beam_agent_content_core.message_to_block(message)
 
   # ── SDK MCP Server Constructors ──────────────────────────────────
 
   @doc "Create an in-process MCP tool definition."
-  @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, list()} | {:error, binary()})) ::
-          map()
+  @spec mcp_tool(binary(), binary(), map(), (map() -> {:error, binary()} | {:ok, [map()]})) ::
+          mcp_tool_def()
   def mcp_tool(name, description, input_schema, handler) do
     :beam_agent_tool_registry.tool(name, description, input_schema, handler)
   end
 
   @doc "Create an in-process MCP server definition."
-  @spec mcp_server(binary(), [map()]) :: map()
+  @spec mcp_server(
+          binary(),
+          [%{required(:description) => binary(), required(:handler) => (map() -> {term(), term()}), required(:input_schema) => map(), required(:name) => binary()}]
+        ) :: mcp_server_def()
   def mcp_server(name, tools) do
     :beam_agent_tool_registry.server(name, tools)
   end
@@ -490,24 +746,24 @@ defmodule CopilotEx do
   # ── Universal: Session Store (beam_agent_core) ─────────────────────────
 
   @doc "List all tracked sessions."
-  @spec list_sessions() :: {:ok, [map()]}
+  @spec list_sessions() :: {:ok, [session_info()]}
   def list_sessions, do: :copilot_client.list_sessions()
 
   @doc "List sessions with filters."
-  @spec list_sessions(map()) :: {:ok, [map()]}
+  @spec list_sessions(session_list_opts()) :: {:ok, [session_info()]}
   def list_sessions(opts) when is_map(opts), do: :copilot_client.list_sessions(opts)
 
   @doc "Get messages for a session."
-  @spec get_session_messages(binary()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary()) :: {:error, :not_found} | {:ok, [message()]}
   def get_session_messages(session_id), do: :copilot_client.get_session_messages(session_id)
 
   @doc "Get messages with options."
-  @spec get_session_messages(binary(), map()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec get_session_messages(binary(), message_filter_opts()) :: {:error, :not_found} | {:ok, [message()]}
   def get_session_messages(session_id, opts),
     do: :copilot_client.get_session_messages(session_id, opts)
 
   @doc "Get session metadata by ID."
-  @spec get_session(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_session(binary()) :: {:error, :not_found} | {:ok, session_info()}
   def get_session(session_id), do: :copilot_client.get_session(session_id)
 
   @doc "Delete a session and its messages."
@@ -515,23 +771,23 @@ defmodule CopilotEx do
   def delete_session(session_id), do: :copilot_client.delete_session(session_id)
 
   @doc "Fork a tracked session into a new session ID."
-  @spec fork_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec fork_session(pid(), map()) :: {:error, :not_found} | {:ok, session_info()}
   def fork_session(session, opts), do: :copilot_client.fork_session(session, opts)
 
   @doc "Revert the visible session history to a prior boundary."
-  @spec revert_session(pid(), map()) :: {:ok, map()} | {:error, term()}
+  @spec revert_session(pid(), map()) :: {:error, :invalid_selector | :not_found} | {:ok, session_info()}
   def revert_session(session, selector),
     do: :copilot_client.revert_session(session, selector)
 
   @doc "Clear any stored session revert state."
-  @spec unrevert_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec unrevert_session(pid()) :: {:error, :not_found} | {:ok, session_info()}
   def unrevert_session(session), do: :copilot_client.unrevert_session(session)
 
   @doc "Create or replace share state for the current session."
-  @spec share_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid()) :: {:error, :not_found} | {:ok, share_info()}
   def share_session(session), do: :copilot_client.share_session(session)
 
-  @spec share_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec share_session(pid(), map()) :: {:error, :not_found} | {:ok, share_info()}
   def share_session(session, opts), do: :copilot_client.share_session(session, opts)
 
   @doc "Revoke share state for the current session."
@@ -539,80 +795,81 @@ defmodule CopilotEx do
   def unshare_session(session), do: :copilot_client.unshare_session(session)
 
   @doc "Generate and store a summary for the current session."
-  @spec summarize_session(pid()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid()) :: {:error, :not_found} | {:ok, summary_info()}
   def summarize_session(session), do: :copilot_client.summarize_session(session)
 
-  @spec summarize_session(pid(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec summarize_session(pid(), map()) :: {:error, :not_found} | {:ok, summary_info()}
   def summarize_session(session, opts),
     do: :copilot_client.summarize_session(session, opts)
 
   # ── Universal: Thread Management (beam_agent_core) ────────────────────
 
   @doc "Start a new conversation thread."
-  @spec thread_start(pid(), map()) :: {:ok, map()}
+  @spec thread_start(pid(), thread_start_opts()) :: {:ok, thread_start_result()}
   def thread_start(session, opts \\ %{}),
     do: :copilot_client.thread_start(session, opts)
 
   @doc "Resume an existing thread."
-  @spec thread_resume(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_resume(pid(), binary()) :: {:error, :not_found} | {:ok, thread_info()}
   def thread_resume(session, thread_id),
     do: :copilot_client.thread_resume(session, thread_id)
 
   @doc "List all threads for this session."
-  @spec thread_list(pid()) :: {:ok, [map()]}
+  @spec thread_list(pid()) :: {:ok, [thread_info()]}
   def thread_list(session), do: :copilot_client.thread_list(session)
 
   @doc "Fork an existing thread."
-  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_fork(pid(), binary()) :: {:error, :not_found} | {:ok, thread_info()}
   def thread_fork(session, thread_id),
     do: :copilot_client.thread_fork(session, thread_id)
 
-  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_fork(pid(), binary(), thread_start_opts()) :: {:error, :not_found} | {:ok, thread_info()}
   def thread_fork(session, thread_id, opts),
     do: :copilot_client.thread_fork(session, thread_id, opts)
 
   @doc "Read thread metadata, optionally including visible messages."
-  @spec thread_read(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_read(pid(), binary()) :: {:error, :not_found} | {:ok, thread_read_result()}
   def thread_read(session, thread_id),
     do: :copilot_client.thread_read(session, thread_id)
 
-  @spec thread_read(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_read(pid(), binary(), map()) :: {:error, :not_found} | {:ok, thread_read_result()}
   def thread_read(session, thread_id, opts),
     do: :copilot_client.thread_read(session, thread_id, opts)
 
   @doc "Archive a thread."
-  @spec thread_archive(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_archive(pid(), binary()) :: {:error, :not_found} | {:ok, thread_info()}
   def thread_archive(session, thread_id),
     do: :copilot_client.thread_archive(session, thread_id)
 
   @doc "Unarchive a thread."
-  @spec thread_unarchive(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec thread_unarchive(pid(), binary()) :: {:error, :not_found} | {:ok, thread_info()}
   def thread_unarchive(session, thread_id),
     do: :copilot_client.thread_unarchive(session, thread_id)
 
   @doc "Rollback the visible thread history."
-  @spec thread_rollback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_rollback(pid(), binary(), map()) :: {:error, :invalid_selector | :not_found} | {:ok, thread_info()}
   def thread_rollback(session, thread_id, selector),
     do: :copilot_client.thread_rollback(session, thread_id, selector)
 
   # ── Universal: MCP Management (beam_agent_core) ───────────────────────
 
   @doc "Get status of all MCP servers."
-  @spec mcp_server_status(pid()) :: {:ok, map()}
+  @spec mcp_server_status(pid()) :: {:ok, %{binary() => map()}}
   def mcp_server_status(session), do: :copilot_client.mcp_server_status(session)
 
   @doc "Replace MCP server configurations."
-  @spec set_mcp_servers(pid(), [map()]) :: {:ok, term()} | {:error, term()}
+  @spec set_mcp_servers(pid(), [%{required(:name) => binary(), required(:tools) => [map()], required(:version) => binary()}]) ::
+          {:error, :not_found} | {:ok, %{binary() => binary()}}
   def set_mcp_servers(session, servers),
     do: :copilot_client.set_mcp_servers(session, servers)
 
   @doc "Reconnect a failed MCP server."
-  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec reconnect_mcp_server(pid(), binary()) :: {:error, :not_found} | {:ok, %{binary() => binary()}}
   def reconnect_mcp_server(session, server_name),
     do: :copilot_client.reconnect_mcp_server(session, server_name)
 
   @doc "Enable or disable an MCP server."
-  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:error, :not_found} | {:ok, %{binary() => binary()}}
   def toggle_mcp_server(session, server_name, enabled),
     do: :copilot_client.toggle_mcp_server(session, server_name, enabled)
 
@@ -643,13 +900,13 @@ defmodule CopilotEx do
   end
 
   @doc "Set maximum thinking tokens via universal control."
-  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, map()}
+  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, %{required(:max_thinking_tokens) => pos_integer()}}
   def set_max_thinking_tokens(session, max_tokens) do
     :copilot_client.set_max_thinking_tokens(session, max_tokens)
   end
 
   @doc "Revert file changes to a checkpoint via universal checkpointing."
-  @spec rewind_files(pid(), binary()) :: :ok | {:error, :not_found | term()}
+  @spec rewind_files(pid(), binary()) :: :ok | {:error, :not_found | {:restore_failed, binary(), atom()}}
   def rewind_files(session, checkpoint_uuid) do
     :copilot_client.rewind_files(session, checkpoint_uuid)
   end
@@ -661,7 +918,9 @@ defmodule CopilotEx do
   end
 
   @doc "Run a command via universal command execution."
-  @spec command_run(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec command_run(pid(), binary(), map()) ::
+          {:error, {:port_exit, term()} | {:port_failed, term()} | {:timeout, timeout()}}
+          | {:ok, %{required(:exit_code) => integer(), required(:output) => binary()}}
   def command_run(session, command, opts \\ %{}) do
     :copilot_client.command_run(session, command, opts)
   end
@@ -685,22 +944,22 @@ defmodule CopilotEx do
   end
 
   @doc "Check server health. Maps to session health for Copilot."
-  @spec server_health(pid()) :: {:ok, map()}
+  @spec server_health(pid()) ::
+          {:ok, %{required(:adapter) => :copilot, required(:health) => :active_query | :connecting | :error | :initializing | :ready}}
   def server_health(session), do: :copilot_client.server_health(session)
 
   # ── Todo Extraction ──────────────────────────────────────────────
 
   @doc "Extract all TodoWrite items from a list of messages."
-  @spec extract_todos([map()]) :: [BeamAgent.Todo.todo_item()]
+  @spec extract_todos([message()]) :: [todo_item()]
   defdelegate extract_todos(messages), to: BeamAgent.Todo
 
   @doc "Filter todo items by status."
-  @spec filter_todos([BeamAgent.Todo.todo_item()], BeamAgent.Todo.todo_status()) ::
-          [BeamAgent.Todo.todo_item()]
+  @spec filter_todos([todo_item()], BeamAgent.Todo.todo_status()) :: [todo_item()]
   defdelegate filter_todos(todos, status), to: BeamAgent.Todo, as: :filter_by_status
 
   @doc "Get a summary of todo counts by status."
-  @spec todo_summary([BeamAgent.Todo.todo_item()]) :: %{atom() => non_neg_integer()}
+  @spec todo_summary([todo_item()]) :: %{required(:total) => non_neg_integer(), atom() => non_neg_integer()}
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
   # ── Internal ─────────────────────────────────────────────────────

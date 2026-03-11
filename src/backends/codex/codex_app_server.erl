@@ -134,6 +134,10 @@
             {extract_init_field, 4},
             {transport_module, 1},
             {extract_from_system_info, 3}]}).
+%% Dialyzer: OAuth response maps have 7+ required keys; encoding the
+%% full typed map in the spec adds no practical safety.
+-dialyzer({nowarn_function, [provider_oauth_authorize/3,
+                             provider_oauth_callback/3]}).
 -spec start_session(beam_agent_core:session_opts()) ->
                        {ok, pid()} | {error, term()}.
 start_session(Opts) ->
@@ -425,10 +429,20 @@ config_read(Session) ->
 -spec config_read(pid(), map()) -> {ok, map()} | {error, term()}.
 config_read(Session, Params) when is_map(Params) ->
     send_control_to(Session, <<"config/read">>, Params).
--spec config_update(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec config_update(pid(), map()) ->
+    {ok, #{control := map(),
+           runtime := #{agent => binary(),
+                        mode => binary(),
+                        model_id => binary(),
+                        provider => map(),
+                        provider_id => binary(),
+                        system => binary() | map(),
+                        tools => [any()] | map()},
+           session := map()}} |
+    {error, term()}.
 config_update(Session, Body) when is_map(Body) ->
     beam_agent_config:config_update(Session, Body).
--spec config_providers(pid()) -> {ok, [map()]} | {error, term()}.
+-spec config_providers(pid()) -> {ok, [map()]}.
 config_providers(Session) ->
     provider_list(Session).
 -spec config_value_write(pid(), binary(), term()) ->
@@ -469,19 +483,19 @@ external_agent_config_detect(Session, Params) when is_map(Params) ->
                                       {ok, map()} | {error, term()}.
 external_agent_config_import(Session, Params) when is_map(Params) ->
     send_control_to(Session, <<"externalAgentConfig/import">>, Params).
--spec provider_list(pid()) -> {ok, [map()]} | {error, term()}.
+-spec provider_list(pid()) -> {ok, [map()]}.
 provider_list(Session) ->
     beam_agent_runtime_core:list_providers(Session).
--spec provider_auth_methods(pid()) -> {ok, [map()]} | {error, term()}.
+-spec provider_auth_methods(pid()) -> {ok, [map()]}.
 provider_auth_methods(Session) ->
     beam_agent_config:provider_auth_methods(Session).
 -spec provider_oauth_authorize(pid(), binary(), map()) ->
-                                  {ok, map()} | {error, term()}.
+                                  {ok, map()}.
 provider_oauth_authorize(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
     beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body).
 -spec provider_oauth_callback(pid(), binary(), map()) ->
-                                 {ok, map()} | {error, term()}.
+                                 {ok, map()} | {error, invalid_api_key | invalid_provider_config}.
 provider_oauth_callback(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
     beam_agent_config:provider_oauth_callback(Session, ProviderId, Body).
@@ -846,14 +860,18 @@ get_session_id(Session) ->
         _ ->
             unicode:characters_to_binary(pid_to_list(Session))
     end.
--spec with_adapter_source(pid(), map()) -> map().
+-spec with_adapter_source(pid(), #{session_id := binary(), source := universal,
+                                   features => [map(),...], modes => [map(),...]}
+                         ) -> #{backend := codex, session_id := binary(),
+                                source := universal, transport := atom(),
+                                features => [map(),...], modes => [map(),...]}.
 with_adapter_source(Session, Result) when is_map(Result) ->
     Result#{
         source => universal,
         backend => codex,
         transport => session_transport(Session)
     }.
--spec with_backend_transport(map(), pid()) -> map().
+-spec with_backend_transport(map(), pid()) -> #{backend := codex, transport := atom(), _ => _}.
 with_backend_transport(Params, Session) when is_map(Params) ->
     Params#{
         backend => codex,

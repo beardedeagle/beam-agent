@@ -1,4 +1,57 @@
 -module(opencode_client).
+
+%% Thread record as stored in thread_core (matches dialyzer-inferred shape)
+-type thread_record() ::
+    #{'created_at' := integer(),
+      'message_count' := non_neg_integer(),
+      'session_id' := binary(),
+      'status' := 'active' | 'archived' | 'completed' | 'paused',
+      'thread_id' := binary(),
+      'updated_at' := integer(),
+      'visible_message_count' := non_neg_integer(),
+      'archived' => boolean(),
+      'archived_at' => integer(),
+      'metadata' => map(),
+      'name' => binary(),
+      'parent_thread_id' => binary(),
+      'summary' => map()}.
+
+%% Session view returned by with_adapter_source/2
+-type session_view() ::
+    #{'backend' := 'opencode',
+      'source' := 'universal',
+      'active_thread_id' => 'undefined' | binary(),
+      'compacted' => 'true',
+      'count' => non_neg_integer(),
+      'features' => [map(), ...],
+      'metadata' => _,
+      'modes' => [map(), ...],
+      'name' => binary(),
+      'selector' => map(),
+      'session_id' => binary(),
+      'thread' => thread_record(),
+      'thread_id' => binary(),
+      'threads' => [map()],
+      'unsubscribed' => 'true'}.
+
+%% Thread resume result (thread_read shape)
+-type thread_resume_result() ::
+    #{'archived' => boolean(),
+      'archived_at' => integer(),
+      'created_at' => integer(),
+      'message_count' => non_neg_integer(),
+      'messages' => [map()],
+      'metadata' => map(),
+      'name' => binary(),
+      'parent_thread_id' => binary(),
+      'session_id' => binary(),
+      'status' => 'active',
+      'summary' => map(),
+      'thread' => thread_record(),
+      'thread_id' => binary(),
+      'updated_at' => integer(),
+      'visible_message_count' => non_neg_integer()}.
+
 -export([start_session/1,
          stop/1,
          child_spec/1,
@@ -119,6 +172,23 @@
          submit_feedback/2,
          turn_respond/3]).
 
+%% Return shape is from universal core; map() is intentional.
+-dialyzer({nowarn_function,
+           [{config_value_write, 3},
+            {config_value_write, 4},
+            {config_batch_write, 2},
+            {config_batch_write, 3},
+            {config_requirements_read, 1},
+            {external_agent_config_detect, 1},
+            {external_agent_config_detect, 2},
+            {external_agent_config_import, 2},
+            {thread_realtime_start, 2},
+            {thread_realtime_append_audio, 3},
+            {thread_realtime_append_text, 3},
+            {thread_realtime_stop, 2},
+            {review_start, 2},
+            {with_adapter_source, 2},
+            {maybe_include_thread_read, 4}]}).
 -dialyzer({no_underspecs,
            [{send_control, 3},
             {fork_session, 2},
@@ -312,32 +382,32 @@ provider_oauth_callback(Session, ProviderId, Body)
     gen_statem:call(Session,
                     {provider_oauth_callback, ProviderId, Body},
                     10000).
--spec config_value_write(pid(), binary(), term()) -> {ok, map()} | {error, term()}.
+-spec config_value_write(pid(), binary(), _) -> {ok, map()} | {error, _}.
 config_value_write(Session, KeyPath, Value) ->
     config_value_write(Session, KeyPath, Value, #{}).
--spec config_value_write(pid(), binary(), term(), map()) ->
-                            {ok, map()} | {error, term()}.
+-spec config_value_write(pid(), binary(), _, map()) ->
+                            {ok, map()} | {error, _}.
 config_value_write(Session, KeyPath, Value, Opts)
     when is_binary(KeyPath), is_map(Opts) ->
     beam_agent_config:config_value_write(Session, KeyPath, Value, Opts).
--spec config_batch_write(pid(), [map()]) -> {ok, map()} | {error, term()}.
+-spec config_batch_write(pid(), [map()]) -> {ok, map()} | {error, _}.
 config_batch_write(Session, Edits) ->
     config_batch_write(Session, Edits, #{}).
 -spec config_batch_write(pid(), [map()], map()) ->
-                            {ok, map()} | {error, term()}.
+                            {ok, map()} | {error, _}.
 config_batch_write(Session, Edits, Opts)
     when is_list(Edits), is_map(Opts) ->
     beam_agent_config:config_batch_write(Session, Edits, Opts).
--spec config_requirements_read(pid()) -> {ok, map()} | {error, term()}.
+-spec config_requirements_read(pid()) -> {ok, map()}.
 config_requirements_read(Session) ->
     beam_agent_config:config_requirements_read(Session).
--spec external_agent_config_detect(pid()) -> {ok, map()} | {error, term()}.
+-spec external_agent_config_detect(pid()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session) ->
     external_agent_config_detect(Session, #{}).
--spec external_agent_config_detect(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec external_agent_config_detect(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session, Opts) when is_map(Opts) ->
     beam_agent_config:external_agent_config_detect(Session, Opts).
--spec external_agent_config_import(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec external_agent_config_import(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_import(Session, Opts) when is_map(Opts) ->
     beam_agent_config:external_agent_config_import(Session, Opts).
 -spec list_commands(pid()) -> {ok, map()} | {error, term()}.
@@ -507,7 +577,7 @@ thread_start(Session, Opts) ->
 thread_resume(Session, ThreadId) ->
     SessionId = get_session_id(Session),
     beam_agent_threads_core:resume_thread(SessionId, ThreadId).
--spec thread_resume(pid(), binary(), map()) -> {ok, map()} | {error, not_found}.
+-spec thread_resume(pid(), binary(), map()) -> {ok, thread_resume_result()} | {error, not_found}.
 thread_resume(Session, ThreadId, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
     case beam_agent_threads_core:resume_thread(SessionId, ThreadId) of
@@ -547,7 +617,7 @@ thread_archive(Session, ThreadId) ->
     SessionId = get_session_id(Session),
     beam_agent_threads_core:archive_thread(SessionId, ThreadId).
 -spec thread_unsubscribe(pid(), binary()) ->
-                            {ok, map()} | {error, not_found}.
+                            {ok, session_view()} | {error, not_found}.
 thread_unsubscribe(Session, ThreadId) ->
     SessionId = get_session_id(Session),
     case beam_agent_threads_core:get_thread(SessionId, ThreadId) of
@@ -567,7 +637,7 @@ thread_unsubscribe(Session, ThreadId) ->
             Error
     end.
 -spec thread_name_set(pid(), binary(), binary()) ->
-                         {ok, map()} | {error, not_found}.
+                         {ok, session_view()} | {error, not_found}.
 thread_name_set(Session, ThreadId, Name)
     when is_binary(ThreadId), is_binary(Name) ->
     SessionId = get_session_id(Session),
@@ -582,7 +652,7 @@ thread_name_set(Session, ThreadId, Name)
             Error
     end.
 -spec thread_metadata_update(pid(), binary(), map()) ->
-                                {ok, map()} | {error, not_found}.
+                                {ok, session_view()} | {error, not_found}.
 thread_metadata_update(Session, ThreadId, MetadataPatch)
     when is_binary(ThreadId), is_map(MetadataPatch) ->
     SessionId = get_session_id(Session),
@@ -607,10 +677,10 @@ thread_unarchive(Session, ThreadId) ->
 thread_rollback(Session, ThreadId, Selector) ->
     SessionId = get_session_id(Session),
     beam_agent_threads_core:rollback_thread(SessionId, ThreadId, Selector).
--spec thread_loaded_list(pid()) -> {ok, map()}.
+-spec thread_loaded_list(pid()) -> {ok, session_view()}.
 thread_loaded_list(Session) ->
     thread_loaded_list(Session, #{}).
--spec thread_loaded_list(pid(), map()) -> {ok, map()}.
+-spec thread_loaded_list(pid(), map()) -> {ok, session_view()}.
 thread_loaded_list(Session, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
     {ok, Threads0} = beam_agent_threads_core:list_threads(SessionId),
@@ -620,7 +690,7 @@ thread_loaded_list(Session, Opts) when is_map(Opts) ->
         active_thread_id => active_thread_id(SessionId),
         count => length(Threads)
     })}.
--spec thread_compact(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_compact(pid(), map()) -> {ok, session_view()} | {error, invalid_selector | not_found}.
 thread_compact(Session, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
     case resolve_thread_id(SessionId, Opts) of
@@ -640,39 +710,39 @@ thread_compact(Session, Opts) when is_map(Opts) ->
         {error, _} = Error ->
             Error
     end.
--spec thread_realtime_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_realtime_start(pid(), map()) -> {ok, map()}.
 thread_realtime_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
     beam_agent_collaboration:start_realtime(SessionId, with_backend(Params, opencode)).
 -spec thread_realtime_append_audio(pid(), binary(), map()) ->
-                                      {ok, map()} | {error, term()}.
+                                      {ok, map()} | {error, not_found}.
 thread_realtime_append_audio(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
     beam_agent_collaboration:append_realtime_audio(SessionId, ThreadId, Params).
 -spec thread_realtime_append_text(pid(), binary(), map()) ->
-                                     {ok, map()} | {error, term()}.
+                                     {ok, map()} | {error, not_found}.
 thread_realtime_append_text(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
     beam_agent_collaboration:append_realtime_text(SessionId, ThreadId, Params).
--spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, not_found}.
 thread_realtime_stop(Session, ThreadId) when is_binary(ThreadId) ->
     SessionId = get_session_id(Session),
     beam_agent_collaboration:stop_realtime(SessionId, ThreadId).
--spec review_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec review_start(pid(), map()) -> {ok, map()}.
 review_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
     beam_agent_collaboration:start_review(SessionId, with_backend(Params, opencode)).
--spec collaboration_mode_list(pid()) -> {ok, map()}.
+-spec collaboration_mode_list(pid()) -> {ok, session_view()}.
 collaboration_mode_list(Session) ->
     SessionId = get_session_id(Session),
     {ok, Result} = beam_agent_collaboration:collaboration_modes(SessionId),
     {ok, with_adapter_source(Session, Result)}.
--spec experimental_feature_list(pid()) -> {ok, map()}.
+-spec experimental_feature_list(pid()) -> {ok, session_view()}.
 experimental_feature_list(Session) ->
     experimental_feature_list(Session, #{}).
--spec experimental_feature_list(pid(), map()) -> {ok, map()}.
+-spec experimental_feature_list(pid(), map()) -> {ok, session_view()}.
 experimental_feature_list(Session, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
     {ok, Result} = beam_agent_collaboration:experimental_features(SessionId, Opts),
@@ -781,10 +851,10 @@ command_run(Session, Command, Opts) ->
                 Opts
         end,
     beam_agent_command_core:run(Command, CmdOpts).
--spec command_write_stdin(pid(), binary(), binary()) -> {ok, map()} | {error, not_found}.
+-spec command_write_stdin(pid(), binary(), binary()) -> {error, not_found}.
 command_write_stdin(Session, ProcessId, Stdin) ->
     command_write_stdin(Session, ProcessId, Stdin, #{}).
--spec command_write_stdin(pid(), binary(), binary(), map()) -> {ok, map()} | {error, not_found}.
+-spec command_write_stdin(pid(), binary(), binary(), map()) -> {error, not_found}.
 command_write_stdin(_Session, _ProcessId, _Stdin, _Opts) ->
     {error, not_found}.
 -spec submit_feedback(pid(), map()) -> ok.
@@ -836,11 +906,11 @@ extract_from_system_info(Info, Key, Default) ->
             {ok, Default}
     end.
 
--spec with_adapter_source(pid(), map()) -> map().
+-spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
     Result#{source => universal, backend => opencode}.
 
--spec with_backend(map(), atom()) -> map().
+-spec with_backend(map(), opencode) -> #{backend := opencode, _ => _}.
 with_backend(Params, Backend) ->
     maps:put(backend, Backend, Params).
 
@@ -851,7 +921,7 @@ active_thread_id(SessionId) ->
         {error, _} -> undefined
     end.
 
--spec maybe_include_thread_read(binary(), binary(), map(), map()) -> {ok, map()} | {error, not_found}.
+-spec maybe_include_thread_read(binary(), binary(), map(), thread_record()) -> {ok, thread_resume_result()} | {error, not_found}.
 maybe_include_thread_read(SessionId, ThreadId, Opts, Thread) ->
     case opt_value([include_messages, <<"include_messages">>, <<"includeMessages">>], Opts, false) of
         true -> beam_agent_threads_core:read_thread(SessionId, ThreadId, Opts);
@@ -879,7 +949,7 @@ filter_loaded_threads(Threads, Opts) ->
         _ -> Threads3
     end.
 
--spec include_thread(map(), boolean()) -> boolean().
+-spec include_thread(thread_record(), boolean()) -> boolean().
 include_thread(Thread, true) ->
     is_map(Thread);
 include_thread(Thread, false) ->
@@ -920,13 +990,13 @@ thread_compact_selector(Opts) ->
             end
     end.
 
--spec maybe_put_selector(atom(), term(), map()) -> map().
+-spec maybe_put_selector(count | message_id | uuid | visible_message_count, _, #{count | message_id | uuid | visible_message_count => _}) -> #{count | message_id | uuid | visible_message_count => _}.
 maybe_put_selector(_Key, undefined, Acc) ->
     Acc;
 maybe_put_selector(Key, Value, Acc) ->
     maps:put(Key, Value, Acc).
 
--spec opt_value([term()], map(), term()) -> term().
+-spec opt_value([count | include_archived | include_messages | limit | message_id | selector | status | thread_id | uuid | visible_message_count | <<_:32, _:_*8>>], map(), false | true | undefined) -> any().
 opt_value([], _Opts, Default) ->
     Default;
 opt_value([Key | Rest], Opts, Default) ->

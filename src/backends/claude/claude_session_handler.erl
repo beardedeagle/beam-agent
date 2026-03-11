@@ -47,6 +47,11 @@ Zero additional processes. The engine gen_statem IS the session process.
     is_query_complete/2
 ]).
 
+%% Dialyzer: resume_args/1 and fork_session_args/1 return string literals
+%% whose character codes are more specific than [[byte()]]; suppressing
+%% since encoding the exact codepoints in a spec is impractical.
+-dialyzer({nowarn_function, [resume_args/1, fork_session_args/1]}).
+
 %%--------------------------------------------------------------------
 %% Handler state
 %%--------------------------------------------------------------------
@@ -557,7 +562,10 @@ fire_permission_hooks(HookCtx, HookReg) ->
                                        HookReg)
     end.
 
--spec normalize_permission_handler_response(term(), map()) -> map().
+-spec normalize_permission_handler_response(
+    {allow, map()} | {allow, map(), [map()] | map()} |
+    {deny, binary()} | {deny, binary(), boolean()} | map(),
+    map()) -> #{<<_:56, _:_*8>> => boolean() | binary() | maybe_improper_list() | map()}.
 normalize_permission_handler_response({allow, UpdatedInput}, OriginalInput) ->
     approve_permission_response(UpdatedInput, OriginalInput, #{});
 normalize_permission_handler_response({allow, UpdatedInput, Third},
@@ -583,7 +591,11 @@ normalize_permission_handler_response(_, _OriginalInput) ->
     #{<<"subtype">> => <<"deny">>,
       <<"message">> => <<"Invalid permission handler response">>}.
 
--spec approve_permission_response(term(), map(), map()) -> map().
+-spec approve_permission_response(
+    term(),
+    map(),
+    #{<<_:56, _:_*8>> => true | binary() | maybe_improper_list() | map()}) ->
+    #{<<_:56, _:_*8>> => true | binary() | maybe_improper_list() | map()}.
 approve_permission_response(UpdatedInput, OriginalInput, Extra) ->
     Input = case UpdatedInput of
         undefined   -> OriginalInput;
@@ -594,11 +606,13 @@ approve_permission_response(UpdatedInput, OriginalInput, Extra) ->
     maps:merge(#{<<"subtype">> => <<"approve">>,
                  <<"updatedInput">> => Input}, Extra).
 
--spec normalize_permission_result_map(map()) -> map().
+-spec normalize_permission_result_map(map()) ->
+    #{<<_:56, _:_*8>> => true | binary() | maybe_improper_list() | map()}.
 normalize_permission_result_map(Map) ->
     normalize_permission_result_map(Map, #{}).
 
--spec normalize_permission_result_map(map(), map()) -> map().
+-spec normalize_permission_result_map(map(), map()) ->
+    #{<<_:56, _:_*8>> => true | binary() | maybe_improper_list() | map()}.
 normalize_permission_result_map(Map, OriginalInput) ->
     Behavior0 = maps:get(behavior, Map,
                  maps:get(<<"behavior">>, Map,
@@ -684,7 +698,10 @@ handle_hook_callback(Request, HookCallbacks, SessionId) ->
             end
     end.
 
--spec invoke_hook_callback(fun(), term(), term(), map()) -> term().
+-spec invoke_hook_callback(fun(), term(), term(),
+                          #{request := map(),
+                            session_id := undefined | binary(),
+                            signal := undefined}) -> any().
 invoke_hook_callback(Callback, Input, ToolUseId, Context)
   when is_function(Callback, 3) ->
     Callback(Input, ToolUseId, Context);
@@ -748,8 +765,7 @@ normalize_hook_key(Key, _Kind) when is_list(Key) ->
 normalize_hook_key(Key, _Kind) ->
     unicode:characters_to_binary(io_lib:format("~p", [Key])).
 
--spec normalize_hook_value(binary(), term(),
-                           top | hook_specific | generic) -> term().
+-spec normalize_hook_value(binary(), term(), hook_specific | top) -> any().
 normalize_hook_value(<<"hookSpecificOutput">>, Value, _Kind)
   when is_map(Value) ->
     normalize_hook_map(Value, hook_specific);
@@ -814,7 +830,7 @@ build_cli_hook_matchers(Matchers) when is_list(Matchers) ->
 build_cli_hook_matchers(Matcher) ->
     build_cli_hook_matchers([Matcher]).
 
--spec build_cli_hook_matcher(term()) -> skip | {map(), #{binary() => fun()}}.
+-spec build_cli_hook_matcher(term()) -> skip | {#{<<_:56, _:_*64>> => _}, #{binary() => fun()}}.
 build_cli_hook_matcher(Matcher)
   when is_function(Matcher, 1); is_function(Matcher, 3) ->
     {CallbackId, Callback} = new_hook_callback(Matcher),
@@ -887,7 +903,7 @@ normalize_list(null)               -> [];
 normalize_list(List) when is_list(List) -> List;
 normalize_list(Value)              -> [Value].
 
--spec new_hook_callback(fun()) -> {binary(), fun()}.
+-spec new_hook_callback(fun()) -> {<<_:40, _:_*8>>, fun()}.
 new_hook_callback(Callback) ->
     Id = <<"hook_",
            (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
@@ -1013,7 +1029,7 @@ session_id_args(Opts) ->
         Id when is_list(Id)   -> ["--session-id", Id]
     end.
 
--spec resume_args(map()) -> [string()].
+-spec resume_args(map()) -> [[byte()]].
 resume_args(Opts) ->
     R = case maps:get(resume, Opts, false) of
             true  -> ["--resume"];
@@ -1025,7 +1041,7 @@ resume_args(Opts) ->
         end,
     R ++ C.
 
--spec fork_session_args(map()) -> [string()].
+-spec fork_session_args(map()) -> [[byte()]].
 fork_session_args(Opts) ->
     case maps:get(fork_session, Opts, false) of
         true  -> ["--fork-session"];
@@ -1065,7 +1081,7 @@ max_turns_args(Opts) ->
         MT when is_integer(MT)  -> ["--max-turns", integer_to_list(MT)]
     end.
 
--spec permission_mode_args(map()) -> [string()].
+-spec permission_mode_args(map()) -> [[byte()]].
 permission_mode_args(Opts) ->
     case maps:get(permission_mode, Opts, undefined) of
         undefined        -> [];
@@ -1113,7 +1129,7 @@ tool_args(Opts) ->
     end,
     Tools ++ AT ++ DT.
 
--spec settings_args(map()) -> [string()].
+-spec settings_args(map()) -> [[byte()]].
 settings_args(Opts) ->
     case build_settings_value(Opts) of
         undefined -> [];
@@ -1139,7 +1155,7 @@ budget_args(Opts) ->
              float_to_list(Budget * 1.0, [{decimals, 4}])]
     end.
 
--spec debug_args(map()) -> [string()].
+-spec debug_args(map()) -> [[byte()]].
 debug_args(Opts) ->
     D = case maps:get(debug, Opts, false) of
             true  -> ["--debug"];
@@ -1191,7 +1207,7 @@ build_settings_value(Opts) ->
             iolist_to_binary(json:encode(SettingsObj))
     end.
 
--spec load_settings_object(term()) -> map().
+-spec load_settings_object(term()) -> #{binary() => _}.
 load_settings_object(undefined)                   -> #{};
 load_settings_object(Value) when is_map(Value)    -> normalize_json_map(Value);
 load_settings_object(Value) when is_binary(Value) -> load_settings_binary(Value);
@@ -1199,7 +1215,8 @@ load_settings_object(Value) when is_list(Value)   ->
     load_settings_binary(list_to_binary(Value));
 load_settings_object(_)                           -> #{}.
 
--spec load_settings_binary(binary()) -> map().
+-spec load_settings_binary(binary()) ->
+    #{binary() => false | null | true | binary() | [any()] | number() | #{binary() => _}}.
 load_settings_binary(Value) ->
     Trimmed = string:trim(Value),
     case looks_like_json(Trimmed) of
@@ -1215,7 +1232,8 @@ load_settings_binary(Value) ->
 looks_like_json(<<"{", _/binary>>) -> true;
 looks_like_json(_)                 -> false.
 
--spec decode_settings_json(binary()) -> map().
+-spec decode_settings_json(binary()) ->
+    #{binary() => false | null | true | binary() | [any()] | number() | #{binary() => _}}.
 decode_settings_json(JsonBin) ->
     try json:decode(JsonBin) of
         Map when is_map(Map) -> Map;
@@ -1223,7 +1241,7 @@ decode_settings_json(JsonBin) ->
     catch _:_ -> #{}
     end.
 
--spec normalize_json_map(map()) -> map().
+-spec normalize_json_map(map()) -> #{binary() => _}.
 normalize_json_map(Map) ->
     maps:from_list([{normalize_json_key(Key), normalize_json_value(Value)}
                     || {Key, Value} <- maps:to_list(Map)]).
@@ -1335,7 +1353,8 @@ maybe_tag_session_id(Msg, SessionId) -> Msg#{session_id => SessionId}.
 %% Internal: encoding helpers
 %%====================================================================
 
--spec encode_system_prompt(map()) -> map().
+-spec encode_system_prompt(#{preset := _, type := preset, _ => _}) ->
+    #{<<_:32, _:_*16>> => _}.
 encode_system_prompt(#{type := preset, preset := Preset} = SP) ->
     Base = #{<<"type">> => <<"preset">>, <<"preset">> => Preset},
     case maps:get(append, SP, undefined) of
@@ -1343,7 +1362,7 @@ encode_system_prompt(#{type := preset, preset := Preset} = SP) ->
         Append    -> Base#{<<"append">> => Append}
     end.
 
--spec encode_permission_mode(beam_agent_core:permission_mode()) -> binary().
+-spec encode_permission_mode(beam_agent_core:permission_mode()) -> <<_:32, _:_*8>>.
 encode_permission_mode(default)            -> <<"default">>;
 encode_permission_mode(accept_edits)       -> <<"acceptEdits">>;
 encode_permission_mode(bypass_permissions) -> <<"bypassPermissions">>;
@@ -1355,7 +1374,21 @@ encode_value(V) when is_atom(V), V =/= true, V =/= false, V =/= null ->
     atom_to_binary(V);
 encode_value(V) -> V.
 
--spec maybe_put_defined(term(), term(), map()) -> map().
+-spec maybe_put_defined(agent_id | session_id, term(),
+                        #{permission_prompt_tool_name := _,
+                          permission_suggestions := _,
+                          tool_input := _,
+                          tool_name := _,
+                          tool_use_id := _,
+                          agent_id => _,
+                          session_id => _}) ->
+    #{permission_prompt_tool_name := _,
+      permission_suggestions := _,
+      tool_input := _,
+      tool_name := _,
+      tool_use_id := _,
+      agent_id => _,
+      session_id => _}.
 maybe_put_defined(_Key, undefined, Map) -> Map;
 maybe_put_defined(Key, Value, Map)      -> Map#{Key => Value}.
 

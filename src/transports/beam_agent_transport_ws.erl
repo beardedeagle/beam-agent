@@ -61,7 +61,8 @@ start(Opts) ->
     end.
 
 -doc "Send WebSocket frames as JSON-encoded text messages.".
--spec send(beam_agent_transport:transport_ref(), term()) -> ok | {error, term()}.
+-spec send(beam_agent_transport:transport_ref(), term()) ->
+    ok | {error, invalid_send_format | {ws_send_failed, _}}.
 send({ConnPid, _, ClientMod}, {ws_frames, WsRef, Messages})
   when is_list(Messages) ->
     try
@@ -91,7 +92,7 @@ is_ready({ConnPid, _, _}) ->
 
 -doc "Return `running` if the WebSocket client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
-    running | {exited, non_neg_integer()}.
+    running | {exited, 0}.
 status({ConnPid, _, _}) ->
     case erlang:is_process_alive(ConnPid) of
         true  -> running;

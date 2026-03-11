@@ -85,7 +85,7 @@ file path, 1-based line number, and the matching line content.
 Default excludes: `.git`, `_build`, `node_modules`, `deps`.
 """.
 -spec find_text(binary(), search_opts()) ->
-    {ok, [search_result()]} | {error, {invalid_pattern, term(), non_neg_integer()}}.
+    {ok, [search_result()]} | {error, {invalid_pattern, string(), non_neg_integer()}}.
 find_text(Pattern, Opts) when is_binary(Pattern), is_map(Opts) ->
     find_text(Pattern, <<"**/*">>, Opts).
 
@@ -165,7 +165,7 @@ Recognized patterns:
 - JavaScript/TypeScript: `function Query`, `class Query`, `const Query =`
 """.
 -spec find_symbols(search_opts()) ->
-    {ok, [search_result()]} | {error, {invalid_pattern, term(), non_neg_integer()}}.
+    {ok, [search_result()]} | {error, {invalid_pattern, string(), non_neg_integer()}}.
 find_symbols(Opts) when is_map(Opts) ->
     find_symbols(<<>>, Opts).
 
@@ -241,7 +241,7 @@ Read file contents using default options.
 -spec file_read(binary()) ->
     {ok, #{path := binary(), content := binary()}}
     | {error, {file_too_large, binary()}}
-    | {error, {read_failed, binary(), term()}}.
+    | {error, {read_failed, binary(), atom()}}.
 file_read(Path) when is_binary(Path) ->
     file_read(Path, #{}).
 
@@ -290,7 +290,7 @@ a git repo.
 """.
 -spec file_status() ->
     {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}}
-    | {error, {list_dir_failed, binary(), term()}}.
+    | {error, {list_dir_failed, binary(), atom() | {_, _}}}.
 file_status() ->
     file_status(#{}).
 
@@ -430,7 +430,7 @@ normalize_file_type(_)         -> other.
 %% Internal: Git status parsing
 %%--------------------------------------------------------------------
 
--spec parse_git_status_line(binary()) -> #{status := binary(), path := binary()}.
+-spec parse_git_status_line(binary()) -> #{status := <<_:_*16>>, path := binary()}.
 parse_git_status_line(Line) when byte_size(Line) >= 3 ->
     <<XY:2/binary, _Space:1/binary, Rest/binary>> = Line,
     #{status => XY, path => Rest};

@@ -46,6 +46,10 @@ beam_agent_session_engine (gen_statem)
     handle_set_permission_mode/2
 ]).
 
+%% Dialyzer: ws_send_actions/2 uses #hstate{} in the spec; the record
+%% fields are intentionally broader than the single call-site infers.
+-dialyzer({nowarn_function, [ws_send_actions/2]}).
+
 -record(hstate, {
     %% Transport access (from transport_started callback)
     client_module          :: module(),
@@ -71,7 +75,7 @@ beam_agent_session_engine (gen_statem)
 %% Required callbacks
 %%====================================================================
 
--spec backend_name() -> atom().
+-spec backend_name() -> codex.
 backend_name() -> codex.
 
 -spec init_handler(beam_agent_core:session_opts()) ->
@@ -147,7 +151,13 @@ encode_query(Prompt, _Params, #hstate{ws_ref = WsRef,
     HState1 = HState#hstate{output_buffer = <<>>},
     {ok, {ws_frames, WsRef, Messages}, HState1}.
 
--spec build_session_info(#hstate{}) -> map().
+-spec build_session_info(#hstate{}) ->
+    #{adapter := codex,
+      backend := codex,
+      model := binary(),
+      session_id := binary(),
+      system_info := #{host := _, port := _, scheme := _, voice := undefined | binary()},
+      transport := realtime}.
 build_session_info(#hstate{session_id = SessionId,
                            model = Model,
                            voice = Voice,
@@ -269,8 +279,7 @@ handle_custom_call(_Request, _From, _HState) ->
     {error, unsupported}.
 
 -spec handle_set_model(binary(), #hstate{}) ->
-    {ok, term(), [beam_agent_session_handler:handler_action()], #hstate{}} |
-    {error, term()}.
+    {ok, binary(), [beam_agent_session_handler:handler_action()], #hstate{}}.
 handle_set_model(Model, #hstate{opts = Opts} = HState) ->
     HState1 = HState#hstate{model = Model},
     Msgs = codex_realtime_protocol:session_update_messages(
@@ -279,8 +288,7 @@ handle_set_model(Model, #hstate{opts = Opts} = HState) ->
     {ok, Model, Actions, HState1}.
 
 -spec handle_set_permission_mode(binary(), #hstate{}) ->
-    {ok, term(), [beam_agent_session_handler:handler_action()], #hstate{}} |
-    {error, term()}.
+    {ok, binary(), [], #hstate{}}.
 handle_set_permission_mode(Mode, #hstate{opts = Opts} = HState) ->
     HState1 = HState#hstate{opts = Opts#{permission_mode => Mode}},
     {ok, Mode, [], HState1}.
@@ -388,8 +396,8 @@ thread_exists(ThreadId, #hstate{session_id = SessionId,
 %% Internal: send helpers
 %%====================================================================
 
--spec ws_send_actions(#hstate{}, [map()]) ->
-    [beam_agent_session_handler:handler_action()].
+-spec ws_send_actions(#hstate{}, [#{binary() => binary() | map()}]) ->
+    [{send, {ws_frames, reference(), [any()]}}].
 ws_send_actions(#hstate{ws_ref = undefined}, _Msgs) ->
     [];
 ws_send_actions(#hstate{ws_ref = WsRef}, Msgs) ->

@@ -446,6 +446,7 @@ rebar3 check            # compile + dialyzer + eunit + ct
 cd beam_agent_ex
 mix deps.get
 mix test
+mix dialyzer               # Static analysis (via Dialyxir)
 ```
 
 ## Requirements

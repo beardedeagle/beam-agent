@@ -53,8 +53,39 @@ defmodule ClaudeEx.Session do
   This is the low-level interface. For most use cases, prefer
   `ClaudeEx.query/3` or `ClaudeEx.stream!/3`.
   """
-  @spec send_query(pid(), binary(), map(), timeout()) ::
-          {:ok, reference()} | {:error, term()}
+  @spec send_query(
+          pid(),
+          binary(),
+          %{
+            optional(:agent) => binary(),
+            optional(:allowed_tools) => [binary()],
+            optional(:approval_policy) => binary(),
+            optional(:attachments) => [map()],
+            optional(:cwd) => binary(),
+            optional(:disallowed_tools) => [binary()],
+            optional(:effort) => binary(),
+            optional(:max_budget_usd) => number(),
+            optional(:max_tokens) => pos_integer(),
+            optional(:max_turns) => pos_integer(),
+            optional(:mode) => binary(),
+            optional(:model) => binary(),
+            optional(:model_id) => binary(),
+            optional(:output_format) => :json_schema | :text | binary() | map(),
+            optional(:permission_mode) =>
+              :accept_edits | :bypass_permissions | :default | :dont_ask | :plan | binary(),
+            optional(:provider) => map(),
+            optional(:provider_id) => binary(),
+            optional(:sandbox_mode) => binary(),
+            optional(:summary) => binary(),
+            optional(:system) => binary() | map(),
+            optional(:system_prompt) =>
+              binary() | %{:preset => binary(), :type => :preset, optional(:append) => binary()},
+            optional(:thinking) => map(),
+            optional(:timeout) => timeout(),
+            optional(:tools) => [any()] | map()
+          },
+          timeout()
+        ) :: {:ok, reference()} | {:error, term()}
   def send_query(session, prompt, params \\ %{}, timeout \\ 120_000) do
     :claude_agent_session.send_query(session, prompt, params, timeout)
   end

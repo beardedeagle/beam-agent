@@ -21,6 +21,33 @@ defmodule BeamAgent do
   @type receive_fun :: :beam_agent.receive_fun()
   @type terminal_pred :: :beam_agent.terminal_pred()
 
+  @type session_info_map :: %{
+          :session_id => binary(),
+          :adapter => atom(),
+          :created_at => integer(),
+          :cwd => binary(),
+          :extra => map(),
+          :message_count => non_neg_integer(),
+          :model => binary(),
+          :updated_at => integer()
+        }
+
+  @type share_info_map :: %{
+          :created_at => integer(),
+          :session_id => binary(),
+          :share_id => binary(),
+          :status => :active | :revoked,
+          :revoked_at => integer()
+        }
+
+  @type summary_info_map :: %{
+          :content => binary(),
+          :generated_at => integer(),
+          :generated_by => binary(),
+          :message_count => non_neg_integer(),
+          :session_id => binary()
+        }
+
   defdelegate start_session(opts), to: :beam_agent
   defdelegate child_spec(opts), to: :beam_agent
   defdelegate stop(session), to: :beam_agent
@@ -159,10 +186,10 @@ defmodule BeamAgent do
     )
   end
 
-  @spec list_sessions() :: {:ok, [map()]}
+  @spec list_sessions() :: {:ok, [session_info_map()]}
   def list_sessions, do: BeamAgent.SessionStore.list_sessions()
 
-  @spec list_sessions(map()) :: {:ok, [map()]}
+  @spec list_sessions(map()) :: {:ok, [session_info_map()]}
   def list_sessions(opts) when is_map(opts), do: BeamAgent.SessionStore.list_sessions(opts)
 
   defdelegate list_native_sessions(), to: :beam_agent
@@ -180,38 +207,38 @@ defmodule BeamAgent do
   defdelegate get_native_session_messages(session_id), to: :beam_agent
   defdelegate get_native_session_messages(session_id, opts), to: :beam_agent
 
-  @spec get_session(binary()) :: {:ok, map()} | {:error, term()}
+  @spec get_session(binary()) :: {:ok, session_info_map()} | {:error, :not_found}
   def get_session(session_id), do: BeamAgent.SessionStore.get_session(session_id)
 
   @spec delete_session(binary()) :: :ok
   def delete_session(session_id), do: BeamAgent.SessionStore.delete_session(session_id)
 
-  @spec fork_session(pid() | binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec fork_session(pid(), map()) :: {:ok, session_info_map()} | {:error, term()}
   def fork_session(session_or_id, opts),
     do: BeamAgent.SessionStore.fork_session(session_or_id, opts)
 
-  @spec revert_session(pid() | binary(), term()) :: {:ok, map()} | {:error, term()}
+  @spec revert_session(pid(), map()) :: {:ok, session_info_map()} | {:error, term()}
   def revert_session(session_or_id, selector),
     do: BeamAgent.SessionStore.revert_session(session_or_id, selector)
 
-  @spec unrevert_session(pid() | binary()) :: {:ok, map()} | {:error, term()}
+  @spec unrevert_session(pid()) :: {:ok, session_info_map()} | {:error, term()}
   def unrevert_session(session_or_id), do: BeamAgent.SessionStore.unrevert_session(session_or_id)
 
-  @spec share_session(pid() | binary()) :: {:ok, map()} | {:error, term()}
+  @spec share_session(pid()) :: {:ok, share_info_map()} | {:error, term()}
   def share_session(session_or_id), do: BeamAgent.SessionStore.share_session(session_or_id)
 
-  @spec share_session(pid() | binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec share_session(pid(), map()) :: {:ok, share_info_map()} | {:error, term()}
   def share_session(session_or_id, opts),
     do: BeamAgent.SessionStore.share_session(session_or_id, opts)
 
-  @spec unshare_session(pid() | binary()) :: :ok | {:error, term()}
+  @spec unshare_session(pid()) :: :ok | {:error, term()}
   def unshare_session(session_or_id), do: BeamAgent.SessionStore.unshare_session(session_or_id)
 
-  @spec summarize_session(pid() | binary()) :: {:ok, map()} | {:error, term()}
+  @spec summarize_session(pid()) :: {:ok, summary_info_map()} | {:error, term()}
   def summarize_session(session_or_id),
     do: BeamAgent.SessionStore.summarize_session(session_or_id)
 
-  @spec summarize_session(pid() | binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec summarize_session(pid(), map()) :: {:ok, summary_info_map()} | {:error, term()}
   def summarize_session(session_or_id, opts),
     do: BeamAgent.SessionStore.summarize_session(session_or_id, opts)
 
@@ -253,7 +280,7 @@ defmodule BeamAgent do
   def thread_unarchive(session, thread_id),
     do: BeamAgent.Threads.thread_unarchive(session, thread_id)
 
-  @spec thread_rollback(pid(), binary(), term()) :: {:ok, map()} | {:error, term()}
+  @spec thread_rollback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def thread_rollback(session, thread_id, selector),
     do: BeamAgent.Threads.thread_rollback(session, thread_id, selector)
 

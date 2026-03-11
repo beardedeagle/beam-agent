@@ -237,6 +237,9 @@ Use `beam_agent_raw` when you need the explicit backend-native namespace.
     universal_submit_feedback/2,
     universal_turn_respond/3
 ]}).
+%% Dialyzer: the options map for universal_prompt_async/3 is
+%% deliberately open; encoding every possible key adds no safety.
+-dialyzer({nowarn_function, [universal_prompt_async/3]}).
 
 -spec start_session(session_opts()) -> {ok, pid()} | {error, term()}.
 start_session(Opts) -> beam_agent_core:start_session(Opts).
@@ -1044,7 +1047,7 @@ session_messages(Session, Opts) ->
         get_session_messages(session_identity(Session), Opts)
     end).
 
--spec prompt_async(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec prompt_async(pid(), binary()) -> {ok, map()} | {error, _}.
 prompt_async(Session, Prompt) ->
     prompt_async(Session, Prompt, #{}).
 
@@ -1568,7 +1571,7 @@ universal_command_run(Session, Command, Opts) ->
             Error
     end.
 
--spec universal_prompt_async(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec universal_prompt_async(pid(), binary(), map()) -> {ok, #{source := universal, _ => _}} | {error, _}.
 universal_prompt_async(Session, Prompt, Opts) when is_binary(Prompt), is_map(Opts) ->
     Timeout = maps:get(timeout, Opts, 120000),
     case beam_agent_router:send_query(Session, Prompt, Opts, Timeout) of
@@ -1581,7 +1584,8 @@ universal_prompt_async(Session, Prompt, Opts) when is_binary(Prompt), is_map(Opt
             Error
     end.
 
--spec universal_shell_command(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec universal_shell_command(pid(), binary(), map()) ->
+    {ok, #{source := universal, _ => _}} | {error, {port_exit, _} | {port_failed, _} | {timeout, infinity | non_neg_integer()}}.
 universal_shell_command(Session, Command, Opts) when is_binary(Command), is_map(Opts) ->
     case command_run(Session, Command, Opts) of
         {ok, Result} when is_map(Result) ->
