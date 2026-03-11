@@ -74,7 +74,9 @@ ws_send(Pid, _WsRef, Frame) ->
 -spec close(pid()) -> ok.
 close(Pid) ->
     try gen_server:stop(Pid, normal, 5000)
-    catch exit:noproc -> ok
+    catch
+        exit:noproc -> ok;
+        exit:{normal, _} -> ok
     end.
 
 %%====================================================================
