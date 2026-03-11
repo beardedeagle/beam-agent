@@ -76,7 +76,7 @@ Zero additional processes. The engine gen_statem IS the session process.
     model                 :: binary() | undefined,
 
     %% SDK registries
-    sdk_mcp_registry      :: beam_agent_mcp_core:mcp_registry() | undefined,
+    sdk_mcp_registry      :: beam_agent_tool_registry:mcp_registry() | undefined,
     sdk_hook_registry     :: beam_agent_hooks_core:hook_registry() | undefined,
 
     %% Permission & input handlers
@@ -509,7 +509,7 @@ handle_server_request(ReqId, <<"tool.call">>, Params,
   when is_map(Registry) ->
     ToolName = maps:get(<<"toolName">>, Params, <<>>),
     Arguments = maps:get(<<"arguments">>, Params, #{}),
-    Result = beam_agent_mcp_core:call_tool_by_name(
+    Result = beam_agent_tool_registry:call_tool_by_name(
                  ToolName, Arguments, Registry),
     Response = case Result of
         {ok, Content} ->
@@ -763,7 +763,7 @@ send_via_port(_Response, _HState) ->
 
 -type mcp_wire_content() :: map().
 
--spec format_mcp_content(beam_agent_mcp_core:content_result()) ->
+-spec format_mcp_content(beam_agent_tool_registry:content_result()) ->
     mcp_wire_content().
 format_mcp_content(#{type := text, text := Text}) ->
     #{<<"type">> => <<"text">>, <<"text">> => Text};
@@ -799,16 +799,16 @@ resolve_cli_path(Opts) ->
     end.
 
 -spec build_mcp_registry(map()) ->
-    beam_agent_mcp_core:mcp_registry() | undefined.
+    beam_agent_tool_registry:mcp_registry() | undefined.
 build_mcp_registry(Opts) ->
-    beam_agent_mcp_core:build_registry(
+    beam_agent_tool_registry:build_registry(
         maps:get(sdk_mcp_servers, Opts, undefined)).
 
--spec maybe_inject_sdk_tools(beam_agent_mcp_core:mcp_registry() | undefined,
+-spec maybe_inject_sdk_tools(beam_agent_tool_registry:mcp_registry() | undefined,
                              map()) -> map().
 maybe_inject_sdk_tools(undefined, Opts) -> Opts;
 maybe_inject_sdk_tools(Reg, Opts) ->
-    case beam_agent_mcp_core:all_tool_definitions(Reg) of
+    case beam_agent_tool_registry:all_tool_definitions(Reg) of
         [] -> Opts;
         ToolDefs -> Opts#{sdk_tools => ToolDefs}
     end.

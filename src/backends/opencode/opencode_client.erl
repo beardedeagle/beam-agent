@@ -223,14 +223,14 @@ health(Session) ->
 send_control(Session, Method, Params) ->
     SessionId = get_session_id(Session),
     beam_agent_control_core:dispatch(SessionId, Method, Params).
--spec mcp_tool(binary(), binary(), map(), beam_agent_mcp_core:tool_handler()) ->
-                  beam_agent_mcp_core:tool_def().
+-spec mcp_tool(binary(), binary(), map(), beam_agent_tool_registry:tool_handler()) ->
+                  beam_agent_tool_registry:tool_def().
 mcp_tool(Name, Description, InputSchema, Handler) ->
-    beam_agent_mcp_core:tool(Name, Description, InputSchema, Handler).
--spec mcp_server(binary(), [beam_agent_mcp_core:tool_def()]) ->
-                    beam_agent_mcp_core:sdk_mcp_server().
+    beam_agent_tool_registry:tool(Name, Description, InputSchema, Handler).
+-spec mcp_server(binary(), [beam_agent_tool_registry:tool_def()]) ->
+                    beam_agent_tool_registry:sdk_mcp_server().
 mcp_server(Name, Tools) ->
-    beam_agent_mcp_core:server(Name, Tools).
+    beam_agent_tool_registry:server(Name, Tools).
 -spec sdk_hook(beam_agent_hooks_core:hook_event(),
                beam_agent_hooks_core:hook_callback()) ->
                   beam_agent_hooks_core:hook_def().
@@ -679,19 +679,19 @@ experimental_feature_list(Session, Opts) when is_map(Opts) ->
     {ok, with_adapter_source(Session, Result)}.
 -spec mcp_server_status(pid()) -> {ok, map()}.
 mcp_server_status(Session) ->
-    case beam_agent_mcp_core:get_session_registry(Session) of
+    case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->
-            beam_agent_mcp_core:server_status(Registry);
+            beam_agent_tool_registry:server_status(Registry);
         {error, not_found} ->
             {ok, #{}}
     end.
--spec set_mcp_servers(pid(), [beam_agent_mcp_core:sdk_mcp_server()]) ->
+-spec set_mcp_servers(pid(), [beam_agent_tool_registry:sdk_mcp_server()]) ->
                          {ok, term()} | {error, term()}.
 set_mcp_servers(Session, Servers) ->
     case
-        beam_agent_mcp_core:update_session_registry(Session,
+        beam_agent_tool_registry:update_session_registry(Session,
                                                fun(R) ->
-                                                      beam_agent_mcp_core:set_servers(Servers,
+                                                      beam_agent_tool_registry:set_servers(Servers,
                                                                                  R)
                                                end)
     of
@@ -703,13 +703,13 @@ set_mcp_servers(Session, Servers) ->
 -spec reconnect_mcp_server(pid(), binary()) ->
                               {ok, term()} | {error, term()}.
 reconnect_mcp_server(Session, ServerName) ->
-    case beam_agent_mcp_core:get_session_registry(Session) of
+    case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->
             case
-                beam_agent_mcp_core:reconnect_server(ServerName, Registry)
+                beam_agent_tool_registry:reconnect_server(ServerName, Registry)
             of
                 {ok, Updated} ->
-                    beam_agent_mcp_core:register_session_registry(Session,
+                    beam_agent_tool_registry:register_session_registry(Session,
                                                              Updated),
                     {ok, #{<<"status">> => <<"reconnected">>}};
                 {error, _} = Err ->
@@ -721,14 +721,14 @@ reconnect_mcp_server(Session, ServerName) ->
 -spec toggle_mcp_server(pid(), binary(), boolean()) ->
                            {ok, term()} | {error, term()}.
 toggle_mcp_server(Session, ServerName, Enabled) ->
-    case beam_agent_mcp_core:get_session_registry(Session) of
+    case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->
             case
-                beam_agent_mcp_core:toggle_server(ServerName, Enabled,
+                beam_agent_tool_registry:toggle_server(ServerName, Enabled,
                                              Registry)
             of
                 {ok, Updated} ->
-                    beam_agent_mcp_core:register_session_registry(Session,
+                    beam_agent_tool_registry:register_session_registry(Session,
                                                              Updated),
                     {ok, #{<<"status">> => <<"toggled">>}};
                 {error, _} = Err ->

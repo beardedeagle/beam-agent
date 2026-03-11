@@ -17,7 +17,7 @@ jobs:
       matrix:
         otp: ['27', '28']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -25,7 +25,7 @@ jobs:
           rebar3-version: '3'
 
       - name: Restore rebar3 cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
@@ -44,7 +44,7 @@ jobs:
     name: Dialyzer
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -52,7 +52,7 @@ jobs:
           rebar3-version: '3'
 
       - name: Restore cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
@@ -105,7 +105,7 @@ jobs:
     env:
       MIX_ENV: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -113,7 +113,7 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
 
       - name: Restore mix cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.mix
@@ -135,7 +135,7 @@ jobs:
     name: Docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -147,7 +147,7 @@ jobs:
         run: mix local.hex --force
 
       - name: Restore rebar3 cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             _build
@@ -163,7 +163,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:

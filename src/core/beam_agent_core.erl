@@ -350,7 +350,7 @@ v0.2.66 for protocol fidelity:
     %% MCP servers
     mcp_servers => map(),
     %% SDK MCP servers (in-process tool handlers)
-    sdk_mcp_servers => [beam_agent_mcp_core:sdk_mcp_server()],
+    sdk_mcp_servers => [beam_agent_tool_registry:sdk_mcp_server()],
     %% MCP handler timeout in milliseconds (default: 30000)
     mcp_handler_timeout => pos_integer(),
     %% SDK-level lifecycle hooks (in-process callbacks)

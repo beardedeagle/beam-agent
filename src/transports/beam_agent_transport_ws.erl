@@ -75,7 +75,8 @@ send(_, _) ->
     {error, invalid_send_format}.
 
 -spec close(beam_agent_transport:transport_ref()) -> ok.
-close({ConnPid, _MonRef, GunModule}) ->
+close({ConnPid, MonRef, GunModule}) ->
+    erlang:demonitor(MonRef, [flush]),
     catch GunModule:close(ConnPid),
     ok.
 

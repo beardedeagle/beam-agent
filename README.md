@@ -12,16 +12,6 @@ They let callers choose **Claude Code**, **Codex CLI**, **Gemini CLI**,
 **OpenCode**, or **GitHub Copilot** at runtime while working against one
 capability-oriented API surface.
 
-## Implementation Status
-
-Universal parity closure is complete. Every user-visible feature works across
-all five backends (Claude, Codex, Gemini, OpenCode, Copilot) through either
-native backend support or a BeamAgent universal fallback. All 110
-capability/backend pairs in the capability registry are marked `full`.
-
-The parity closure implementation spec that drove this work is
-`BEAM_AGENT_ABSOLUTE_PARITY_CLOSURE_IMPLEMENTATION_SPEC.md`.
-
 ## Architecture
 
 All five backends share a three-layer architecture:
@@ -275,7 +265,21 @@ That path uses the direct realtime websocket transport for Codex-native
 audio/text sessions while the app-server transport remains available for the
 broader CLI control-plane surface.
 
-### In-Process MCP Servers (Claude Code)
+### MCP (Model Context Protocol)
+
+The SDK includes a full MCP 2025-06-18 implementation with four layers:
+
+| Layer | Module | Purpose |
+|-------|--------|---------|
+| Protocol | `beam_agent_mcp_protocol` | JSON-RPC 2.0 message constructors, validators, and encoders for the MCP spec |
+| Server dispatch | `beam_agent_mcp_dispatch` | Server-side state machine — lifecycle, capability negotiation, request routing |
+| Client dispatch | `beam_agent_mcp_client_dispatch` | Client-side state machine — request/response tracking, timeouts, server capability discovery |
+| Tool registry | `beam_agent_tool_registry` | In-process tool registration, dispatch, and session-scoped registry management |
+| Transports | `beam_agent_mcp_transport_stdio`, `beam_agent_mcp_transport_http` | Stdio (line-delimited JSON) and Streamable HTTP transports |
+
+The public API is `beam_agent_mcp` (Erlang) / `BeamAgent.MCP` (Elixir).
+
+#### In-Process MCP Tool Servers
 
 Define custom tools as Erlang functions that Claude can call:
 
@@ -295,6 +299,46 @@ Server = beam_agent_mcp:server(<<"my-tools">>, [Tool]),
     backend => claude,
     sdk_mcp_servers => [Server]
 }).
+```
+
+#### MCP Server Dispatch
+
+Build a full MCP server that handles the protocol lifecycle:
+
+```erlang
+%% Create a server dispatch state machine
+State = beam_agent_mcp:new_dispatch(
+    #{name => <<"my-server">>, version => <<"1.0.0">>},
+    #{tools => true, resources => true},
+    #{tool_registry => Registry, provider => MyProviderModule}
+),
+
+%% Feed incoming JSON-RPC messages through the state machine
+{Responses, NewState} = beam_agent_mcp:dispatch_message(IncomingMsg, State).
+```
+
+#### MCP Client Dispatch
+
+Connect to an MCP server as a client:
+
+```erlang
+%% Create a client dispatch state machine
+Client = beam_agent_mcp:new_client(
+    #{name => <<"my-client">>, version => <<"1.0.0">>},
+    #{roots => true, sampling => true},
+    #{handler => MyHandlerModule}
+),
+
+%% Build and send the initialize request
+{InitMsg, Client1} = beam_agent_mcp:client_send_initialize(Client),
+%% ... send InitMsg over transport, receive response ...
+{Events, Client2} = beam_agent_mcp:client_handle_message(Response, Client1),
+
+%% Complete the handshake
+{InitializedMsg, Client3} = beam_agent_mcp:client_send_initialized(Client2),
+
+%% List available tools
+{ToolsReq, Client4} = beam_agent_mcp:client_send_tools_list(Client3).
 ```
 
 ### SDK Lifecycle Hooks
@@ -409,7 +453,7 @@ mix test
 - Erlang/OTP 27+
 - Elixir 1.17+ (for wrappers)
 - `telemetry` ~> 1.3
-- `gun` ~> 2.1 (only for `opencode_client`)
+- `gun` ~> 2.1 (for `opencode_client` and MCP Streamable HTTP transport)
 - Test deps: `proper` ~> 1.4
 
 ## Package Documentation

@@ -8,11 +8,6 @@ capabilities, capability introspection, and the lower-level foundation modules
 used across all five supported backends (Claude, Codex, Gemini, OpenCode,
 Copilot).
 
-Universal parity closure is complete. Every user-visible feature works across
-all five backends through either native support or a BeamAgent universal
-fallback. All 110 capability/backend pairs are `full` in the capability
-registry. `BeamAgent.Capabilities` exposes the current status surface.
-
 Backend-specific wrappers such as `ClaudeEx`, `CodexEx`, `GeminiEx`,
 `OpencodeEx`, and `CopilotEx` still ship inside this same package as native
 escape hatches.
@@ -35,7 +30,7 @@ The Erlang `:beam_agent` module works from Elixir, but this wrapper provides:
 | `BeamAgent.Catalog` | Shared tools/skills/plugins/agents accessors |
 | `BeamAgent.Capabilities` | Support-level / implementation / fidelity introspection |
 | `BeamAgent.Raw` | Explicit backend-native escape hatch |
-| `BeamAgent.MCP` | In-process MCP server registry and tool dispatch |
+| `BeamAgent.MCP` | MCP 2025-06-18 protocol, server/client dispatch, tool registry, and transports |
 | `BeamAgent.Hooks` | SDK lifecycle hooks (pre/post tool use, stop, etc.) |
 | `BeamAgent.Content` | Content block / flat message conversion |
 | `BeamAgent.Telemetry` | Telemetry event helpers |

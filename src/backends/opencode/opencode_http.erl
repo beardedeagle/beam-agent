@@ -73,8 +73,9 @@ split_host_port(HostPort, DefaultPort) ->
             {Host, DefaultPort};
         [Host, PortBin] ->
             Port =
-                try
-                    binary_to_integer(PortBin)
+                try binary_to_integer(PortBin) of
+                    P when P >= 1, P =< 65535 -> P;
+                    _ -> DefaultPort
                 catch
                     _:_ ->
                         DefaultPort

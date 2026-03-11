@@ -1,4 +1,4 @@
--module(beam_agent_mcp_core).
+-module(beam_agent_tool_registry).
 -moduledoc """
 In-process MCP server support for the BEAM Agent SDK.
 
@@ -9,14 +9,14 @@ createSdkMcpServer() and Python SDK create_sdk_mcp_server().
 
 Usage:
 ```erlang
-Tool = beam_agent_mcp_core:tool(<<"greet">>, <<"Greet a user">>,
+Tool = beam_agent_tool_registry:tool(<<"greet">>, <<"Greet a user">>,
     #{<<"type">> => <<"object">>,
       <<"properties">> => #{<<"name">> => #{<<"type">> => <<"string">>}}},
     fun(Input) ->
         Name = maps:get(<<"name">>, Input, <<"world">>),
         {ok, [#{type => text, text => <<"Hello, ", Name/binary, "!">>}]}
     end),
-Server = beam_agent_mcp_core:server(<<"my-tools">>, [Tool]),
+Server = beam_agent_tool_registry:server(<<"my-tools">>, [Tool]),
 %% Pass to session:
 claude_agent_session:start_link(#{sdk_mcp_servers => [Server]})
 ```
@@ -239,8 +239,11 @@ call_tool_by_name(ToolName, Arguments, Registry, Opts) ->
 -doc "Get all tool definitions from the registry, flattened across servers. Useful for advertising available tools during session setup.".
 -spec all_tool_definitions(mcp_registry()) -> [tool_def()].
 all_tool_definitions(Registry) ->
-    lists:append(maps:fold(fun(_Name, #{tools := Tools}, Acc) ->
-        [Tools | Acc]
+    lists:append(maps:fold(fun
+        (_Name, #{enabled := false}, Acc) ->
+            Acc;
+        (_Name, Server, Acc) ->
+            [maps:get(tools, Server, []) | Acc]
     end, [], Registry)).
 
 %%--------------------------------------------------------------------
@@ -298,6 +301,8 @@ list are removed.
 """.
 -spec set_servers([sdk_mcp_server()], mcp_registry() | undefined) ->
     mcp_registry().
+set_servers([], _OldRegistry) ->
+    new_registry();
 set_servers(Servers, _OldRegistry) when is_list(Servers) ->
     build_registry(Servers);
 set_servers(_, OldRegistry) ->
@@ -355,7 +360,7 @@ unregister_server(Name, Registry)
 %%--------------------------------------------------------------------
 
 %% ETS table for session-scoped MCP registries.
--define(SESSION_REGISTRY_TABLE, beam_agent_mcp_registries).
+-define(SESSION_REGISTRY_TABLE, beam_agent_tool_registries).
 
 -doc "Ensure the session registry ETS table exists. Idempotent.".
 -spec ensure_registry_table() -> ok.
@@ -436,7 +441,7 @@ dispatch_jsonrpc(#{<<"method">> := <<"initialize">>} = Msg, Server, _Timeout) ->
         <<"jsonrpc">> => <<"2.0">>,
         <<"id">> => Id,
         <<"result">> => #{
-            <<"protocolVersion">> => <<"2024-11-05">>,
+            <<"protocolVersion">> => beam_agent_mcp_protocol:protocol_version(),
             <<"capabilities">> => #{<<"tools">> => #{}},
             <<"serverInfo">> => #{
                 <<"name">> => Name,
