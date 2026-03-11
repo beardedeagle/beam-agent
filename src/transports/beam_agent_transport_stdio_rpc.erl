@@ -1,6 +1,6 @@
 -module(beam_agent_transport_stdio_rpc).
 -compile([nowarn_missing_spec]).
--moduledoc "Reusable request/response framing helpers for stdio RPC backends.".
+-moduledoc false.
 
 -export([
     encode_request/3,

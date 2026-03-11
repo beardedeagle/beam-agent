@@ -1,37 +1,5 @@
 -module(beam_agent_transport_ws).
--moduledoc """
-WebSocket transport via `beam_agent_ws_client`.
-
-Manages a WebSocket connection. The transport ref is a tuple
-`{ConnPid, MonRef, WsModule}`. Since the WebSocket stream ref is only
-available after the async upgrade completes, the handler must store it
-(received from `WsModule:ws_upgrade/3` return value) and include it
-in send actions as `{ws_frames, StreamRef, [map()]}`.
-
-## Connection Lifecycle
-
-    start/1 → ws_client:open → {ok, {ConnPid, MonRef, WsModule}}
-
-    {transport_up, ConnPid, _} → classify → connected     (TCP ready)
-    handler calls WsModule:ws_upgrade(ConnPid, Path, Headers) → WsRef
-    {ws_upgraded, ConnPid, ...} → classify → connected     (WS ready)
-
-    {ws_frame, ConnPid, _, {text, Payload}} → classify → {data, Payload}
-    send({ws_frames, WsRef, [Msg, ...]}) → ws_send for each frame
-
-## Dependency Injection
-
-Pass `client_module` in opts to inject a test implementation:
-
-```erlang
-beam_agent_transport_ws:start(#{
-    client_module => test_ws_client,  %% test fixture, no mocking needed
-    host       => <<"localhost">>,
-    port       => 8080,
-    scheme     => <<"ws">>
-}).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_transport).
 

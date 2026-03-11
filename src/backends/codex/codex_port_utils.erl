@@ -1,4 +1,5 @@
 -module(codex_port_utils).
+-moduledoc false.
 -export([buffer_line/3,
          append_buffer/3,
          check_buffer_overflow/2,

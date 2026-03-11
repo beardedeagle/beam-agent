@@ -1,20 +1,5 @@
 -module(beam_agent_queue).
--moduledoc """
-Bounded message queue wrapping OTP's `queue` module.
-
-Replaces the O(n) list append (`messages ++ [message]`) found in
-guess/claude_code. OTP's `queue` gives O(1) amortized push/pop
-on both ends, eliminating the quadratic cost over long streaming
-sessions.
-
-The bounded max prevents unbounded heap growth when a slow consumer
-can't keep up with a fast producer (the backpressure escape valve).
-
-Note: The core session (claude_agent_session) currently uses
-demand-driven binary buffer extraction rather than this queue.
-This module is provided as a utility for consumers building custom
-message buffering or multi-consumer dispatch layers.
-""".
+-moduledoc false.
 
 -export([
     new/0,

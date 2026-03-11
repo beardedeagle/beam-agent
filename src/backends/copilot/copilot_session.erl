@@ -1,22 +1,5 @@
 -module(copilot_session).
--moduledoc """
-Copilot session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `copilot_session_handler` as the
-backend handler.
-
-## Usage
-
-```erlang
-{ok, Pid} = copilot_session:start_link(#{
-    cli_path => "/usr/local/bin/copilot",
-    model    => <<"gpt-4o">>
-}).
-{ok, Ref} = copilot_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = copilot_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 

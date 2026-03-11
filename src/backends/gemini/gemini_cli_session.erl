@@ -1,22 +1,5 @@
 -module(gemini_cli_session).
--moduledoc """
-Gemini CLI session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `gemini_session_handler` as the
-backend handler.
-
-## Usage
-
-```erlang
-{ok, Pid} = gemini_cli_session:start_link(#{
-    cli_path => "gemini",
-    model    => <<"gemini-2.5-pro">>
-}).
-{ok, Ref} = gemini_cli_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = gemini_cli_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 

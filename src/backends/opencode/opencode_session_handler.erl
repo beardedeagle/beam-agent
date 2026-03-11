@@ -1,33 +1,5 @@
 -module(opencode_session_handler).
--moduledoc """
-OpenCode session handler — backend protocol logic for OpenCode.
-
-Implements `beam_agent_session_handler` by managing the OpenCode
-dual-channel architecture: SSE for streaming events + REST for commands,
-both over a single HTTP connection.
-
-The transport (`beam_agent_transport_http`) manages the HTTP connection
-lifecycle. This handler performs all protocol-level I/O:
-
-  - SSE stream setup and event parsing
-  - REST request dispatch and response accumulation
-  - Event subscription management
-  - Permission handling (fail-closed)
-  - ~30 REST endpoint operations
-
-HTTP messages (`http_response`, `http_data`) are processed through
-`handle_info/3` since the transport cannot distinguish SSE from REST
-streams without handler state context.
-
-## Architecture
-
-```
-opencode_session (thin wrapper)
-  → beam_agent_session_engine (gen_statem)
-    → opencode_session_handler (this module, callbacks)
-    → beam_agent_transport_http (HTTP connection)
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

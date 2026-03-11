@@ -1,4 +1,5 @@
 -module(gemini_cli_protocol).
+-moduledoc false.
 
 -dialyzer({no_underspecs,
            [{protocol_version, 0},

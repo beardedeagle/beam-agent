@@ -1,30 +1,5 @@
 -module(codex_session_handler).
--moduledoc """
-Codex CLI session handler for the beam_agent_session_engine.
-
-Implements `beam_agent_session_handler` callbacks to provide all
-Codex-specific logic:
-
-  - CLI subprocess launch via `beam_agent_transport_port` (line mode)
-  - JSON-RPC over JSONL encoding/decoding
-  - Init handshake (initialize request → response → initialized notification)
-  - Thread/turn lifecycle (thread/start, turn/start, turn/completed)
-  - Server request handling (approval, user input, dynamic tool calls, MCP)
-  - SIGINT-based interrupt and turn/interrupt protocol message
-  - SDK hook and MCP registry integration
-  - Session tracking via beam_agent_session_store_core and
-    beam_agent_threads_core
-
-## Architecture
-
-```
-beam_agent_session_engine (gen_statem)
-  → codex_session_handler (this module, callbacks)
-    → beam_agent_transport_port (byte I/O, line mode)
-```
-
-Zero additional processes. The engine gen_statem IS the session process.
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

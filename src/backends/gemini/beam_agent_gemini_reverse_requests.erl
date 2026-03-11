@@ -1,7 +1,5 @@
 -module(beam_agent_gemini_reverse_requests).
--moduledoc """
-Bridge Gemini ACP reverse requests into BeamAgent's shared control layer.
-""".
+-moduledoc false.
 
 -dialyzer({no_underspecs, [permission_response/3, selected/1, cancelled/0]}).
 

@@ -1,4 +1,5 @@
 -module(codex_app_server).
+-moduledoc false.
 -export([start_session/1,
          start_exec/1,
          stop/1,

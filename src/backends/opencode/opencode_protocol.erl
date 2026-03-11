@@ -1,4 +1,5 @@
 -module(opencode_protocol).
+-moduledoc false.
 -export([normalize_event/1,
          build_prompt_input/2,
          build_session_init_input/1,

@@ -1,9 +1,5 @@
 -module(codex_realtime_protocol).
--moduledoc """
-Protocol helpers for the direct Codex realtime/voice transport.
-
-This module keeps wire-shape concerns out of `codex_realtime_session`.
-""".
+-moduledoc false.
 
 -export([
     default_model/0,

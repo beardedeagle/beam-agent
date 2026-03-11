@@ -1,4 +1,5 @@
 -module(codex_protocol).
+-moduledoc false.
 -export([normalize_notification/2,
          thread_start_params/1,
          thread_resume_params/2,

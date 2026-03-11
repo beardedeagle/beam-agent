@@ -1,36 +1,5 @@
 -module(beam_agent_ws_frame).
--moduledoc """
-RFC 6455 WebSocket frame codec — pure functions only.
-
-Encodes client frames with required masking (Section 5.3), decodes
-server frames (unmasked), and handles all standard opcodes:
-
-  0x0 — continuation
-  0x1 — text
-  0x2 — binary
-  0x8 — close
-  0x9 — ping
-  0xA — pong
-
-## Frame Size Limits
-
-The `decode/2` and `decode/3` functions accept a `MaxFrameSize`
-parameter to prevent OOM from oversized frames. Frames exceeding
-this limit are rejected with `{error, frame_too_large}`.
-
-## Continuation Frames
-
-Continuation frames are tracked via the `frag_state()` accumulator.
-Pass the returned state through successive `decode/3` calls to
-reassemble fragmented messages automatically.
-
-## Performance
-
-Masking XOR operates on 32-bit aligned words for bulk data,
-falling back to byte-wise XOR for the 0–3 byte tail. On OTP 27+
-the JIT compiles these binary operations to native SIMD-capable
-instructions.
-""".
+-moduledoc false.
 
 -export([
     encode/2,

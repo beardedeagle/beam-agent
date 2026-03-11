@@ -1,17 +1,5 @@
 -module(beam_agent_behaviour).
--moduledoc """
-Unified behaviour contract for all agent wire protocol adapters.
-
-Every agent SDK (claude_agent_sdk, codex_app_server, opencode_client,
-gemini_cli_client, copilot_client) implements this behaviour. Consumers — including
-the coord orchestrator — program against this contract without
-knowing which agent they're talking to.
-
-Enhanced from initial version with:
-  - Permission handler callback with input modification
-  - Session info query callback
-  - Runtime control method callbacks (set_model, set_permission_mode)
-""".
+-moduledoc false.
 
 %% Required callbacks — every adapter must implement these.
 

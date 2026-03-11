@@ -1,29 +1,5 @@
 -module(copilot_session_handler).
--moduledoc """
-Copilot session handler for the beam_agent_session_engine.
-
-Implements `beam_agent_session_handler` callbacks to provide all
-Copilot-specific logic:
-
-  - CLI subprocess launch via `beam_agent_transport_port` in raw mode
-  - Content-Length framed JSON-RPC protocol via `copilot_frame`
-  - Two-phase init handshake (connecting/ping -> initializing/session.create)
-  - JSON-RPC request/response tracking with pending map
-  - Server-side request handling (permissions, hooks, user_input, tool.call)
-  - Query encoding via `copilot_protocol:build_session_send_params/3`
-  - Interrupt via `session.abort` JSON-RPC request
-  - SDK hook and MCP registry integration
-
-## Architecture
-
-```
-beam_agent_session_engine (gen_statem)
-  -> copilot_session_handler (this module, callbacks)
-    -> beam_agent_transport_port (byte I/O, raw mode)
-```
-
-Zero additional processes. The engine gen_statem IS the session process.
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

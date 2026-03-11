@@ -1,16 +1,5 @@
 -module(beam_agent_telemetry_core).
--moduledoc """
-Telemetry event helpers for BEAM agent adapters.
-
-All gen_statem state transitions and query lifecycle events emit
-telemetry events via the `telemetry` OTP library. This module
-provides consistent event emission across all five adapters.
-
-Libraries emit events; applications handle them. No OTLP export
-is built in -- consumers bring their own telemetry handlers.
-
-The published event namespace is `[:beam_agent, ...]`.
-""".
+-moduledoc false.
 
 -export([
     span_start/3,

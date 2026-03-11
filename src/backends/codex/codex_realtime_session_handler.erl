@@ -1,27 +1,5 @@
 -module(codex_realtime_session_handler).
--moduledoc """
-Codex Realtime session handler — WebSocket-based OpenAI Realtime API.
-
-Implements `beam_agent_session_handler` callbacks to provide all
-Codex Realtime-specific logic:
-
-  - WebSocket connection lifecycle via `beam_agent_transport_ws`
-  - OpenAI Realtime protocol via `codex_realtime_protocol`
-  - Session update messages on connection
-  - Text/audio message encoding and response.done detection
-  - Output buffer accumulation across streaming events
-  - Realtime thread lifecycle management
-  - Interrupt via response.cancel
-
-## Architecture
-
-```
-beam_agent_session_engine (gen_statem)
-  └── codex_realtime_session_handler (this module)
-        ├── beam_agent_transport_ws (WebSocket)
-        └── codex_realtime_protocol (wire format)
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

@@ -1,4 +1,5 @@
 -module(claude_session_store).
+-moduledoc false.
 -record(file_info,{size :: non_neg_integer() | undefined,
                    type ::
                        device | directory | other | regular | symlink |

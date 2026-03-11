@@ -1,32 +1,5 @@
 -module(beam_agent_mcp_transport_stdio).
--moduledoc """
-MCP stdio transport: newline-delimited JSON-RPC 2.0 over stdin/stdout subprocess.
-
-Wraps Erlang `open_port/2` with `spawn_executable` to launch an MCP server
-binary. Communication uses stdin/stdout with newline-delimited JSON framing.
-
-Each outgoing message is a JSON-RPC 2.0 map encoded to JSON and terminated
-with a newline. Each received complete line is returned as a raw binary for
-the session handler to decode. Partial lines (noeol) return
-`{disconnected, line_overflow}` — with a 1 MiB default buffer, noeol only
-fires on degenerate input.
-
-Messages MUST NOT contain embedded newlines per the MCP 2025-06-18 spec.
-stderr from the subprocess is left separate (available for logging).
-
-## Options
-
-  - `executable` (required) — Path to the MCP server binary
-  - `args` — CLI arguments (default: `[]`)
-  - `env` — Environment variables as `[{string(), string()}]` (default: `[]`)
-  - `line_max` — Line buffer size in bytes (default: 1,048,576)
-
-## Patterns
-
-Follows `beam_agent_transport_port` conventions for port lifecycle and
-`classify_message/2` structure. Unlike `beam_agent_transport_port`, stderr
-is NOT merged into stdout — MCP reserves stderr for server logging.
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_transport).
 
