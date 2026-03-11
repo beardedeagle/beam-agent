@@ -1,35 +1,5 @@
 -module(beam_agent_transport_http).
--moduledoc """
-HTTP transport via `beam_agent_http_client`.
-
-Manages an HTTP connection for backends that use HTTP (SSE + REST)
-rather than WebSocket. The transport ref is a tuple
-`{ConnPid, MonRef, HttpModule}`.
-
-Only classifies connection-level events:
-  - `transport_up`   → `connected`
-  - `transport_down` → `{disconnected, Reason}`
-  - `DOWN`           → `{exit, 1}`
-
-All HTTP-level messages (`http_response`, `http_data`) are returned
-as `ignore`. The handler processes them via `handle_info/3` since it
-has the context needed to distinguish SSE from REST streams.
-
-The `send/2` callback accepts `noop` as a passthrough — the handler
-performs HTTP requests directly using the stored connection ref.
-
-## Dependency Injection
-
-Pass `client_module` in opts to inject a test implementation:
-
-```erlang
-beam_agent_transport_http:start(#{
-    client_module => test_http_client,
-    host       => <<"localhost">>,
-    port       => 4096
-}).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_transport).
 

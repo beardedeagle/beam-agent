@@ -1,24 +1,5 @@
 -module(codex_realtime_session).
--moduledoc """
-Codex Realtime session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `codex_realtime_session_handler` as
-the backend handler. Also exposes Codex Realtime-specific functions
-(thread management, audio/text append) that route through the engine
-as custom calls.
-
-## Usage
-
-```erlang
-{ok, Pid} = codex_realtime_session:start_link(#{
-    api_key => <<"sk-...">>,
-    model   => <<"gpt-4o-realtime-preview">>
-}).
-{ok, Ref} = codex_realtime_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = codex_realtime_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 

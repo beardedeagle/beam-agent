@@ -1,9 +1,6 @@
 -module(beam_agent_transport_callbacks).
 -compile([nowarn_missing_spec]).
--moduledoc """
-Reusable callback/control helpers for backends that need approvals, user input,
-turn responses, or other out-of-band session control.
-""".
+-moduledoc false.
 
 -export([
     ensure_tables/0,

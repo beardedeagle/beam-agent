@@ -1,29 +1,5 @@
 -module(gemini_session_handler).
--moduledoc """
-Gemini CLI session handler for the beam_agent_session_engine.
-
-Implements `beam_agent_session_handler` callbacks to provide all
-Gemini ACP-specific logic:
-
-  - CLI subprocess launch via `beam_agent_transport_port` (line mode)
-  - JSON-RPC over JSONL encoding/decoding via `beam_agent_gemini_wire`
-  - Multi-step init handshake (initialize → auth → session/start → ready)
-  - Session update notifications → canonical BeamAgent messages
-  - Permission reverse-requests with inline responses
-  - Session cancel notification for interrupt
-  - Mode/model wire protocol (session/set_mode, session/set_model)
-  - SDK hook and MCP registry integration
-
-## Architecture
-
-```
-beam_agent_session_engine (gen_statem)
-  → gemini_session_handler (this module, callbacks)
-    → beam_agent_transport_port (byte I/O, line mode)
-```
-
-Zero additional processes. The engine gen_statem IS the session process.
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

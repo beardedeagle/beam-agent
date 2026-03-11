@@ -1,23 +1,5 @@
 -module(codex_session).
--moduledoc """
-Codex CLI session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `codex_session_handler` as the
-backend handler. Also exposes Codex-specific functions (`respond_request`)
-that map to custom calls routed through the engine.
-
-## Usage
-
-```erlang
-{ok, Pid} = codex_session:start_link(#{
-    cli_path => "/usr/local/bin/codex",
-    model    => <<"o4-mini">>
-}).
-{ok, Ref} = codex_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = codex_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 

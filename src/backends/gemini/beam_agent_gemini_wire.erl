@@ -1,10 +1,5 @@
 -module(beam_agent_gemini_wire).
--moduledoc """
-Gemini ACP request builders and notification parsers.
-
-This module keeps the protocol details out of the session state machine so the
-session process only needs to manage lifecycle and routing.
-""".
+-moduledoc false.
 
 -dialyzer({no_underspecs,
            [protocol_version/0,

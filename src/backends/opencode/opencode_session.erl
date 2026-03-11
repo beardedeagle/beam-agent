@@ -1,24 +1,5 @@
 -module(opencode_session).
--moduledoc """
-OpenCode session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `opencode_session_handler` as the
-backend handler. Also exposes OpenCode-specific functions (event
-subscription, REST endpoints) that route through the engine as custom
-calls.
-
-## Usage
-
-```erlang
-{ok, Pid} = opencode_session:start_link(#{
-    directory => <<"/home/user/project">>,
-    base_url  => <<"http://localhost:4096">>
-}).
-{ok, Ref} = opencode_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = opencode_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 

@@ -1,32 +1,5 @@
 -module(beam_agent_transport_port).
--moduledoc """
-Stdio port transport for CLI subprocess communication.
-
-Wraps Erlang `open_port/2` with `spawn_executable` to launch a CLI binary
-and communicate via stdin/stdout. Used by Claude, Codex, Copilot, and Gemini
-backends.
-
-Supports two data modes via the `mode` option:
-
-  - `line` (default) — opens port with `{line, N}` for line-oriented
-    framing. `classify_message/2` re-appends the stripped newline for
-    downstream JSONL extraction.
-  - `raw` — opens port with `stream` for raw binary framing. Used by
-    backends with custom frame protocols (e.g., Copilot's length-prefixed
-    frames).
-
-Both modes normalize incoming data into `{data, Binary}` transport events.
-
-## Options
-
-  - `executable` (required) — Path to the CLI binary
-  - `args` — CLI arguments (default: `[]`)
-  - `env` — Environment variables as `[{string(), string()}]` (default: `[]`)
-  - `cd` — Working directory (default: caller's cwd)
-  - `mode` — `line | raw` (default: `line`)
-  - `line_buffer` — Line buffer size for `{line, N}` mode (default: 1,048,576)
-  - `extra_port_opts` — Additional port options to append (default: `[]`)
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_transport).
 

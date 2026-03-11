@@ -1,4 +1,5 @@
 -module(copilot_protocol).
+-moduledoc false.
 -export([normalize_event/1,
          build_session_create_params/1,
          build_session_resume_params/2,

@@ -1,28 +1,5 @@
 -module(claude_session_handler).
--moduledoc """
-Claude Code session handler for the beam_agent_session_engine.
-
-Implements `beam_agent_session_handler` callbacks to provide all
-Claude-specific logic:
-
-  - CLI subprocess launch via `beam_agent_transport_port`
-  - JSONL stream-JSON protocol encoding/decoding
-  - Init handshake (system + control_response extraction)
-  - Control request/response protocol (permissions, MCP, hooks, elicitation)
-  - Query encoding with per-query parameter overrides
-  - SIGINT-based interrupt via stored port ref
-  - SDK hook and MCP registry integration
-
-## Architecture
-
-```
-beam_agent_session_engine (gen_statem)
-  → claude_session_handler (this module, callbacks)
-    → beam_agent_transport_port (byte I/O)
-```
-
-Zero additional processes. The engine gen_statem IS the session process.
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_session_handler).
 

@@ -1,33 +1,6 @@
 -module(beam_agent_file_core).
 -include_lib("kernel/include/file.hrl").
--moduledoc """
-Universal file operations for the BEAM Agent SDK.
-
-Provides file listing, reading, searching, and status capabilities
-using Erlang stdlib (`file`, `filelib`, `re` modules). These are
-universal fallbacks for when a backend does not support native file
-operations natively.
-
-No ETS tables. No processes. Pure I/O via Erlang stdlib.
-
-Usage:
-```erlang
-%% Search for text across files:
-{ok, Results} = beam_agent_file_core:find_text(<<"TODO">>, #{}),
-
-%% Find files matching a pattern:
-{ok, Entries} = beam_agent_file_core:find_files(<<"**/*.erl">>, #{}),
-
-%% Read a file:
-{ok, #{content := Bin}} = beam_agent_file_core:file_read(<<"/tmp/foo.txt">>),
-
-%% List a directory:
-{ok, Entries} = beam_agent_file_core:file_list(<<"/tmp">>),
-
-%% Git-aware working directory status:
-{ok, Status} = beam_agent_file_core:file_status(#{cwd => <<"/my/project">>}).
-```
-""".
+-moduledoc false.
 
 -export([
     find_text/2, find_text/3,

@@ -1,30 +1,5 @@
 -module(beam_agent_account_core).
--moduledoc """
-Universal account and authentication management for the BEAM Agent SDK.
-
-Provides ETS-backed authentication state tracking as universal fallbacks
-when backends don't support native account management. All session
-authentication state is stored in a single named ETS table keyed by
-session pid or binary session identifier.
-
-Sessions are assumed to be authenticated by default — the underlying
-transport connection itself serves as the credential. Operations like
-`account_login/2` transition the session to `logged_in` immediately
-(no real OAuth flow is performed at this layer) while recording any
-provider parameters for introspection.
-
-Usage:
-```erlang
-%% Initiate login for a session:
-{ok, Status} = beam_agent_account_core:account_login(self(), #{provider_id => <<"claude">>}),
-
-%% Check current auth state:
-{ok, AuthState} = beam_agent_account_core:auth_status(self()),
-
-%% Retrieve combined account info:
-{ok, Info} = beam_agent_account_core:account_info(self())
-```
-""".
+-moduledoc false.
 
 -export([
     %% Table lifecycle

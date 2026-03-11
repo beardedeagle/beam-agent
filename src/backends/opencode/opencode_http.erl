@@ -1,4 +1,5 @@
 -module(opencode_http).
+-moduledoc false.
 -export([parse_base_url/1,
          build_path/2,
          auth_headers/1,

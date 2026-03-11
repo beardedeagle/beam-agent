@@ -1,30 +1,5 @@
 -module(beam_agent_search_core).
--moduledoc """
-Universal fuzzy file search for the BEAM Agent SDK.
-
-Provides fuzzy file name matching and stateful incremental search sessions
-as universal fallbacks when backends don't support native fuzzy search.
-
-Files are discovered by walking directory trees under one or more root
-paths. The fuzzy scorer rewards consecutive character matches, matches at
-word boundaries (after `/`, `.`, `_`, `-`), and shorter candidate names.
-Sessions cache their last query result so callers can page or filter
-without re-scanning the filesystem.
-
-Uses ETS for session state. Sessions persist until explicitly stopped or
-the BEAM node restarts.
-
-Usage:
-```erlang
-%% One-shot search:
-{ok, Matches} = beam_agent_search_core:fuzzy_file_search(<<"foo">>, #{cwd => <<"/my/project">>}),
-
-%% Stateful search session:
-{ok, _Session} = beam_agent_search_core:session_start(self(), <<"sess-1">>, [<<"/my/project">>]),
-{ok, Matches}  = beam_agent_search_core:session_update(self(), <<"sess-1">>, <<"foo">>),
-ok             = beam_agent_search_core:session_stop(self(), <<"sess-1">>)
-```
-""".
+-moduledoc false.
 
 -export([
     %% Table lifecycle

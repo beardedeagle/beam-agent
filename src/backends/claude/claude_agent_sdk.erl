@@ -1,4 +1,5 @@
 -module(claude_agent_sdk).
+-moduledoc false.
 -type session_meta() :: beam_agent_session_store_core:session_meta().
 -type session_share() :: beam_agent_session_store_core:session_share().
 -type session_summary() :: beam_agent_session_store_core:session_summary().

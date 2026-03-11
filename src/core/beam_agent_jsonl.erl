@@ -1,16 +1,5 @@
 -module(beam_agent_jsonl).
--moduledoc """
-JSONL buffer reassembly and decoding -- pure functions.
-
-Port data arrives in arbitrary binary chunks that do not respect
-JSONL line boundaries. This module handles reassembly. Callers
-maintain buffer state externally (in the gen_statem's data record).
-
-Extracted from guess/claude_code's Port adapter rolling buffer,
-but expressed as stateless functions. No processes.
-
-Uses OTP 27+ `json` module -- no external JSON dependency.
-""".
+-moduledoc false.
 
 -export([
     extract_lines/1,

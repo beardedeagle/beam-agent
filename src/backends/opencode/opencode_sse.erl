@@ -1,4 +1,5 @@
 -module(opencode_sse).
+-moduledoc false.
 -export([new_state/0,parse_chunk/2,buffer_size/1]).
 -export_type([sse_event/0,parse_state/0]).
 -type sse_event() ::

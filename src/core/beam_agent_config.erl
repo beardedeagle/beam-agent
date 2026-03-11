@@ -1,11 +1,5 @@
 -module(beam_agent_config).
--moduledoc """
-Universal config and provider fallback helpers for the canonical SDK.
-
-Backends with native config/provider APIs keep their richer implementations.
-This module gives every backend a working canonical baseline through shared
-runtime and control state.
-""".
+-moduledoc false.
 
 -export([
     config_read/1,

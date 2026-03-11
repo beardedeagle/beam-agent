@@ -1,4 +1,5 @@
 -module(copilot_frame).
+-moduledoc false.
 -type json_scalar() :: binary() | number() | boolean() | null.
 -type json_value() :: json_scalar() | [json_value()] | json_map().
 -type json_map() :: #{binary() => json_value()}.

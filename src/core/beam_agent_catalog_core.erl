@@ -1,15 +1,5 @@
 -module(beam_agent_catalog_core).
--moduledoc """
-Shared catalog and metadata accessors for the canonical SDK.
-
-This module surfaces the catalog-shaped data that all backends expose in some
-form: tools, skills, plugins, MCP servers, and agents. It prefers native
-backend listings when those are available, and falls back to normalized
-session-info metadata otherwise.
-
-Mutation is intentionally conservative here. The unified layer only exposes
-mutations that it can apply truthfully across requests today.
-""".
+-moduledoc false.
 
 -export([
     list_tools/1,

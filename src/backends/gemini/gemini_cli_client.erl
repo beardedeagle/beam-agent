@@ -1,4 +1,5 @@
 -module(gemini_cli_client).
+-moduledoc false.
 
 %% Thread record as stored in thread_core (matches dialyzer-inferred shape)
 -type thread_record() ::

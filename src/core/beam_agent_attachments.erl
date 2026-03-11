@@ -1,12 +1,5 @@
 -module(beam_agent_attachments).
--moduledoc """
-Universal attachment materialization for backends without native rich input
-parts.
-
-When a backend already supports structured attachments natively, query params
-are passed through unchanged. Otherwise attachments are rendered into a stable
-text appendix so the canonical API remains usable across every backend.
-""".
+-moduledoc false.
 
 -export([prepare/3]).
 

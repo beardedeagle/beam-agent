@@ -36,7 +36,7 @@ defmodule BeamAgentEx.MixProject do
     [
       {:beam_agent, path: ".."},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.35", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end
 
@@ -44,7 +44,42 @@ defmodule BeamAgentEx.MixProject do
     [
       main: "BeamAgent",
       source_url: @source_url,
-      extras: ["README.md"]
+      extras: [
+        "README.md",
+        "../docs/guides/backend_integration_guide.md",
+        "LICENSE"
+      ],
+      groups_for_modules: [
+        "Public API": [
+          BeamAgent,
+          BeamAgent.Capabilities,
+          BeamAgent.Catalog,
+          BeamAgent.Checkpoint,
+          BeamAgent.Command,
+          BeamAgent.Content,
+          BeamAgent.Control,
+          BeamAgent.Hooks,
+          BeamAgent.MCP,
+          BeamAgent.Raw,
+          BeamAgent.Runtime,
+          BeamAgent.SessionStore,
+          BeamAgent.Telemetry,
+          BeamAgent.Threads,
+          BeamAgent.Todo
+        ],
+        "Backend Wrappers": [
+          ClaudeEx,
+          ClaudeEx.Session,
+          CodexEx,
+          CodexEx.Session,
+          CopilotEx,
+          CopilotEx.Session,
+          GeminiEx,
+          GeminiEx.Session,
+          OpencodeEx,
+          OpencodeEx.Session
+        ]
+      ]
     ]
   end
 

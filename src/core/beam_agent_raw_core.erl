@@ -1,11 +1,5 @@
 -module(beam_agent_raw_core).
--moduledoc """
-Explicit native escape hatch for the unified SDK.
-
-The canonical `beam_agent_core` API should cover the stable union-capability
-surface. When a caller needs backend-native functionality that is not yet
-normalized, this module provides an explicit and honest raw path.
-""".
+-moduledoc false.
 
 -export([
     backend/1,

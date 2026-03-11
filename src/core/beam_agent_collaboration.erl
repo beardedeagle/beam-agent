@@ -1,11 +1,5 @@
 -module(beam_agent_collaboration).
--moduledoc """
-Universal review, collaboration, and realtime state for the canonical SDK.
-
-The native Codex surface remains the richest implementation. This module
-provides backend-agnostic fallbacks so the canonical API stays available for
-every supported backend.
-""".
+-moduledoc false.
 
 -export([
     ensure_tables/0,

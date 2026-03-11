@@ -1,6 +1,6 @@
 -module(beam_agent_transport_stdio_jsonl).
 -compile([nowarn_missing_spec]).
--moduledoc "Reusable JSONL framing helpers for stdio line-oriented backends.".
+-moduledoc false.
 
 -export([extract_lines/1, extract_line/1, decode_line/1, encode_line/1]).
 

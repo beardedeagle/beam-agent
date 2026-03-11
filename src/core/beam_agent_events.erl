@@ -1,11 +1,5 @@
 -module(beam_agent_events).
--moduledoc """
-Universal event subscription layer for the canonical SDK.
-
-Backends with native event APIs can keep using them directly. This module
-provides a session-scoped fallback stream for every backend by fanning out
-normalized events to subscribers from the shared session/control layers.
-""".
+-moduledoc false.
 
 -export([
     ensure_tables/0,

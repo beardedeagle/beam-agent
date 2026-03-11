@@ -1,28 +1,5 @@
 -module(beam_agent_todo).
--moduledoc """
-Todo tracking helpers for Claude Code agent messages.
-
-The Claude Code CLI uses the `TodoWrite` tool internally to track
-multi-step task progress. Each todo item has a content description,
-status (pending | in_progress | completed), and an activeForm for
-display during execution.
-
-This module provides convenience functions for extracting and
-querying todo state from agent message streams. Useful for:
-  - Building progress indicators in client applications
-  - Monitoring multi-step task completion
-  - Extracting structured task breakdowns from agent responses
-
-## Usage
-
-```erlang
-Messages = claude_agent_sdk:query(Session, "Build a REST API"),
-Todos = beam_agent_todo:extract_todos(Messages),
-Completed = beam_agent_todo:filter_by_status(Todos, completed),
-io:format("~b/~b tasks complete~n",
-    [length(Completed), length(Todos)]).
-```
-""".
+-moduledoc false.
 
 -export([
     extract_todos/1,

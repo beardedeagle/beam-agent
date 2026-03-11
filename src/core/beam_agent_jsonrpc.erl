@@ -1,13 +1,5 @@
 -module(beam_agent_jsonrpc).
--moduledoc """
-Shared JSON-RPC encoding/decoding for Codex wire protocol.
-
-Pure functions for the JSON-RPC envelope used by Codex CLI.
-CRITICAL: Codex does NOT include `"jsonrpc": "2.0"` on the wire.
-Our encoder matches this behaviour exactly.
-
-Uses OTP 27+ `json` module -- no external JSON dependency.
-""".
+-moduledoc false.
 
 -export([
     %% Encoding (returns iodata, newline-terminated)

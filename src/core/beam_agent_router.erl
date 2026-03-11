@@ -1,11 +1,5 @@
 -module(beam_agent_router).
--moduledoc """
-Canonical routing layer for the unified BEAM agent SDK.
-
-This module owns the public backend-selected session lifecycle and common
-capability dispatch. It sits above the backend-specific adapter facades and
-below the public `beam_agent` / `BeamAgent` entrypoints.
-""".
+-moduledoc false.
 
 -dialyzer({no_underspecs, [route_session_capability/3, call_module/5]}).
 

@@ -1,29 +1,5 @@
 -module(beam_agent_app_core).
--moduledoc """
-Universal app/project management for the BEAM Agent SDK.
-
-Provides ETS-backed app registration, info, and logging across all adapters.
-Apps are scoped to a session — each session can register multiple apps,
-query their status, and append log entries.
-
-Uses ETS for fast in-process storage. App entries persist for the
-lifetime of the BEAM node (or until explicitly deleted/cleared).
-
-Usage:
-```erlang
-%% Register an app:
-{ok, App} = beam_agent_app_core:register_app(SessionId, <<"my-app">>, #{
-    name => <<"My App">>,
-    modes => [<<"default">>, <<"debug">>]
-}),
-
-%% List apps for a session:
-{ok, Apps} = beam_agent_app_core:apps_list(SessionId),
-
-%% Append a log entry:
-ok = beam_agent_app_core:app_log(SessionId, <<"Tool executed">>)
-```
-""".
+-moduledoc false.
 
 -export([
     %% Table lifecycle

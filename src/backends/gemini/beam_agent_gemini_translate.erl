@@ -1,7 +1,5 @@
 -module(beam_agent_gemini_translate).
--moduledoc """
-Translate Gemini ACP session updates into canonical BeamAgent messages.
-""".
+-moduledoc false.
 
 -dialyzer({no_underspecs,
            [tool_call_message/2,

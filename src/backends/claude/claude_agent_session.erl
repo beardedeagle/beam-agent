@@ -1,23 +1,5 @@
 -module(claude_agent_session).
--moduledoc """
-Claude Code session — thin wrapper over the session engine.
-
-Implements `beam_agent_behaviour` by delegating all lifecycle operations
-to `beam_agent_session_engine` with `claude_session_handler` as the
-backend handler. Also exposes Claude-specific convenience functions
-(cancel, rewind, MCP, etc.) that map to `send_control/3` calls.
-
-## Usage
-
-```erlang
-{ok, Pid} = claude_agent_session:start_link(#{
-    cli_path => "/usr/local/bin/claude",
-    model    => <<"claude-sonnet-4-20250514">>
-}).
-{ok, Ref} = claude_agent_session:send_query(Pid, <<"Hello">>, #{}, 30000).
-{ok, Msg} = claude_agent_session:receive_message(Pid, Ref, 30000).
-```
-""".
+-moduledoc false.
 
 -behaviour(beam_agent_behaviour).
 
