@@ -10,7 +10,7 @@
 
 -behaviour(beam_agent_transport).
 
--export([start/1, send/2, close/1, is_ready/1, classify_message/2]).
+-export([start/1, send/2, close/1, is_ready/1, status/1, classify_message/2]).
 
 -spec start(map()) -> {ok, pid()} | {error, term()}.
 start(#{owner := Owner}) ->
@@ -29,6 +29,13 @@ close(_Ref) ->
 -spec is_ready(pid()) -> boolean().
 is_ready(Ref) ->
     erlang:is_process_alive(Ref).
+
+-spec status(pid()) -> running | {exited, non_neg_integer()}.
+status(Ref) ->
+    case erlang:is_process_alive(Ref) of
+        true  -> running;
+        false -> {exited, 0}
+    end.
 
 -spec classify_message(term(), pid()) ->
     beam_agent_session_handler:transport_event() | ignore.

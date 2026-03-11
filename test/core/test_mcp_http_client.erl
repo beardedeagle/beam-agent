@@ -1,9 +1,9 @@
--module(test_mcp_gun).
+-module(test_mcp_http_client).
 -moduledoc """
-Test fixture replacing `gun` for MCP HTTP transport tests.
+Test fixture for MCP HTTP transport tests.
 
-Implements the gun API surface used by `beam_agent_mcp_transport_http`:
-`open/3`, `close/1`, `post/4`, `delete/3`.
+Implements the `beam_agent_http_client` API surface used by
+`beam_agent_mcp_transport_http`: `open/3`, `close/1`, `post/4`, `delete/3`.
 
 Instead of real TCP connections, spawns a dummy process that the transport
 can monitor. All outgoing HTTP requests are relayed to the test owner process
@@ -11,32 +11,32 @@ as tagged messages so the test can assert on them and simulate responses.
 
 ## Message formats
 
-  - `{gun_request, post,   Path, Headers, Body, StreamRef}`
-  - `{gun_request, delete, Path, Headers, StreamRef}`
+  - `{http_request, post,   Path, Headers, Body, StreamRef}`
+  - `{http_request, delete, Path, Headers, StreamRef}`
 
 ## Usage
 
 ```erlang
-test_mcp_gun:setup(),
+test_mcp_http_client:setup(),
 {ok, Ref} = beam_agent_mcp_transport_http:start(#{
-    gun_module => test_mcp_gun,
-    host       => <<"localhost">>,
-    port       => 4096,
-    path       => <<"/mcp">>
+    client_module => test_mcp_http_client,
+    host          => <<"localhost">>,
+    port          => 4096,
+    path          => <<"/mcp">>
 }),
-ConnPid = test_mcp_gun:conn_pid(),
-%% Simulate gun_up
-ConnPid ! {gun_up, ConnPid, http},  %% not needed for unit tests
+ConnPid = test_mcp_http_client:conn_pid(),
+%% Simulate transport_up
+ConnPid ! {transport_up, ConnPid, http},
 %% Drive a send and assert on the emitted request
 ok = beam_agent_mcp_transport_http:send(Ref, #{<<"method">> => <<"ping">>}),
 receive
-    {gun_request, post, <<"/mcp">>, _Headers, _Body, _Ref} -> ok
+    {http_request, post, <<"/mcp">>, _Headers, _Body, _Ref} -> ok
 end,
-test_mcp_gun:teardown().
+test_mcp_http_client:teardown().
 ```
 """.
 
-%% gun API compatibility
+%% Client API compatibility
 -export([open/3, close/1, post/4, delete/3]).
 
 %% Test API
@@ -49,9 +49,9 @@ test_mcp_gun:teardown().
 -doc "Initialise the test fixture. Must be called before starting a transport.".
 -spec setup() -> ok.
 setup() ->
-    catch ets:delete(test_mcp_gun_state),
-    _ = ets:new(test_mcp_gun_state, [named_table, public, set]),
-    ets:insert(test_mcp_gun_state, {owner, self()}),
+    catch ets:delete(test_mcp_http_client_state),
+    _ = ets:new(test_mcp_http_client_state, [named_table, public, set]),
+    ets:insert(test_mcp_http_client_state, {owner, self()}),
     ok.
 
 -doc "Re-register the calling process as the request receiver.".
@@ -62,48 +62,53 @@ set_owner() ->
 -doc "Register the given pid as the request receiver.".
 -spec set_owner(pid()) -> ok.
 set_owner(Pid) ->
-    ets:insert(test_mcp_gun_state, {owner, Pid}),
+    ets:insert(test_mcp_http_client_state, {owner, Pid}),
     ok.
 
 -doc "Clean up the test fixture. Call in test teardown.".
 -spec teardown() -> ok.
 teardown() ->
-    case ets:whereis(test_mcp_gun_state) of
+    case ets:whereis(test_mcp_http_client_state) of
         undefined ->
             ok;
         _ ->
-            case ets:lookup(test_mcp_gun_state, conn_pid) of
+            case ets:lookup(test_mcp_http_client_state, conn_pid) of
                 [{conn_pid, Pid}] when is_pid(Pid) ->
+                    MonRef = erlang:monitor(process, Pid),
                     unlink(Pid),
-                    exit(Pid, shutdown);
+                    exit(Pid, shutdown),
+                    receive
+                        {'DOWN', MonRef, process, Pid, _} -> ok
+                    after 1000 -> ok
+                    end;
                 _ ->
                     ok
             end,
-            ets:delete(test_mcp_gun_state)
+            ets:delete(test_mcp_http_client_state)
     end,
     ok.
 
 -doc "Return the ConnPid created during open/3.".
 -spec conn_pid() -> pid().
 conn_pid() ->
-    case ets:lookup(test_mcp_gun_state, conn_pid) of
+    case ets:lookup(test_mcp_http_client_state, conn_pid) of
         [{conn_pid, Pid}] -> Pid;
-        []                -> error(test_mcp_gun_not_started)
+        []                -> error(test_mcp_http_client_not_started)
     end.
 
 %%====================================================================
-%% gun API
+%% Client API
 %%====================================================================
 
--doc "Spawn a dummy connection process (replaces gun:open/3).".
+-doc "Spawn a dummy connection process (replaces beam_agent_http_client:open/3).".
 -spec open(string(), inet:port_number(), map()) ->
     {ok, pid()} | {error, term()}.
 open(_Host, _Port, _Opts) ->
     ConnPid = spawn_link(fun conn_loop/0),
-    ets:insert(test_mcp_gun_state, {conn_pid, ConnPid}),
+    ets:insert(test_mcp_http_client_state, {conn_pid, ConnPid}),
     {ok, ConnPid}.
 
--doc "Kill the dummy connection process (replaces gun:close/1).".
+-doc "Kill the dummy connection process (replaces close/1).".
 -spec close(pid()) -> ok.
 close(ConnPid) ->
     unlink(ConnPid),
@@ -111,25 +116,25 @@ close(ConnPid) ->
     ok.
 
 -doc """
-Simulate POST — relays `{gun_request, post, Path, Headers, Body, StreamRef}`
+Simulate POST — relays `{http_request, post, Path, Headers, Body, StreamRef}`
 to the owner process.
 """.
 -spec post(pid(), iodata(), [{binary(), binary()}], iodata()) -> reference().
 post(_ConnPid, Path, Headers, Body) ->
     Ref = make_ref(),
-    notify_owner({gun_request, post,
+    notify_owner({http_request, post,
                   iolist_to_binary(Path), Headers,
                   iolist_to_binary(Body), Ref}),
     Ref.
 
 -doc """
-Simulate DELETE — relays `{gun_request, delete, Path, Headers, StreamRef}`
+Simulate DELETE — relays `{http_request, delete, Path, Headers, StreamRef}`
 to the owner process.
 """.
 -spec delete(pid(), iodata(), [{binary(), binary()}]) -> reference().
 delete(_ConnPid, Path, Headers) ->
     Ref = make_ref(),
-    notify_owner({gun_request, delete, iolist_to_binary(Path), Headers, Ref}),
+    notify_owner({http_request, delete, iolist_to_binary(Path), Headers, Ref}),
     Ref.
 
 %%====================================================================
@@ -138,7 +143,7 @@ delete(_ConnPid, Path, Headers) ->
 
 -spec notify_owner(term()) -> ok.
 notify_owner(Msg) ->
-    case ets:lookup(test_mcp_gun_state, owner) of
+    case ets:lookup(test_mcp_http_client_state, owner) of
         [{owner, Owner}] -> Owner ! Msg;
         _                -> ok
     end,

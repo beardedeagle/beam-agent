@@ -7,8 +7,9 @@ binary. Communication uses stdin/stdout with newline-delimited JSON framing.
 
 Each outgoing message is a JSON-RPC 2.0 map encoded to JSON and terminated
 with a newline. Each received complete line is returned as a raw binary for
-the session handler to decode. Partial lines (noeol) return `{error, line_overflow}` —
-with a 1 MiB default buffer, noeol only fires on degenerate input.
+the session handler to decode. Partial lines (noeol) return
+`{disconnected, line_overflow}` — with a 1 MiB default buffer, noeol only
+fires on degenerate input.
 
 Messages MUST NOT contain embedded newlines per the MCP 2025-06-18 spec.
 stderr from the subprocess is left separate (available for logging).
@@ -93,9 +94,9 @@ Classify an incoming Erlang message as a transport event.
   - `{Port, {data, {eol, Line}}}` — complete line, returned as raw binary.
     The session handler is responsible for JSON decode and validation.
   - `{Port, {data, {noeol, _}}}` — partial line from buffer overflow.
-    Returns `{error, line_overflow}` so the session handler can log it.
-    With a 1 MiB default buffer this should not occur with well-behaved
-    MCP servers.
+    Returns `{disconnected, line_overflow}` since a buffer overflow suggests
+    a degenerate connection state. With a 1 MiB default buffer this should
+    not occur with well-behaved MCP servers.
   - `{Port, {exit_status, N}}` — subprocess exited with code N.
   - Everything else returns `ignore`.
 """.
@@ -104,7 +105,7 @@ Classify an incoming Erlang message as a transport event.
 classify_message({Port, {data, {eol, Line}}}, Port) ->
     {data, Line};
 classify_message({Port, {data, {noeol, _Chunk}}}, Port) ->
-    {error, line_overflow};
+    {disconnected, line_overflow};
 classify_message({Port, {exit_status, Status}}, Port) ->
     {exit, Status};
 classify_message(_, _) ->

@@ -2,10 +2,10 @@
 -moduledoc """
 MCP Streamable HTTP transport per MCP spec 2025-06-18.
 
-Manages a gun HTTP connection for MCP servers using the Streamable HTTP
+Manages an HTTP connection for MCP servers using the Streamable HTTP
 transport. The transport ref is a 4-tuple:
 
-    {ConnPid, MonRef, GunModule, SessionState}
+    {ConnPid, MonRef, HttpModule, SessionState}
 
 where `SessionState` is a map tracking the MCP session ID, negotiated
 protocol version, and the endpoint path.
@@ -19,12 +19,11 @@ Notification-only requests return 202 Accepted with no body.
 
 ## Transport vs Protocol Boundary
 
-This module handles connection-level events only: `gun_up`, `gun_down`,
-and process `DOWN`. All HTTP-level messages (`gun_response`, `gun_data`)
-are returned as `ignore` — the MCP session handler processes them via
-`handle_info/3` since it owns session state, stream mode tracking, and
-protocol decode logic (JSON body accumulation, SSE parsing, session ID
-extraction).
+This module handles connection-level events only: `transport_up`,
+`transport_down`, and process `DOWN`. All HTTP-level messages
+(`http_response`, `http_data`) are returned as `ignore` — the MCP
+session handler processes them via `handle_info/3` since it owns session
+state, stream mode tracking, and protocol decode logic.
 
 This follows the same pattern as `beam_agent_transport_http`.
 
@@ -35,15 +34,15 @@ and `protocol_version`. These are managed by the session handler, which
 reconstructs the ref tuple when session state changes (e.g., after the
 server assigns a session via `Mcp-Session-Id` response header).
 
-Session termination sends HTTP DELETE before closing the gun connection.
+Session termination sends HTTP DELETE before closing the connection.
 
 ## Dependency Injection
 
-Pass `gun_module` in opts for testing:
+Pass `client_module` in opts for testing:
 
 ```erlang
 beam_agent_mcp_transport_http:start(#{
-    gun_module => test_mcp_gun,
+    client_module => test_mcp_http_client,
     host       => <<"localhost">>,
     port       => 4096,
     path       => <<"/mcp">>
@@ -59,17 +58,17 @@ beam_agent_mcp_transport_http:start(#{
 %% beam_agent_transport callbacks
 %%====================================================================
 
--doc "Open a gun HTTP connection to the MCP server endpoint.".
+-doc "Open an HTTP connection to the MCP server endpoint.".
 -spec start(map()) ->
     {ok, beam_agent_transport:transport_ref()} | {error, term()}.
 start(Opts) ->
-    GunMod  = maps:get(gun_module, Opts, gun),
+    ClientMod  = maps:get(client_module, Opts, beam_agent_http_client),
     Host    = maps:get(host, Opts),
     Port    = maps:get(port, Opts),
     Path    = maps:get(path, Opts, <<"/mcp">>),
     TlsOpts = maps:get(tls_opts, Opts, []),
-    GunOpts = build_gun_opts(TlsOpts),
-    case GunMod:open(binary_to_list(Host), Port, GunOpts) of
+    ClientOpts = build_client_opts(TlsOpts),
+    case ClientMod:open(ensure_list(Host), Port, ClientOpts) of
         {ok, ConnPid} ->
             MonRef       = erlang:monitor(process, ConnPid),
             SessionState = #{
@@ -77,7 +76,7 @@ start(Opts) ->
                 session_id       => undefined,
                 protocol_version => undefined
             },
-            {ok, {ConnPid, MonRef, GunMod, SessionState}};
+            {ok, {ConnPid, MonRef, ClientMod, SessionState}};
         {error, Reason} ->
             {error, {mcp_http_connect_failed, Reason}}
     end.
@@ -93,27 +92,30 @@ The response is handled asynchronously via the session handler's
 """.
 -spec send(beam_agent_transport:transport_ref(), map()) ->
     ok | {error, term()}.
-send({ConnPid, _MonRef, GunMod, SessionState}, Data) when is_map(Data) ->
+send({ConnPid, _MonRef, ClientMod, SessionState}, Data) when is_map(Data) ->
     Path     = maps:get(path, SessionState, <<"/mcp">>),
     SessId   = maps:get(session_id, SessionState, undefined),
     ProtoVer = maps:get(protocol_version, SessionState, undefined),
     Json     = iolist_to_binary(json:encode(Data)),
     Headers  = build_post_headers(SessId, ProtoVer),
     try
-        _ = GunMod:post(ConnPid, Path, Headers, Json),
+        %% StreamRef intentionally discarded — JSON-RPC request/response
+        %% matching uses the wire-level `id` field, not HTTP stream refs.
+        _ = ClientMod:post(ConnPid, Path, Headers, Json),
         ok
     catch
-        error:Reason -> {error, {send_failed, Reason}}
+        error:Reason -> {error, {send_failed, Reason}};
+        exit:Reason  -> {error, {send_failed, Reason}}
     end.
 
 -doc """
-Terminate the MCP session and close the gun connection.
+Terminate the MCP session and close the HTTP connection.
 
 Sends HTTP DELETE to the endpoint with `Mcp-Session-Id` header if a
-session is active. Always closes the gun connection afterwards.
+session is active. Always closes the connection afterwards.
 """.
 -spec close(beam_agent_transport:transport_ref()) -> ok.
-close({ConnPid, MonRef, GunMod, SessionState}) ->
+close({ConnPid, MonRef, ClientMod, SessionState}) ->
     erlang:demonitor(MonRef, [flush]),
     Path   = maps:get(path, SessionState, <<"/mcp">>),
     SessId = maps:get(session_id, SessionState, undefined),
@@ -122,17 +124,17 @@ close({ConnPid, MonRef, GunMod, SessionState}) ->
             ok;
         SId ->
             Headers = [{<<"mcp-session-id">>, SId}],
-            catch GunMod:delete(ConnPid, Path, Headers)
+            catch ClientMod:delete(ConnPid, Path, Headers)
     end,
-    catch GunMod:close(ConnPid),
+    catch ClientMod:close(ConnPid),
     ok.
 
--doc "Return true if the gun connection process is alive.".
+-doc "Return true if the HTTP client process is alive.".
 -spec is_ready(beam_agent_transport:transport_ref()) -> boolean().
 is_ready({ConnPid, _, _, _}) ->
     erlang:is_process_alive(ConnPid).
 
--doc "Return `running` if the gun connection is alive, `{exited, 0}` otherwise.".
+-doc "Return `running` if the HTTP client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
     running | {exited, non_neg_integer()}.
 status({ConnPid, _, _, _}) ->
@@ -142,23 +144,22 @@ status({ConnPid, _, _, _}) ->
     end.
 
 -doc """
-Classify an incoming gun message as a transport event.
+Classify an incoming message as a transport event.
 
 Only connection-level events are classified. All HTTP-level messages
-(`gun_response`, `gun_data`, `gun_trailers`) return `ignore` so the
-session handler can process them with full protocol context in
-`handle_info/3`.
+(`http_response`, `http_data`) return `ignore` so the session handler
+can process them with full protocol context in `handle_info/3`.
 
 Connection events:
-  - `gun_up`   → `connected`
-  - `gun_down` → `{disconnected, Reason}`
-  - `DOWN`     → `{exit, 1}`
+  - `transport_up`   → `connected`
+  - `transport_down` → `{disconnected, Reason}`
+  - `DOWN`           → `{exit, 1}`
 """.
 -spec classify_message(term(), beam_agent_transport:transport_ref()) ->
     beam_agent_session_handler:transport_event() | ignore.
-classify_message({gun_up, ConnPid, _Protocol}, {ConnPid, _, _, _}) ->
+classify_message({transport_up, ConnPid, _Protocol}, {ConnPid, _, _, _}) ->
     connected;
-classify_message({gun_down, ConnPid, _Protocol, Reason, _Killed},
+classify_message({transport_down, ConnPid, Reason},
                  {ConnPid, _, _, _}) ->
     {disconnected, Reason};
 classify_message({'DOWN', MonRef, process, ConnPid, _Reason},
@@ -171,9 +172,12 @@ classify_message(_, _) ->
 %% Internal helpers
 %%====================================================================
 
-build_gun_opts([]) ->
+ensure_list(B) when is_binary(B) -> binary_to_list(B);
+ensure_list(L) when is_list(L) -> L.
+
+build_client_opts([]) ->
     #{protocols => [http]};
-build_gun_opts(TlsOpts) ->
+build_client_opts(TlsOpts) ->
     #{transport => tls, tls_opts => TlsOpts, protocols => [http]}.
 
 build_post_headers(SessId, ProtoVer) ->

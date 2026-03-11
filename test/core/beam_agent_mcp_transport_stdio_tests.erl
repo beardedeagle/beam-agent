@@ -53,20 +53,20 @@ classify_eol_arbitrary_binary_returned_verbatim_test() ->
 
 classify_noeol_returns_error_test() ->
     Port = make_ref(),
-    ?assertEqual({error, line_overflow},
+    ?assertEqual({disconnected, line_overflow},
                  beam_agent_mcp_transport_stdio:classify_message(
                      {Port, {data, {noeol, <<"partial">>}}}, Port)).
 
 classify_noeol_returns_error_on_chunk_test() ->
     FakePort = make_ref(),
     Chunk = <<"partial json fragment">>,
-    ?assertEqual({error, line_overflow},
+    ?assertEqual({disconnected, line_overflow},
         beam_agent_mcp_transport_stdio:classify_message(
             {FakePort, {data, {noeol, Chunk}}}, FakePort)).
 
 classify_noeol_empty_chunk_returns_error_test() ->
     FakePort = make_ref(),
-    ?assertEqual({error, line_overflow},
+    ?assertEqual({disconnected, line_overflow},
         beam_agent_mcp_transport_stdio:classify_message(
             {FakePort, {data, {noeol, <<>>}}}, FakePort)).
 

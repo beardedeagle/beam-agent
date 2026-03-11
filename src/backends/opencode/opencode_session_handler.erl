@@ -4,9 +4,9 @@ OpenCode session handler — backend protocol logic for OpenCode.
 
 Implements `beam_agent_session_handler` by managing the OpenCode
 dual-channel architecture: SSE for streaming events + REST for commands,
-both over a single gun HTTP connection.
+both over a single HTTP connection.
 
-The transport (`beam_agent_transport_http`) manages the gun connection
+The transport (`beam_agent_transport_http`) manages the HTTP connection
 lifecycle. This handler performs all protocol-level I/O:
 
   - SSE stream setup and event parsing
@@ -15,7 +15,7 @@ lifecycle. This handler performs all protocol-level I/O:
   - Permission handling (fail-closed)
   - ~30 REST endpoint operations
 
-Gun HTTP messages (`gun_response`, `gun_data`) are processed through
+HTTP messages (`http_response`, `http_data`) are processed through
 `handle_info/3` since the transport cannot distinguish SSE from REST
 streams without handler state context.
 
@@ -25,7 +25,7 @@ streams without handler state context.
 opencode_session (thin wrapper)
   → beam_agent_session_engine (gen_statem)
     → opencode_session_handler (this module, callbacks)
-    → beam_agent_transport_http (gun HTTP connection)
+    → beam_agent_transport_http (HTTP connection)
 ```
 """.
 
@@ -74,8 +74,8 @@ opencode_session (thin wrapper)
     send_command | server_health.
 
 -record(hstate, {
-    %% Gun connection (stored from transport_started)
-    gun_module         :: module(),
+    %% HTTP client (stored from transport_started)
+    client_module         :: module(),
     conn_pid           :: pid() | undefined,
 
     %% SSE stream
@@ -151,9 +151,9 @@ init_handler(Opts) ->
         {basic, Encoded} when is_binary(Encoded) -> {basic, Encoded}
     end,
     {Host, Port, BasePath} = opencode_http:parse_base_url(BaseUrl),
-    GunModule = maps:get(gun_module, Opts, gun),
+    ClientMod = maps:get(client_module, Opts, beam_agent_http_client),
     HState = #hstate{
-        gun_module         = GunModule,
+        client_module         = ClientMod,
         sse_state          = opencode_sse:new_state(),
         rest_pending       = #{},
         event_queue        = queue:new(),
@@ -172,7 +172,7 @@ init_handler(Opts) ->
     },
     {ok, #{
         transport_spec => {beam_agent_transport_http, #{
-            gun_module => GunModule,
+            client_module => ClientMod,
             host       => Host,
             port       => Port
         }},
@@ -235,28 +235,28 @@ terminate_handler(Reason, #hstate{} = HState) ->
 
 -spec transport_started(beam_agent_transport:transport_ref(), term()) ->
     term().
-transport_started({ConnPid, _MonRef, GunModule}, #hstate{} = HState) ->
-    HState#hstate{conn_pid = ConnPid, gun_module = GunModule}.
+transport_started({ConnPid, _MonRef, ClientMod}, #hstate{} = HState) ->
+    HState#hstate{conn_pid = ConnPid, client_module = ClientMod}.
 
 -spec handle_connecting(beam_agent_session_handler:transport_event(),
                         term()) ->
     beam_agent_session_handler:phase_result().
-handle_connecting(connected, #hstate{gun_module = GunMod,
+handle_connecting(connected, #hstate{client_module = ClientMod,
                                      conn_pid = ConnPid} = HState) ->
     SsePath = build_sse_path(HState),
     SseHeaders = build_sse_headers(HState),
-    SseRef = GunMod:get(ConnPid, SsePath, SseHeaders),
+    SseRef = ClientMod:get(ConnPid, SsePath, SseHeaders),
     {keep_state, [], HState#hstate{sse_ref = SseRef}};
 handle_connecting(connect_timeout, HState) ->
     logger:error("OpenCode connection timed out"),
     {error_state, connect_timeout, HState};
 handle_connecting({disconnected, Reason}, HState) ->
-    logger:error("OpenCode gun connection down in connecting: ~p", [Reason]),
+    logger:error("OpenCode HTTP connection down in connecting: ~p", [Reason]),
     {error_state, {disconnected, Reason},
      HState#hstate{conn_pid = undefined, sse_ref = undefined}};
 handle_connecting({exit, _}, HState) ->
-    logger:error("OpenCode gun process crashed in connecting"),
-    {error_state, gun_process_crash,
+    logger:error("OpenCode HTTP client process crashed in connecting"),
+    {error_state, client_process_crash,
      HState#hstate{conn_pid = undefined, sse_ref = undefined}}.
 
 -spec handle_initializing(beam_agent_session_handler:transport_event(),
@@ -266,12 +266,12 @@ handle_initializing(init_timeout, HState) ->
     logger:error("OpenCode initialization timed out"),
     {error_state, init_timeout, HState};
 handle_initializing({disconnected, Reason}, HState) ->
-    logger:error("OpenCode gun connection down in initializing: ~p", [Reason]),
+    logger:error("OpenCode HTTP connection down in initializing: ~p", [Reason]),
     {error_state, {disconnected, Reason},
      HState#hstate{conn_pid = undefined, sse_ref = undefined}};
 handle_initializing({exit, _}, HState) ->
-    logger:error("OpenCode gun process crashed in initializing"),
-    {error_state, gun_process_crash,
+    logger:error("OpenCode HTTP client process crashed in initializing"),
+    {error_state, client_process_crash,
      HState#hstate{conn_pid = undefined, sse_ref = undefined}}.
 
 -spec encode_interrupt(term()) ->
@@ -344,7 +344,7 @@ handle_custom_call(_Request, _From, _HState) ->
     {error, not_ready}.
 
 %%====================================================================
-%% handle_info — unclassified gun messages
+%% handle_info — unclassified transport messages
 %%====================================================================
 
 -spec handle_info(term(), beam_agent_session_handler:state_name(),
@@ -381,20 +381,20 @@ handle_info(Msg, StateName, #hstate{} = HState) ->
     unknown.
 
 %% SSE stream response (200 = ok, other = error)
-classify_info({gun_response, ConnPid, SseRef, nofin, 200, _Headers},
+classify_info({http_response, ConnPid, SseRef, nofin, 200, _Headers},
               #hstate{conn_pid = ConnPid, sse_ref = SseRef}) ->
     {sse_response, 200};
-classify_info({gun_response, ConnPid, SseRef, _IsFin, Status, _Headers},
+classify_info({http_response, ConnPid, SseRef, _IsFin, Status, _Headers},
               #hstate{conn_pid = ConnPid, sse_ref = SseRef}) ->
     {sse_error, Status};
 
 %% SSE stream data
-classify_info({gun_data, ConnPid, SseRef, _IsFin, RawData},
+classify_info({http_data, ConnPid, SseRef, _IsFin, RawData},
               #hstate{conn_pid = ConnPid, sse_ref = SseRef}) ->
     {sse_data, iolist_to_binary(RawData)};
 
 %% REST response headers
-classify_info({gun_response, ConnPid, Ref, IsFin, Status, _Headers},
+classify_info({http_response, ConnPid, Ref, IsFin, Status, _Headers},
               #hstate{conn_pid = ConnPid, rest_pending = Pending}) ->
     case maps:is_key(Ref, Pending) of
         true  -> {rest_response, Ref, IsFin, Status};
@@ -402,7 +402,7 @@ classify_info({gun_response, ConnPid, Ref, IsFin, Status, _Headers},
     end;
 
 %% REST response body
-classify_info({gun_data, ConnPid, Ref, IsFin, Body},
+classify_info({http_data, ConnPid, Ref, IsFin, Body},
               #hstate{conn_pid = ConnPid, rest_pending = Pending}) ->
     case maps:is_key(Ref, Pending) of
         true  -> {rest_data, Ref, IsFin, iolist_to_binary(Body)};
@@ -712,14 +712,14 @@ handle_permission(PermId, Metadata, #hstate{} = HState) ->
                    gen_statem:from() | undefined, #hstate{}) ->
     #hstate{}.
 do_post_json(EndpointPath, Body, Purpose, From,
-             #hstate{gun_module = GunMod, conn_pid = ConnPid,
+             #hstate{client_module = ClientMod, conn_pid = ConnPid,
                      base_path = BasePath, auth = Auth,
                      directory = Dir,
                      rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
     Headers = opencode_http:common_headers(Auth, Dir),
     Encoded = json:encode(Body),
-    Ref = GunMod:post(ConnPid, binary_to_list(FullPath), Headers, Encoded),
+    Ref = ClientMod:post(ConnPid, binary_to_list(FullPath), Headers, Encoded),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
 
@@ -727,13 +727,13 @@ do_post_json(EndpointPath, Body, Purpose, From,
                      #hstate{}) ->
     #hstate{}.
 do_get_request(EndpointPath, Purpose, From,
-               #hstate{gun_module = GunMod, conn_pid = ConnPid,
+               #hstate{client_module = ClientMod, conn_pid = ConnPid,
                        base_path = BasePath, auth = Auth,
                        directory = Dir,
                        rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
     Headers = opencode_http:common_headers(Auth, Dir),
-    Ref = GunMod:get(ConnPid, binary_to_list(FullPath), Headers),
+    Ref = ClientMod:get(ConnPid, binary_to_list(FullPath), Headers),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
 
@@ -741,14 +741,14 @@ do_get_request(EndpointPath, Purpose, From,
                     #hstate{}) ->
     #hstate{}.
 do_patch_json(EndpointPath, Body, Purpose, From,
-              #hstate{gun_module = GunMod, conn_pid = ConnPid,
+              #hstate{client_module = ClientMod, conn_pid = ConnPid,
                       base_path = BasePath, auth = Auth,
                       directory = Dir,
                       rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
     Headers = opencode_http:common_headers(Auth, Dir),
     Encoded = json:encode(Body),
-    Ref = GunMod:patch(ConnPid, binary_to_list(FullPath), Headers, Encoded),
+    Ref = ClientMod:patch(ConnPid, binary_to_list(FullPath), Headers, Encoded),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
 
@@ -756,13 +756,13 @@ do_patch_json(EndpointPath, Body, Purpose, From,
                         #hstate{}) ->
     #hstate{}.
 do_delete_request(EndpointPath, Purpose, From,
-                  #hstate{gun_module = GunMod, conn_pid = ConnPid,
+                  #hstate{client_module = ClientMod, conn_pid = ConnPid,
                           base_path = BasePath, auth = Auth,
                           directory = Dir,
                           rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
     Headers = opencode_http:common_headers(Auth, Dir),
-    Ref = GunMod:delete(ConnPid, binary_to_list(FullPath), Headers),
+    Ref = ClientMod:delete(ConnPid, binary_to_list(FullPath), Headers),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
 

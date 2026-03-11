@@ -1,31 +1,31 @@
 -module(beam_agent_transport_ws).
 -moduledoc """
-WebSocket transport via gun.
+WebSocket transport via `beam_agent_ws_client`.
 
-Manages a gun HTTP→WebSocket connection. The transport ref is a tuple
-`{ConnPid, MonRef, GunModule}`. Since the WebSocket stream ref is only
+Manages a WebSocket connection. The transport ref is a tuple
+`{ConnPid, MonRef, WsModule}`. Since the WebSocket stream ref is only
 available after the async upgrade completes, the handler must store it
-(received from `gun:ws_upgrade/3` return value) and include it in send
-actions as `{ws_frames, StreamRef, [map()]}`.
+(received from `WsModule:ws_upgrade/3` return value) and include it
+in send actions as `{ws_frames, StreamRef, [map()]}`.
 
 ## Connection Lifecycle
 
-    start/1 → gun:open → {ok, {ConnPid, MonRef, GunModule}}
+    start/1 → ws_client:open → {ok, {ConnPid, MonRef, WsModule}}
 
-    {gun_up, ConnPid, _}       → classify → connected      (TCP ready)
-    handler calls gun:ws_upgrade(ConnPid, Path, Headers) → WsRef
-    {gun_upgrade, ConnPid, ...} → classify → connected      (WS ready)
+    {transport_up, ConnPid, _} → classify → connected     (TCP ready)
+    handler calls WsModule:ws_upgrade(ConnPid, Path, Headers) → WsRef
+    {ws_upgraded, ConnPid, ...} → classify → connected     (WS ready)
 
-    {gun_ws, ConnPid, _, {text, Payload}} → classify → {data, Payload}
-    send({ws_frames, WsRef, [Msg, ...]}) → gun:ws_send for each frame
+    {ws_frame, ConnPid, _, {text, Payload}} → classify → {data, Payload}
+    send({ws_frames, WsRef, [Msg, ...]}) → ws_send for each frame
 
 ## Dependency Injection
 
-Pass `gun_module` in opts to inject a test implementation:
+Pass `client_module` in opts to inject a test implementation:
 
 ```erlang
 beam_agent_transport_ws:start(#{
-    gun_module => test_gun,  %% test fixture, no mocking needed
+    client_module => test_ws_client,  %% test fixture, no mocking needed
     host       => <<"localhost">>,
     port       => 8080,
     scheme     => <<"ws">>
@@ -35,69 +35,87 @@ beam_agent_transport_ws:start(#{
 
 -behaviour(beam_agent_transport).
 
--export([start/1, send/2, close/1, is_ready/1, classify_message/2]).
+-export([start/1, send/2, close/1, is_ready/1, status/1, classify_message/2]).
 
 %%====================================================================
 %% beam_agent_transport callbacks
 %%====================================================================
 
+-doc "Open a WebSocket connection to the given host and port.".
 -spec start(map()) -> {ok, beam_agent_transport:transport_ref()} | {error, term()}.
 start(Opts) ->
-    GunModule = maps:get(gun_module, Opts, gun),
+    ClientMod = maps:get(client_module, Opts, beam_agent_ws_client),
     Host = maps:get(host, Opts),
     Port = maps:get(port, Opts),
     Scheme = maps:get(scheme, Opts, <<"wss">>),
-    GunOpts = case Scheme of
+    ClientOpts = case Scheme of
         <<"wss">> -> #{transport => tls, protocols => [http]};
         _         -> #{protocols => [http]}
     end,
-    case GunModule:open(binary_to_list(Host), Port, GunOpts) of
+    case ClientMod:open(ensure_list(Host), Port, ClientOpts) of
         {ok, ConnPid} ->
             MonRef = erlang:monitor(process, ConnPid),
-            {ok, {ConnPid, MonRef, GunModule}};
+            {ok, {ConnPid, MonRef, ClientMod}};
         {error, Reason} ->
             {error, {ws_connect_failed, Reason}}
     end.
 
+-doc "Send WebSocket frames as JSON-encoded text messages.".
 -spec send(beam_agent_transport:transport_ref(), term()) -> ok | {error, term()}.
-send({ConnPid, _, GunModule}, {ws_frames, WsRef, Messages})
+send({ConnPid, _, ClientMod}, {ws_frames, WsRef, Messages})
   when is_list(Messages) ->
     try
         lists:foreach(fun(Msg) ->
             Json = iolist_to_binary(json:encode(Msg)),
-            GunModule:ws_send(ConnPid, WsRef, {text, Json})
+            ClientMod:ws_send(ConnPid, WsRef, {text, Json})
         end, Messages),
         ok
     catch
-        error:Reason -> {error, {ws_send_failed, Reason}}
+        error:Reason -> {error, {ws_send_failed, Reason}};
+        exit:Reason  -> {error, {ws_send_failed, Reason}}
     end;
 send(_, _) ->
     {error, invalid_send_format}.
 
+-doc "Close the WebSocket connection and demonitor the client process.".
 -spec close(beam_agent_transport:transport_ref()) -> ok.
-close({ConnPid, MonRef, GunModule}) ->
+close({ConnPid, MonRef, ClientMod}) ->
     erlang:demonitor(MonRef, [flush]),
-    catch GunModule:close(ConnPid),
+    catch ClientMod:close(ConnPid),
     ok.
 
+-doc "Return true if the WebSocket client process is alive.".
 -spec is_ready(beam_agent_transport:transport_ref()) -> boolean().
 is_ready({ConnPid, _, _}) ->
     erlang:is_process_alive(ConnPid).
 
+-doc "Return `running` if the WebSocket client is alive, `{exited, 0}` otherwise.".
+-spec status(beam_agent_transport:transport_ref()) ->
+    running | {exited, non_neg_integer()}.
+status({ConnPid, _, _}) ->
+    case erlang:is_process_alive(ConnPid) of
+        true  -> running;
+        false -> {exited, 0}
+    end.
+
+-doc "Classify an incoming Erlang message as a transport event.".
 -spec classify_message(term(), beam_agent_transport:transport_ref()) ->
     beam_agent_session_handler:transport_event() | ignore.
-classify_message({gun_up, ConnPid, _Protocol}, {ConnPid, _, _}) ->
+classify_message({transport_up, ConnPid, _Protocol}, {ConnPid, _, _}) ->
     connected;
-classify_message({gun_upgrade, ConnPid, _WsRef, _Protocols, _Headers},
+classify_message({ws_upgraded, ConnPid, _WsRef, _Protocols, _Headers},
                  {ConnPid, _, _}) ->
     connected;
-classify_message({gun_ws, ConnPid, _WsRef, {text, Payload}},
+classify_message({ws_frame, ConnPid, _WsRef, {text, Payload}},
                  {ConnPid, _, _}) ->
     {data, Payload};
-classify_message({gun_ws, ConnPid, _WsRef, {close, _Code, _Reason}},
+classify_message({ws_frame, ConnPid, _WsRef, {binary, Payload}},
+                 {ConnPid, _, _}) ->
+    {data, Payload};
+classify_message({ws_frame, ConnPid, _WsRef, {close, _Code, _Reason}},
                  {ConnPid, _, _}) ->
     {disconnected, ws_closed};
-classify_message({gun_down, ConnPid, _Protocol, Reason, _Killed},
+classify_message({transport_down, ConnPid, Reason},
                  {ConnPid, _, _}) ->
     {disconnected, Reason};
 classify_message({'DOWN', MonRef, process, ConnPid, _Reason},
@@ -105,3 +123,10 @@ classify_message({'DOWN', MonRef, process, ConnPid, _Reason},
     {exit, 1};
 classify_message(_, _) ->
     ignore.
+
+%%====================================================================
+%% Internal helpers
+%%====================================================================
+
+ensure_list(B) when is_binary(B) -> binary_to_list(B);
+ensure_list(L) when is_list(L) -> L.
