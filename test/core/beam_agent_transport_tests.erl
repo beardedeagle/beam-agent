@@ -3,9 +3,9 @@
 %%%
 %%% Tests cover:
 %%%   - Module is loadable
-%%%   - Required callbacks are declared (start, send, close, is_ready)
-%%%   - Optional callback is declared (status)
-%%%   - Optional callback is absent from the required-only list
+%%%   - All 6 required callbacks are declared
+%%%     (start, send, close, is_ready, status, classify_message)
+%%%   - No optional callbacks exist
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_transport_tests).
@@ -44,41 +44,22 @@ is_ready_1_is_required_test() ->
     Callbacks = beam_agent_transport:behaviour_info(callbacks),
     ?assert(lists:member({is_ready, 1}, Callbacks)).
 
+status_1_is_required_test() ->
+    Callbacks = beam_agent_transport:behaviour_info(callbacks),
+    ?assert(lists:member({status, 1}, Callbacks)).
+
+classify_message_2_is_required_test() ->
+    Callbacks = beam_agent_transport:behaviour_info(callbacks),
+    ?assert(lists:member({classify_message, 2}, Callbacks)).
+
 required_callback_count_test() ->
-    %% behaviour_info(callbacks) returns ALL callbacks (required + optional).
-    %% At minimum the 4 required callbacks must be present.
     Callbacks = beam_agent_transport:behaviour_info(callbacks),
-    ?assert(length(Callbacks) >= 4).
+    ?assertEqual(6, length(Callbacks)).
 
 %%====================================================================
-%% Optional callbacks
+%% No optional callbacks
 %%====================================================================
 
-optional_callbacks_returns_list_test() ->
+no_optional_callbacks_test() ->
     Optional = beam_agent_transport:behaviour_info(optional_callbacks),
-    ?assert(is_list(Optional)).
-
-status_1_is_optional_test() ->
-    Optional = beam_agent_transport:behaviour_info(optional_callbacks),
-    ?assert(lists:member({status, 1}, Optional)).
-
-optional_callback_count_test() ->
-    Optional = beam_agent_transport:behaviour_info(optional_callbacks),
-    ?assertEqual(1, length(Optional)).
-
-%%====================================================================
-%% Optional callback is not in required-only list
-%%====================================================================
-
-status_not_in_required_test() ->
-    Callbacks = beam_agent_transport:behaviour_info(callbacks),
-    Required = [CB || CB <- Callbacks,
-                      not lists:member(CB,
-                          beam_agent_transport:behaviour_info(optional_callbacks))],
-    ?assertNot(lists:member({status, 1}, Required)).
-
-required_only_has_four_entries_test() ->
-    Callbacks = beam_agent_transport:behaviour_info(callbacks),
-    Optional = beam_agent_transport:behaviour_info(optional_callbacks),
-    Required = [CB || CB <- Callbacks, not lists:member(CB, Optional)],
-    ?assertEqual(5, length(Required)).
+    ?assertEqual([], Optional).

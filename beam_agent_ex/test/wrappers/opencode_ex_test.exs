@@ -9,7 +9,7 @@ defmodule OpencodeExTest do
   @moduledoc """
   Tests for the OpencodeEx Elixir wrapper.
 
-  Since the wrapper depends on gun (network), these tests are kept
+  Since the wrapper depends on network transports, these tests are kept
   lightweight and focus on:
     - Module compilation and export verification
     - opts_to_map behaviour (keyword → map conversion)

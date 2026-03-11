@@ -97,4 +97,3 @@ Required for use with `beam_agent_session_engine`.
 -callback classify_message(Msg :: term(), Ref :: transport_ref()) ->
     beam_agent_session_handler:transport_event() | ignore.
 
--optional_callbacks([status/1]).

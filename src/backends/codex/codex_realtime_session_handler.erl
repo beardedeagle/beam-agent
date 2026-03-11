@@ -18,7 +18,7 @@ Codex Realtime-specific logic:
 ```
 beam_agent_session_engine (gen_statem)
   └── codex_realtime_session_handler (this module)
-        ├── beam_agent_transport_ws (WebSocket via gun)
+        ├── beam_agent_transport_ws (WebSocket)
         └── codex_realtime_protocol (wire format)
 ```
 """.
@@ -48,7 +48,7 @@ beam_agent_session_engine (gen_statem)
 
 -record(hstate, {
     %% Transport access (from transport_started callback)
-    gun_module          :: module(),
+    client_module          :: module(),
     conn_pid            :: pid() | undefined,
     ws_ref              :: reference() | undefined,
     path                :: binary(),
@@ -77,7 +77,7 @@ backend_name() -> codex.
 -spec init_handler(beam_agent_core:session_opts()) ->
     beam_agent_session_handler:init_result().
 init_handler(Opts) ->
-    GunModule = maps:get(gun_module, Opts, gun),
+    ClientMod = maps:get(client_module, Opts, beam_agent_ws_client),
     ApiKey = resolve_api_key(Opts),
     case ApiKey of
         <<>> ->
@@ -91,13 +91,13 @@ init_handler(Opts) ->
             Headers = codex_realtime_protocol:build_headers(
                           ApiKey, maps:get(realtime_headers, Opts, #{})),
             TransportOpts = #{
-                gun_module => GunModule,
+                client_module => ClientMod,
                 host       => Host,
                 port       => Port,
                 scheme     => Scheme
             },
             HState = #hstate{
-                gun_module     = GunModule,
+                client_module     = ClientMod,
                 path           = Path,
                 headers        = Headers,
                 session_id     = SessionId,
@@ -176,19 +176,19 @@ terminate_handler(_Reason, _HState) ->
 
 -spec transport_started(beam_agent_transport:transport_ref(), #hstate{}) ->
     #hstate{}.
-transport_started({ConnPid, _MonRef, GunModule}, HState) ->
-    HState#hstate{conn_pid = ConnPid, gun_module = GunModule}.
+transport_started({ConnPid, _MonRef, ClientMod}, HState) ->
+    HState#hstate{conn_pid = ConnPid, client_module = ClientMod}.
 
 -spec handle_connecting(beam_agent_session_handler:transport_event(),
                         #hstate{}) ->
     beam_agent_session_handler:phase_result().
 handle_connecting(connected, #hstate{ws_ref = undefined,
-                                     gun_module = GunModule,
+                                     client_module = ClientMod,
                                      conn_pid = ConnPid,
                                      path = Path,
                                      headers = Headers} = HState) ->
     %% TCP connected — initiate WebSocket upgrade
-    WsRef = GunModule:ws_upgrade(ConnPid, binary_to_list(Path), Headers),
+    WsRef = ClientMod:ws_upgrade(ConnPid, binary_to_list(Path), Headers),
     {keep_state, [], HState#hstate{ws_ref = WsRef}};
 handle_connecting(connected, #hstate{ws_ref = WsRef,
                                      opts = Opts} = HState)

@@ -453,7 +453,7 @@ mix test
 - Erlang/OTP 27+
 - Elixir 1.17+ (for wrappers)
 - `telemetry` ~> 1.3
-- `gun` ~> 2.1 (for `opencode_client` and MCP Streamable HTTP transport)
+- OTP built-ins: `crypto`, `ssl`, `inets`, `public_key` (for HTTP/WebSocket transports)
 - Test deps: `proper` ~> 1.4
 
 ## Package Documentation

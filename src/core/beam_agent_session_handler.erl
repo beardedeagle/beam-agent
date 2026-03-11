@@ -123,7 +123,7 @@ active query), executes send actions, and updates handler state. No
 buffer involvement — this bypasses the engine's buffer management.
 
 A phase_result() triggers a state transition (e.g., connecting to
-initializing when a gun_up arrives for an HTTP transport).
+initializing when a transport_up arrives for an HTTP transport).
 
 The ignore atom means the handler does not handle this message either.
 """.
@@ -372,7 +372,7 @@ erlang message. This allows handlers to process transport-level
 messages that require handler state to interpret.
 
 Primary use case: dual-channel transports (e.g., OpenCode SSE + REST
-over the same gun connection) where the transport cannot distinguish
+over the same HTTP connection) where the transport cannot distinguish
 SSE data from REST responses without knowing which stream ref is which.
 
 The handler receives the raw message, the current state name, and its

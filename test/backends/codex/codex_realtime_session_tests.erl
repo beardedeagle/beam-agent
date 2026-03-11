@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @doc EUnit tests for Codex Realtime session (engine + handler + WS transport).
 %%%
-%%% Uses `test_gun` — a dependency-injected gun replacement that captures
-%%% outgoing WebSocket frames and lets the test simulate incoming gun
-%%% events. No mocking (meck) is used.
+%%% Uses `test_ws_client` — a dependency-injected client replacement that
+%%% captures outgoing WebSocket frames and lets the test simulate
+%%% incoming transport events. No mocking (meck) is used.
 %%%
 %%% Tests cover:
 %%%   - Full session lifecycle (connect → WS upgrade → ready → query → result)
@@ -29,16 +29,16 @@
 
 realtime_thread_lifecycle_and_query_test() ->
     ensure_started(),
-    test_gun:setup(),
+    test_ws_client:setup(),
     try
         run_lifecycle()
     after
-        test_gun:teardown()
+        test_ws_client:teardown()
     end.
 
 run_lifecycle() ->
     {ok, Pid} = start_session(),
-    ConnPid = test_gun:conn_pid(),
+    ConnPid = test_ws_client:conn_pid(),
 
     %% 1. Engine starts in connecting state
     ?assertEqual(connecting, codex_realtime_session:health(Pid)),
@@ -50,10 +50,10 @@ run_lifecycle() ->
     ?assertEqual(<<"gpt-4o-realtime-preview">>, maps:get(model, Info)),
 
     %% 3. Simulate TCP connected → handler calls ws_upgrade, stays connecting
-    Pid ! {gun_up, ConnPid, http},
+    Pid ! {transport_up, ConnPid, http},
 
     %% 4. Simulate WS upgrade confirmed → handler sends session.update, goes ready
-    Pid ! {gun_upgrade, ConnPid, make_ref(), [<<"websocket">>], []},
+    Pid ! {ws_upgraded, ConnPid, make_ref(), [<<"websocket">>], []},
     wait_for_state(Pid, ready),
     ?assertEqual(ready, codex_realtime_session:health(Pid)),
     ?assert(received_ws_type(<<"session.update">>)),
@@ -130,15 +130,21 @@ run_lifecycle() ->
 
 missing_api_key_test() ->
     ensure_started(),
-    process_flag(trap_exit, true),
-    Result = codex_realtime_session:start_link(#{
-        api_key    => <<>>,
-        gun_module => test_gun
-    }),
-    %% Drain the EXIT signal from the linked process termination
-    receive {'EXIT', _, _} -> ok after 100 -> ok end,
-    process_flag(trap_exit, false),
-    ?assertMatch({error, missing_api_key}, Result).
+    #{level := OldLevel} = logger:get_primary_config(),
+    logger:set_primary_config(level, none),
+    try
+        process_flag(trap_exit, true),
+        Result = codex_realtime_session:start_link(#{
+            api_key    => <<>>,
+            client_module => test_ws_client
+        }),
+        %% Drain the EXIT signal from the linked process termination
+        receive {'EXIT', _, _} -> ok after 100 -> ok end,
+        process_flag(trap_exit, false),
+        ?assertMatch({error, missing_api_key}, Result)
+    after
+        logger:set_primary_config(level, OldLevel)
+    end.
 
 %%====================================================================
 %% Error case: thread not found
@@ -146,10 +152,10 @@ missing_api_key_test() ->
 
 thread_not_found_test() ->
     ensure_started(),
-    test_gun:setup(),
+    test_ws_client:setup(),
     try
         {ok, Pid} = start_session(),
-        ConnPid = test_gun:conn_pid(),
+        ConnPid = test_ws_client:conn_pid(),
         bring_to_ready(Pid, ConnPid),
 
         ?assertMatch({error, not_found},
@@ -166,7 +172,7 @@ thread_not_found_test() ->
 
         ok = codex_realtime_session:stop(Pid)
     after
-        test_gun:teardown()
+        test_ws_client:teardown()
     end.
 
 %%====================================================================
@@ -175,10 +181,10 @@ thread_not_found_test() ->
 
 error_response_test() ->
     ensure_started(),
-    test_gun:setup(),
+    test_ws_client:setup(),
     try
         {ok, Pid} = start_session(),
-        ConnPid = test_gun:conn_pid(),
+        ConnPid = test_ws_client:conn_pid(),
         bring_to_ready(Pid, ConnPid),
 
         {ok, Ref} = codex_realtime_session:send_query(
@@ -197,7 +203,7 @@ error_response_test() ->
         wait_for_state(Pid, ready),
         ok = codex_realtime_session:stop(Pid)
     after
-        test_gun:teardown()
+        test_ws_client:teardown()
     end.
 
 %%====================================================================
@@ -206,10 +212,10 @@ error_response_test() ->
 
 interrupt_test() ->
     ensure_started(),
-    test_gun:setup(),
+    test_ws_client:setup(),
     try
         {ok, Pid} = start_session(),
-        ConnPid = test_gun:conn_pid(),
+        ConnPid = test_ws_client:conn_pid(),
         bring_to_ready(Pid, ConnPid),
 
         {ok, _Ref} = codex_realtime_session:send_query(
@@ -222,7 +228,7 @@ interrupt_test() ->
         wait_for_state(Pid, ready),
         ok = codex_realtime_session:stop(Pid)
     after
-        test_gun:teardown()
+        test_ws_client:teardown()
     end.
 
 %%====================================================================
@@ -231,10 +237,10 @@ interrupt_test() ->
 
 set_model_test() ->
     ensure_started(),
-    test_gun:setup(),
+    test_ws_client:setup(),
     try
         {ok, Pid} = start_session(),
-        ConnPid = test_gun:conn_pid(),
+        ConnPid = test_ws_client:conn_pid(),
         bring_to_ready(Pid, ConnPid),
 
         {ok, <<"gpt-4o-mini">>} = codex_realtime_session:set_model(
@@ -246,7 +252,7 @@ set_model_test() ->
 
         ok = codex_realtime_session:stop(Pid)
     after
-        test_gun:teardown()
+        test_ws_client:teardown()
     end.
 
 %%====================================================================
@@ -264,13 +270,13 @@ start_session() ->
         api_key      => <<"test-key">>,
         model        => <<"gpt-4o-realtime-preview">>,
         realtime_url => <<"ws://example.test:8080/v1/realtime?model=gpt-4o-realtime-preview">>,
-        gun_module   => test_gun
+        client_module   => test_ws_client
     }).
 
 -spec bring_to_ready(pid(), pid()) -> ok.
 bring_to_ready(Pid, ConnPid) ->
-    Pid ! {gun_up, ConnPid, http},
-    Pid ! {gun_upgrade, ConnPid, make_ref(), [<<"websocket">>], []},
+    Pid ! {transport_up, ConnPid, http},
+    Pid ! {ws_upgraded, ConnPid, make_ref(), [<<"websocket">>], []},
     wait_for_state(Pid, ready),
     drain_mailbox(),
     ok.
@@ -291,7 +297,7 @@ wait_for_state(Pid, State, N) ->
 -spec send_ws_event(pid(), pid(), map()) -> ok.
 send_ws_event(SessionPid, ConnPid, Json) ->
     Payload = iolist_to_binary(json:encode(Json)),
-    SessionPid ! {gun_ws, ConnPid, make_ref(), {text, Payload}},
+    SessionPid ! {ws_frame, ConnPid, make_ref(), {text, Payload}},
     ok.
 
 -spec received_ws_type(binary()) -> boolean().

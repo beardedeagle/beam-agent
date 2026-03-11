@@ -1,8 +1,8 @@
 %%%-------------------------------------------------------------------
 %%% @doc EUnit tests for opencode_session (engine-backed).
 %%%
-%%% Uses `test_opencode_gun` dependency injection instead of mocks.
-%%% The test fixture relays gun requests as messages to the test
+%%% Uses `test_http_client` — a dependency-injected client replacement.
+%%% The test fixture relays HTTP requests as messages to the test
 %%% process, enabling full lifecycle and protocol testing.
 %%%
 %%% Tests cover:
@@ -17,8 +17,8 @@
 %%%   - Abort sends POST request
 %%%   - Concurrent query rejected
 %%%   - Wrong ref rejected
-%%%   - Gun connection down → error state
-%%%   - Gun process crash → error state
+%%%   - Transport connection down → error state
+%%%   - Transport process crash → error state
 %%%   - Heartbeat events not delivered to consumer
 %%%   - child_spec correctness
 %%%   - Event subscription in ready state
@@ -31,7 +31,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
-%% API contract tests (no gun needed)
+%% API contract tests (no transport needed)
 %%====================================================================
 
 child_spec_test() ->
@@ -56,7 +56,7 @@ child_spec_with_session_id_test() ->
 %%====================================================================
 
 session_lifecycle_test_() ->
-    {"opencode_session lifecycle with injected gun",
+    {"opencode_session lifecycle with injected transport",
      {setup,
       fun setup/0,
       fun cleanup/1,
@@ -105,16 +105,16 @@ permission_test_() ->
            {timeout, 10, fun test_no_permission_handler_deny/0}}
       ] end}}.
 
-gun_down_test_() ->
-    {"gun connection failure tests",
+transport_down_test_() ->
+    {"transport connection failure tests",
      {setup,
       fun setup/0,
       fun cleanup/1,
       fun(_) -> [
-          {"gun_down in ready → error state",
-           {timeout, 10, fun test_gun_down_in_ready/0}},
-          {"gun process crash → error state",
-           {timeout, 10, fun test_gun_process_crash/0}}
+          {"transport_down in ready → error state",
+           {timeout, 10, fun test_transport_down_in_ready/0}},
+          {"transport process crash → error state",
+           {timeout, 10, fun test_transport_process_crash/0}}
       ] end}}.
 
 %%====================================================================
@@ -129,7 +129,7 @@ cleanup(_) ->
     ok.
 
 %%====================================================================
-%% Helper: build a fully-initialised session with injected gun
+%% Helper: build a fully-initialised session with injected transport
 %%====================================================================
 
 %% Returns {SessionPid, ConnPid, SseRef} after driving the session
@@ -141,12 +141,12 @@ start_ready_session(ExtraOpts) ->
     start_ready_session(ExtraOpts, undefined).
 
 start_ready_session(ExtraOpts, PermissionHandler) ->
-    flush_gun_requests(),
-    test_opencode_gun:setup(),
-    test_opencode_gun:set_owner(),
+    flush_http_requests(),
+    test_http_client:setup(),
+    test_http_client:set_owner(),
 
     BaseOpts = #{
-        gun_module => test_opencode_gun,
+        client_module => test_http_client,
         directory  => <<"/tmp/test">>,
         base_url   => <<"http://localhost:4096">>
     },
@@ -156,20 +156,20 @@ start_ready_session(ExtraOpts, PermissionHandler) ->
     end,
 
     {ok, Pid} = opencode_session:start_link(Opts),
-    ConnPid = test_opencode_gun:conn_pid(),
+    ConnPid = test_http_client:conn_pid(),
 
-    %% Drive: gun_up → triggers SSE GET
-    Pid ! {gun_up, ConnPid, http},
+    %% Drive: transport_up → triggers SSE GET
+    Pid ! {transport_up, ConnPid, http},
 
     %% Receive SSE GET ref
     SseRef = receive
-        {gun_request, get, _SsePath, Ref0} -> Ref0
+        {http_request, get, _SsePath, Ref0} -> Ref0
     after 1000 ->
         error(no_sse_get)
     end,
 
     %% Drive: SSE response 200 → server.connected
-    Pid ! {gun_response, ConnPid, SseRef, nofin, 200,
+    Pid ! {http_response, ConnPid, SseRef, nofin, 200,
            [{<<"content-type">>, <<"text/event-stream">>}]},
     send_sse(Pid, ConnPid, SseRef,
              <<"event: server.connected\ndata: {}\n\n">>),
@@ -177,20 +177,20 @@ start_ready_session(ExtraOpts, PermissionHandler) ->
 
     %% Drive: create_session POST
     CreateRef = receive
-        {gun_request, post, <<"/session">>, _Body, Ref1} -> Ref1
+        {http_request, post, <<"/session">>, _Body, Ref1} -> Ref1
     after 1000 ->
         error(no_session_post)
     end,
     SessionJson = json:encode(#{<<"id">> => <<"sess-test">>}),
-    Pid ! {gun_response, ConnPid, CreateRef, nofin, 200, []},
-    Pid ! {gun_data, ConnPid, CreateRef, fin, SessionJson},
+    Pid ! {http_response, ConnPid, CreateRef, nofin, 200, []},
+    Pid ! {http_data, ConnPid, CreateRef, fin, SessionJson},
     timer:sleep(20),
 
     {Pid, ConnPid, SseRef}.
 
 stop_session(Pid) ->
     catch opencode_session:stop(Pid),
-    test_opencode_gun:teardown().
+    test_http_client:teardown().
 
 %%====================================================================
 %% Individual test functions
@@ -219,7 +219,7 @@ test_query_lifecycle() ->
     drain_post_ref(),
 
     %% Emit a text delta SSE event then session.idle
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(50),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: message.part.updated\n",
@@ -251,7 +251,7 @@ test_tool_use_event() ->
     {ok, Ref} = opencode_session:send_query(Pid, <<"use a tool">>, #{}, 5000),
     drain_post_ref(),
 
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         ToolJson = <<"{\"part\":{\"type\":\"tool\","
                      "\"state\":{\"status\":\"running\","
@@ -286,14 +286,14 @@ test_ready_event_subscription() ->
 test_tui_append_prompt() ->
     {Pid, ConnPid, _SseRef} = start_ready_session(),
     Self = self(),
-    spawn(fun() ->
+    spawn_link(fun() ->
         Self ! {tui_append_result,
                 opencode_client:tui_append_prompt(Pid, <<"hello">>)}
     end),
     receive
-        {gun_request, post, <<"/tui/append-prompt">>, _Body, Ref0} ->
-            Pid ! {gun_response, ConnPid, Ref0, nofin, 200, []},
-            Pid ! {gun_data, ConnPid, Ref0, fin, <<"true">>}
+        {http_request, post, <<"/tui/append-prompt">>, _Body, Ref0} ->
+            Pid ! {http_response, ConnPid, Ref0, nofin, 200, []},
+            Pid ! {http_data, ConnPid, Ref0, fin, <<"true">>}
     after 1000 ->
         error(no_tui_append_post)
     end,
@@ -308,13 +308,13 @@ test_tui_append_prompt() ->
 test_tui_open_help() ->
     {Pid, ConnPid, _SseRef} = start_ready_session(),
     Self = self(),
-    spawn(fun() ->
+    spawn_link(fun() ->
         Self ! {tui_open_result, opencode_client:tui_open_help(Pid)}
     end),
     receive
-        {gun_request, post, <<"/tui/open-help">>, _Body, Ref0} ->
-            Pid ! {gun_response, ConnPid, Ref0, nofin, 200, []},
-            Pid ! {gun_data, ConnPid, Ref0, fin, <<"true">>}
+        {http_request, post, <<"/tui/open-help">>, _Body, Ref0} ->
+            Pid ! {http_response, ConnPid, Ref0, nofin, 200, []},
+            Pid ! {http_data, ConnPid, Ref0, fin, <<"true">>}
     after 1000 ->
         error(no_tui_open_post)
     end,
@@ -332,7 +332,7 @@ test_session_idle_result() ->
     {ok, Ref} = opencode_session:send_query(Pid, <<"prompt">>, #{}, 5000),
     drain_post_ref(),
 
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: session.idle\ndata: {\"id\":\"sess-test\"}\n\n">>)
@@ -350,7 +350,7 @@ test_session_error() ->
     {ok, Ref} = opencode_session:send_query(Pid, <<"prompt">>, #{}, 5000),
     drain_post_ref(),
 
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: session.error\n",
@@ -392,7 +392,7 @@ test_heartbeat_not_delivered() ->
     drain_post_ref(),
 
     %% Send heartbeat then a real text event then idle
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: server.heartbeat\ndata: {}\n\n">>),
@@ -416,7 +416,7 @@ test_client_query() ->
     {Pid, ConnPid, SseRef} = start_ready_session(),
 
     %% Use opencode_client:query/2 — must collect all messages
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(100),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: message.part.updated\n",
@@ -427,7 +427,7 @@ test_client_query() ->
     end),
 
     Result = opencode_client:query(Pid, <<"Hello">>, #{timeout => 5000}),
-    flush_gun_requests(),
+    flush_http_requests(),
     ?assertMatch({ok, [_ | _]}, Result),
     {ok, Messages} = Result,
     Last = lists:last(Messages),
@@ -435,7 +435,7 @@ test_client_query() ->
     stop_session(Pid).
 
 test_abort() ->
-    flush_gun_requests(),
+    flush_http_requests(),
     {Pid, _ConnPid, _SseRef} = start_ready_session(),
 
     {ok, _Ref} = opencode_session:send_query(Pid, <<"prompt">>, #{}, 5000),
@@ -445,7 +445,7 @@ test_abort() ->
     ok = opencode_session:interrupt(Pid),
 
     receive
-        {gun_request, post, AbortPath, _Body, _AbortRef} ->
+        {http_request, post, AbortPath, _Body, _AbortRef} ->
             ?assert(binary:match(AbortPath, <<"/abort">>) =/= nomatch)
     after 1000 ->
         %% abort may already have been processed; that is also OK
@@ -470,7 +470,7 @@ test_permission_allow() ->
 
     %% Emit a permission.updated event
     PermJson = <<"{\"id\":\"perm-001\",\"request\":{\"tool\":\"bash\"}}">>,
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: permission.updated\ndata: ", PermJson/binary, "\n\n">>),
@@ -489,7 +489,7 @@ test_permission_allow() ->
 
     %% A POST to /permission/perm-001/reply should have been sent
     receive
-        {gun_request, post, PermPath, _Body, _PermRef} ->
+        {http_request, post, PermPath, _Body, _PermRef} ->
             ?assert(binary:match(PermPath, <<"perm-001">>) =/= nomatch)
     after 1000 ->
         ok
@@ -508,7 +508,7 @@ test_permission_crash_deny() ->
     drain_post_ref(),
 
     PermJson = <<"{\"id\":\"perm-002\",\"request\":{\"tool\":\"bash\"}}">>,
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: permission.updated\ndata: ", PermJson/binary, "\n\n">>),
@@ -527,14 +527,14 @@ test_permission_crash_deny() ->
 
 test_no_permission_handler_deny() ->
     %% No permission_handler configured → deny by default (fail-closed)
-    flush_gun_requests(),
+    flush_http_requests(),
     {Pid, ConnPid, SseRef} = start_ready_session(#{}, undefined),
 
     {ok, Ref} = opencode_session:send_query(Pid, <<"test">>, #{}, 5000),
     drain_post_ref(),
 
     PermJson = <<"{\"id\":\"perm-003\",\"request\":{\"tool\":\"bash\"}}">>,
-    spawn(fun() ->
+    spawn_link(fun() ->
         timer:sleep(30),
         send_sse(Pid, ConnPid, SseRef,
                  <<"event: permission.updated\ndata: ", PermJson/binary, "\n\n">>),
@@ -545,7 +545,7 @@ test_no_permission_handler_deny() ->
 
     %% A deny POST should have been sent
     receive
-        {gun_request, post, PermPath, _Body, _PermRef} ->
+        {http_request, post, PermPath, _Body, _PermRef} ->
             ?assert(binary:match(PermPath, <<"perm-003">>) =/= nomatch)
     after 2000 ->
         ok
@@ -555,34 +555,34 @@ test_no_permission_handler_deny() ->
     stop_session(Pid).
 
 %%====================================================================
-%% Gun failure tests
+%% Transport failure tests
 %%====================================================================
 
-test_gun_down_in_ready() ->
+test_transport_down_in_ready() ->
     {Pid, ConnPid, _SseRef} = start_ready_session(),
     ?assertEqual(ready, opencode_session:health(Pid)),
 
-    %% Suppress expected logger:error from gun_down handler
+    %% Suppress expected logger:error from transport_down handler
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    %% Simulate gun connection going down
-    Pid ! {gun_down, ConnPid, http, closed, []},
+    %% Simulate transport connection going down
+    Pid ! {transport_down, ConnPid, closed},
     timer:sleep(50),
     logger:set_primary_config(level, OldLevel),
 
     Health = opencode_session:health(Pid),
     ?assertEqual(error, Health),
     catch gen_statem:stop(Pid, normal, 1000),
-    test_opencode_gun:teardown().
+    test_http_client:teardown().
 
-test_gun_process_crash() ->
+test_transport_process_crash() ->
     {Pid, ConnPid, _SseRef} = start_ready_session(),
     ?assertEqual(ready, opencode_session:health(Pid)),
 
-    %% Suppress expected logger:error from gun crash handler
+    %% Suppress expected logger:error from transport crash handler
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    %% Kill the fake gun process so the real monitor fires
+    %% Kill the fake transport process so the real monitor fires
     %% Unlink first to prevent the test process from dying
     unlink(ConnPid),
     exit(ConnPid, kill),
@@ -593,7 +593,7 @@ test_gun_process_crash() ->
     Health = opencode_session:health(Pid),
     ?assertEqual(error, Health),
     catch gen_statem:stop(Pid, normal, 1000),
-    test_opencode_gun:teardown().
+    test_http_client:teardown().
 
 %%====================================================================
 %% Hook tests
@@ -622,23 +622,23 @@ hook_deny_test_() ->
 %% Helpers
 %%====================================================================
 
-%% @doc Flush any stale gun_request messages from the mailbox.
+%% @doc Flush any stale request messages from the mailbox.
 %%      Handles both 4-tuple (GET/DELETE) and 5-tuple (POST/PATCH) formats.
-flush_gun_requests() ->
+flush_http_requests() ->
     receive
-        {gun_request, _, _, _} -> flush_gun_requests();
-        {gun_request, _, _, _, _} -> flush_gun_requests()
+        {http_request, _, _, _} -> flush_http_requests();
+        {http_request, _, _, _, _} -> flush_http_requests()
     after 0 -> ok
     end.
 
-%% @doc Drain a single expected POST gun_request (message POST after query).
+%% @doc Drain a single expected POST http_request (message POST after query).
 drain_post_ref() ->
-    receive {gun_request, post, _, _, _} -> ok
+    receive {http_request, post, _, _, _} -> ok
     after 500 -> ok
     end.
 
-%% @doc Send SSE data as a gun_data message to the session pid.
+%% @doc Send SSE data as an http_data message to the session pid.
 -spec send_sse(pid(), pid(), reference(), binary()) -> ok.
 send_sse(Pid, ConnPid, SseRef, Data) ->
-    Pid ! {gun_data, ConnPid, SseRef, nofin, Data},
+    Pid ! {http_data, ConnPid, SseRef, nofin, Data},
     ok.

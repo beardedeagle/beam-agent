@@ -5,8 +5,11 @@
     {applications, [
         kernel,
         stdlib,
-        telemetry,
-        gun
+        crypto,
+        ssl,
+        inets,
+        public_key,
+        telemetry
     ]},
     {env, []},
     {modules, [
@@ -60,7 +63,11 @@
         beam_agent_session_engine,
         beam_agent_session_handler,
         beam_agent_transport,
+        beam_agent_transport_port,
         beam_agent_transport_ws,
+        beam_agent_ws_frame,
+        beam_agent_ws_client,
+        beam_agent_http_client,
         beam_agent_account_core,
         beam_agent_app_core,
         beam_agent_file_core,
