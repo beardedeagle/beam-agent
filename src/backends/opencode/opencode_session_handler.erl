@@ -106,7 +106,7 @@ opencode_session (thin wrapper)
     permission_handler :: fun((binary(), map(), map()) ->
                               beam_agent_core:permission_result()) |
                           undefined,
-    sdk_mcp_registry   :: beam_agent_mcp_core:mcp_registry() | undefined,
+    sdk_mcp_registry   :: beam_agent_tool_registry:mcp_registry() | undefined,
     sdk_hook_registry  :: beam_agent_hooks_core:hook_registry() | undefined,
 
     %% State tracking (for custom call state checks)
@@ -141,7 +141,7 @@ init_handler(Opts) ->
     BufferMax = maps:get(buffer_max, Opts, 2 * 1024 * 1024),
     Model = maps:get(model, Opts, undefined),
     PermissionHandler = maps:get(permission_handler, Opts, undefined),
-    McpRegistry = beam_agent_mcp_core:build_registry(
+    McpRegistry = beam_agent_tool_registry:build_registry(
                       maps:get(sdk_mcp_servers, Opts, undefined)),
     HookRegistry = beam_agent_hooks_core:build_registry(
                        maps:get(sdk_hooks, Opts, undefined)),

@@ -536,9 +536,9 @@ tool_handler_test_() ->
                   {ok, [#{type => text, text => <<"tool output">>}]}
               end,
 
-              Tool = beam_agent_mcp_core:tool(<<"my_tool">>, <<"Test tool">>,
+              Tool = beam_agent_tool_registry:tool(<<"my_tool">>, <<"Test tool">>,
                   #{<<"type">> => <<"object">>}, Handler),
-              Server = beam_agent_mcp_core:server(<<"test-tools">>, [Tool]),
+              Server = beam_agent_tool_registry:server(<<"test-tools">>, [Tool]),
 
               {ok, Pid} = copilot_session:start_link(#{
                   cli_path => ScriptPath,

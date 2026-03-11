@@ -89,7 +89,7 @@ Zero additional processes. The engine gen_statem IS the session process.
 
     %% SDK registries
     sdk_hook_registry   :: beam_agent_hooks_core:hook_registry() | undefined,
-    sdk_mcp_registry    :: beam_agent_mcp_core:mcp_registry() | undefined
+    sdk_mcp_registry    :: beam_agent_tool_registry:mcp_registry() | undefined
 }).
 
 -dialyzer({no_underspecs, [
@@ -130,7 +130,7 @@ init_handler(Opts) ->
     UserInputHandler = maps:get(user_input_handler, Opts, undefined),
     HookRegistry = beam_agent_hooks_core:build_registry(
                        maps:get(sdk_hooks, Opts, undefined)),
-    McpRegistry = beam_agent_mcp_core:build_registry(
+    McpRegistry = beam_agent_tool_registry:build_registry(
                       maps:get(sdk_mcp_servers, Opts, undefined)),
     TransportOpts = #{
         executable  => CliPath,
@@ -627,7 +627,7 @@ handle_server_request(Id, <<"mcp/message">>, Params,
     SafeParams = safe_params(Params),
     ServerName = maps:get(<<"server_name">>, SafeParams, <<>>),
     Message = maps:get(<<"message">>, SafeParams, #{}),
-    Action = case beam_agent_mcp_core:handle_mcp_message(
+    Action = case beam_agent_tool_registry:handle_mcp_message(
                       ServerName, Message, Registry) of
         {ok, McpResponse} ->
             [{send, beam_agent_jsonrpc:encode_response(Id, McpResponse)}];
@@ -750,7 +750,7 @@ handle_dynamic_tool_call_request(Id, Params,
     ToolName = maps:get(<<"tool">>, Params, <<>>),
     Arguments = normalize_dynamic_tool_arguments(
                     maps:get(<<"arguments">>, Params, #{})),
-    case beam_agent_mcp_core:call_tool_by_name(
+    case beam_agent_tool_registry:call_tool_by_name(
              ToolName, Arguments, Registry) of
         {ok, ContentItems} ->
             ResponseMap = dynamic_tool_call_response(ContentItems),
@@ -956,14 +956,14 @@ safe_user_input_response(Handler, Params, Ctx) ->
 normalize_dynamic_tool_arguments(Args) when is_map(Args) -> Args;
 normalize_dynamic_tool_arguments(_) -> #{}.
 
--spec dynamic_tool_call_response([beam_agent_mcp_core:content_result()]) ->
+-spec dynamic_tool_call_response([beam_agent_tool_registry:content_result()]) ->
     map().
 dynamic_tool_call_response(ContentItems) ->
     #{<<"success">> => true,
       <<"contentItems">> =>
           [dynamic_tool_content_item(Item) || Item <- ContentItems]}.
 
--spec dynamic_tool_content_item(beam_agent_mcp_core:content_result()) ->
+-spec dynamic_tool_content_item(beam_agent_tool_registry:content_result()) ->
     map().
 dynamic_tool_content_item(#{type := text, text := Text}) ->
     #{<<"type">> => <<"inputText">>, <<"text">> => Text};

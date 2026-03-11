@@ -660,9 +660,9 @@ sdk_mcp_session_test_() ->
                    Text = maps:get(<<"text">>, Input, <<"default">>),
                    {ok, [#{type => text, text => Text}]}
                end,
-               Tool = beam_agent_mcp_core:tool(<<"echo">>, <<"Echo">>,
+               Tool = beam_agent_tool_registry:tool(<<"echo">>, <<"Echo">>,
                    #{<<"type">> => <<"object">>}, EchoHandler),
-               Server = beam_agent_mcp_core:server(<<"test-tools">>, [Tool]),
+               Server = beam_agent_tool_registry:server(<<"test-tools">>, [Tool]),
 
                {ok, Pid} = claude_agent_session:start_link(#{
                    cli_path => ScriptPath,

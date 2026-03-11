@@ -182,14 +182,14 @@ reconnect_mcp_server(Session, ServerName) ->
                            {ok, term()} | {error, term()}.
 toggle_mcp_server(Session, ServerName, Enabled) ->
     claude_agent_session:toggle_mcp_server(Session, ServerName, Enabled).
--spec mcp_tool(binary(), binary(), map(), beam_agent_mcp_core:tool_handler()) ->
-                  beam_agent_mcp_core:tool_def().
+-spec mcp_tool(binary(), binary(), map(), beam_agent_tool_registry:tool_handler()) ->
+                  beam_agent_tool_registry:tool_def().
 mcp_tool(Name, Description, InputSchema, Handler) ->
-    beam_agent_mcp_core:tool(Name, Description, InputSchema, Handler).
--spec mcp_server(binary(), [beam_agent_mcp_core:tool_def()]) ->
-                    beam_agent_mcp_core:sdk_mcp_server().
+    beam_agent_tool_registry:tool(Name, Description, InputSchema, Handler).
+-spec mcp_server(binary(), [beam_agent_tool_registry:tool_def()]) ->
+                    beam_agent_tool_registry:sdk_mcp_server().
 mcp_server(Name, Tools) ->
-    beam_agent_mcp_core:server(Name, Tools).
+    beam_agent_tool_registry:server(Name, Tools).
 -spec sdk_hook(beam_agent_hooks_core:hook_event(),
                beam_agent_hooks_core:hook_callback()) ->
                   beam_agent_hooks_core:hook_def().

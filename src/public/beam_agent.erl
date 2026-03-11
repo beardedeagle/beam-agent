@@ -849,10 +849,10 @@ mcp_status(Session) ->
 add_mcp_server(Session, Body) ->
     native_or(Session, add_mcp_server, [Body], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
-            Server = beam_agent_mcp_core:server(
+            Server = beam_agent_tool_registry:server(
                 maps:get(<<"name">>, Body, maps:get(name, Body, <<"unnamed">>)),
                 maps:get(<<"tools">>, Body, maps:get(tools, Body, []))),
-            NewRegistry = beam_agent_mcp_core:register_server(Server, Registry),
+            NewRegistry = beam_agent_tool_registry:register_server(Server, Registry),
             {{ok, with_universal_source(Session, #{status => added,
                 server_name => maps:get(name, Server)})}, NewRegistry}
         end)
@@ -861,8 +861,8 @@ add_mcp_server(Session, Body) ->
 -spec mcp_server_status(pid()) -> {ok, term()} | {error, term()}.
 mcp_server_status(Session) ->
     native_or(Session, mcp_server_status, [], fun() ->
-        case beam_agent_mcp_core:get_session_registry(Session) of
-            {ok, Registry} -> beam_agent_mcp_core:server_status(Registry);
+        case beam_agent_tool_registry:get_session_registry(Session) of
+            {ok, Registry} -> beam_agent_tool_registry:server_status(Registry);
             {error, not_found} -> {ok, #{}}
         end
     end).
@@ -871,7 +871,7 @@ mcp_server_status(Session) ->
 set_mcp_servers(Session, Servers) ->
     native_or(Session, set_mcp_servers, [Servers], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
-            NewRegistry = beam_agent_mcp_core:set_servers(Servers, Registry),
+            NewRegistry = beam_agent_tool_registry:set_servers(Servers, Registry),
             {{ok, with_universal_source(Session, #{status => updated})}, NewRegistry}
         end)
     end).
@@ -880,7 +880,7 @@ set_mcp_servers(Session, Servers) ->
 reconnect_mcp_server(Session, ServerName) ->
     native_or(Session, reconnect_mcp_server, [ServerName], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
-            case beam_agent_mcp_core:reconnect_server(ServerName, Registry) of
+            case beam_agent_tool_registry:reconnect_server(ServerName, Registry) of
                 {ok, NewRegistry} ->
                     {{ok, with_universal_source(Session, #{status => reconnected,
                         server_name => ServerName})}, NewRegistry};
@@ -894,7 +894,7 @@ reconnect_mcp_server(Session, ServerName) ->
 toggle_mcp_server(Session, ServerName, Enabled) ->
     native_or(Session, toggle_mcp_server, [ServerName, Enabled], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
-            case beam_agent_mcp_core:toggle_server(ServerName, Enabled, Registry) of
+            case beam_agent_tool_registry:toggle_server(ServerName, Enabled, Registry) of
                 {ok, NewRegistry} ->
                     {{ok, with_universal_source(Session, #{status => toggled,
                         server_name => ServerName, enabled => Enabled})}, NewRegistry};
@@ -916,7 +916,7 @@ mcp_server_oauth_login(Session, Params) ->
 -spec mcp_server_reload(pid()) -> {ok, term()} | {error, term()}.
 mcp_server_reload(Session) ->
     native_or(Session, mcp_server_reload, [], fun() ->
-        case beam_agent_mcp_core:get_session_registry(Session) of
+        case beam_agent_tool_registry:get_session_registry(Session) of
             {ok, _Registry} ->
                 {ok, with_universal_source(Session, #{status => reloaded})};
             {error, not_found} ->
@@ -1240,21 +1240,21 @@ session_file_opts(Session) ->
     end.
 
 -spec universal_mcp_registry_op(pid(),
-    fun((beam_agent_mcp_core:mcp_registry()) ->
-        {{ok, term()} | {error, term()}, beam_agent_mcp_core:mcp_registry()})) ->
+    fun((beam_agent_tool_registry:mcp_registry()) ->
+        {{ok, term()} | {error, term()}, beam_agent_tool_registry:mcp_registry()})) ->
     {ok, term()} | {error, term()}.
 universal_mcp_registry_op(Session, Fun) ->
-    case beam_agent_mcp_core:get_session_registry(Session) of
+    case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->
             {Result, NewRegistry} = Fun(Registry),
-            _ = beam_agent_mcp_core:update_session_registry(Session,
+            _ = beam_agent_tool_registry:update_session_registry(Session,
                 fun(_) -> NewRegistry end),
             Result;
         {error, not_found} ->
             %% No registry exists; create one, apply the op
-            EmptyRegistry = beam_agent_mcp_core:new_registry(),
+            EmptyRegistry = beam_agent_tool_registry:new_registry(),
             {Result, NewRegistry} = Fun(EmptyRegistry),
-            beam_agent_mcp_core:register_session_registry(Session, NewRegistry),
+            beam_agent_tool_registry:register_session_registry(Session, NewRegistry),
             Result
     end.
 
@@ -1389,7 +1389,7 @@ universal_session_destroy(Session, SessionId) ->
     ok = beam_agent_control_core:clear_config(SessionId),
     ok = beam_agent_control_core:clear_feedback(SessionId),
     ok = beam_agent_control_core:clear_session_callbacks(SessionId),
-    ok = beam_agent_mcp_core:unregister_session_registry(Session),
+    ok = beam_agent_tool_registry:unregister_session_registry(Session),
     case session_identity(Session) =:= SessionId of
         true ->
             ok = beam_agent_backend:unregister_session(Session);

@@ -40,22 +40,22 @@ defmodule CopilotEx do
   - `:output_format` - Structured output JSON schema (map)
   - `:reasoning_effort` - Reasoning effort level
   - `:sdk_mcp_servers` - In-process MCP servers (list of server maps).
-    All adapters share this unified API via `beam_agent_mcp_core`.
+    All adapters share this unified API via `beam_agent_tool_registry`.
   - `:sdk_hooks` - SDK lifecycle hooks (list of hook maps)
   - `:user_input_handler` - User input request handler function
 
   ## In-Process MCP Tools
 
-  Register tools via the unified `beam_agent_mcp_core` API (same as all adapters):
+  Register tools via the unified `beam_agent_tool_registry` API (same as all adapters):
 
-      tool = :beam_agent_mcp_core.tool("weather", "Get weather",
+      tool = :beam_agent_tool_registry.tool("weather", "Get weather",
         %{"type" => "object",
           "properties" => %{"city" => %{"type" => "string"}}},
         fn args ->
           city = Map.get(args, "city", "unknown")
           {:ok, [%{type: :text, text: "72F in \#{city}"}]}
         end)
-      server = :beam_agent_mcp_core.server("my-tools", [tool])
+      server = :beam_agent_tool_registry.server("my-tools", [tool])
       {:ok, session} = CopilotEx.start_session(
         cli_path: "copilot",
         sdk_mcp_servers: [server]
@@ -415,13 +415,13 @@ defmodule CopilotEx do
   @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, list()} | {:error, binary()})) ::
           map()
   def mcp_tool(name, description, input_schema, handler) do
-    :beam_agent_mcp_core.tool(name, description, input_schema, handler)
+    :beam_agent_tool_registry.tool(name, description, input_schema, handler)
   end
 
   @doc "Create an in-process MCP server definition."
   @spec mcp_server(binary(), [map()]) :: map()
   def mcp_server(name, tools) do
-    :beam_agent_mcp_core.server(name, tools)
+    :beam_agent_tool_registry.server(name, tools)
   end
 
   # ── System Init Convenience Accessors ────────────────────────────

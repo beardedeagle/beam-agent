@@ -72,6 +72,7 @@ end,
 
     %% Outgoing requests (client → server)
     send_initialize/1,
+    send_initialized/1,
     send_ping/1,
     send_tools_list/1,
     send_tools_list/2,
@@ -212,8 +213,9 @@ Options:
 -spec new(beam_agent_mcp_protocol:implementation_info(),
           beam_agent_mcp_protocol:client_capabilities(),
           map()) -> client_state().
-new(ClientInfo, ClientCaps, Opts)
-  when is_map(ClientInfo), is_map(ClientCaps), is_map(Opts) ->
+new(ClientInfo, ClientCaps0, Opts)
+  when is_map(ClientInfo), is_map(ClientCaps0), is_map(Opts) ->
+    ClientCaps = normalize_client_caps(ClientCaps0),
     Base = #{
         lifecycle => uninitialized,
         client_info => ClientInfo,
@@ -276,6 +278,11 @@ send_initialize(#{lifecycle := uninitialized,
     {Msg, State2#{lifecycle => initializing}};
 send_initialize(#{lifecycle := Lifecycle}) ->
     error({invalid_lifecycle, Lifecycle, initialize}).
+
+-doc "Generate the `notifications/initialized` notification to complete the MCP handshake.".
+-spec send_initialized(client_state()) -> {map(), client_state()}.
+send_initialized(#{lifecycle := ready} = State) ->
+    {beam_agent_mcp_protocol:initialized_notification(), State}.
 
 -doc """
 Generate a `ping` request.
@@ -735,7 +742,7 @@ dispatch_handler(Id, Method, Capability, HandlerFun, Params, State) ->
                         client_state(), module()) -> client_result().
 dispatch_sampling(Id, Params,
                   #{handler_state := HState} = State, Handler) ->
-    case Handler:handle_sampling_create_message(Params, HState) of
+    try Handler:handle_sampling_create_message(Params, HState) of
         {ok, Result, NewHState} ->
             Resp = beam_agent_mcp_protocol:sampling_create_message_response(
                        Id, Result),
@@ -743,13 +750,21 @@ dispatch_sampling(Id, Params,
         {error, Code, Msg} ->
             Resp = beam_agent_mcp_protocol:error_response(Id, Code, Msg),
             {server_request, Resp, State}
+    catch
+        Class:Reason:Stack ->
+            logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
+                         [<<"handle_sampling_create_message">>, Class, Reason, Stack]),
+            Resp = beam_agent_mcp_protocol:error_response(
+                       Id, beam_agent_mcp_protocol:error_internal(),
+                       <<"Handler crashed">>),
+            {server_request, Resp, State}
     end.
 
 -spec dispatch_elicitation(beam_agent_mcp_protocol:request_id(), map(),
                            client_state(), module()) -> client_result().
 dispatch_elicitation(Id, Params,
                      #{handler_state := HState} = State, Handler) ->
-    case Handler:handle_elicitation_create(Params, HState) of
+    try Handler:handle_elicitation_create(Params, HState) of
         {ok, Result, NewHState} ->
             Resp = beam_agent_mcp_protocol:elicitation_create_response(
                        Id, Result),
@@ -757,18 +772,34 @@ dispatch_elicitation(Id, Params,
         {error, Code, Msg} ->
             Resp = beam_agent_mcp_protocol:error_response(Id, Code, Msg),
             {server_request, Resp, State}
+    catch
+        Class:Reason:Stack ->
+            logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
+                         [<<"handle_elicitation_create">>, Class, Reason, Stack]),
+            Resp = beam_agent_mcp_protocol:error_response(
+                       Id, beam_agent_mcp_protocol:error_internal(),
+                       <<"Handler crashed">>),
+            {server_request, Resp, State}
     end.
 
 -spec dispatch_roots_list(beam_agent_mcp_protocol:request_id(), map(),
                           client_state(), module()) -> client_result().
 dispatch_roots_list(Id, _Params,
                     #{handler_state := HState} = State, Handler) ->
-    case Handler:handle_roots_list(HState) of
+    try Handler:handle_roots_list(HState) of
         {ok, Roots, NewHState} ->
             Resp = beam_agent_mcp_protocol:roots_list_response(Id, Roots),
             {server_request, Resp, State#{handler_state => NewHState}};
         {error, Code, Msg} ->
             Resp = beam_agent_mcp_protocol:error_response(Id, Code, Msg),
+            {server_request, Resp, State}
+    catch
+        Class:Reason:Stack ->
+            logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
+                         [<<"handle_roots_list">>, Class, Reason, Stack]),
+            Resp = beam_agent_mcp_protocol:error_response(
+                       Id, beam_agent_mcp_protocol:error_internal(),
+                       <<"Handler crashed">>),
             {server_request, Resp, State}
     end.
 
@@ -862,6 +893,24 @@ untrack_request(Id, #{pending := Pending} = State) ->
 require_ready(#{lifecycle := ready}) -> ok;
 require_ready(#{lifecycle := Lifecycle}) ->
     error({not_ready, Lifecycle}).
+
+%%--------------------------------------------------------------------
+%% Internal: Client Capability Normalization
+%%--------------------------------------------------------------------
+
+%% Normalize client capabilities to use atom keys.
+%% Accepts both atom-keyed and binary-keyed maps for caller convenience.
+-spec normalize_client_caps(map()) -> map().
+normalize_client_caps(Caps) when is_map(Caps) ->
+    maps:fold(fun
+        (K, V, Acc) when is_atom(K) -> Acc#{K => V};
+        (K, V, Acc) when is_binary(K) ->
+            case beam_agent_mcp_protocol:safe_capability_atom(K) of
+                undefined -> Acc;
+                Atom -> Acc#{Atom => V}
+            end;
+        (_, _, Acc) -> Acc
+    end, #{}, Caps).
 
 %%--------------------------------------------------------------------
 %% Internal: Capability Decoding

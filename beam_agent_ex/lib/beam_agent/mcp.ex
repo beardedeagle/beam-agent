@@ -7,26 +7,39 @@ defmodule BeamAgent.MCP do
   and client-side dispatch.
   """
 
-  # Tool registry (beam_agent_mcp_core)
+  # Tool registry — constructors
   defdelegate tool(name, description, input_schema, handler), to: :beam_agent_mcp
   defdelegate server(name, tools), to: :beam_agent_mcp
   defdelegate server(name, tools, version), to: :beam_agent_mcp
+
+  # Tool registry — registry management
   defdelegate new_registry(), to: :beam_agent_mcp
   defdelegate register_server(server, registry), to: :beam_agent_mcp
   defdelegate server_names(registry), to: :beam_agent_mcp
   defdelegate servers_for_cli(registry), to: :beam_agent_mcp
   defdelegate servers_for_init(registry), to: :beam_agent_mcp
-  defdelegate handle_mcp_message(session_id, message, registry), to: :beam_agent_mcp
-  defdelegate handle_mcp_message(session_id, message, registry, timeout), to: :beam_agent_mcp
-  defdelegate call_tool_by_name(session_id, name, input), to: :beam_agent_mcp
-  defdelegate call_tool_by_name(session_id, name, input, timeout), to: :beam_agent_mcp
+
+  # Tool registry — dispatch
+  defdelegate handle_mcp_message(server_name, message, registry), to: :beam_agent_mcp
+  defdelegate handle_mcp_message(server_name, message, registry, opts), to: :beam_agent_mcp
+  defdelegate call_tool_by_name(tool_name, arguments, registry), to: :beam_agent_mcp
+  defdelegate call_tool_by_name(tool_name, arguments, registry, opts), to: :beam_agent_mcp
   defdelegate all_tool_definitions(registry), to: :beam_agent_mcp
-  defdelegate build_registry(opts), to: :beam_agent_mcp
-  defdelegate server_status(session_id), to: :beam_agent_mcp
-  defdelegate set_servers(session_id, servers), to: :beam_agent_mcp
-  defdelegate toggle_server(session_id, server_name, enabled), to: :beam_agent_mcp
-  defdelegate reconnect_server(session_id, server_name), to: :beam_agent_mcp
-  defdelegate unregister_server(session_id, server_name), to: :beam_agent_mcp
+  defdelegate build_registry(servers), to: :beam_agent_mcp
+
+  # Tool registry — runtime management
+  defdelegate server_status(registry), to: :beam_agent_mcp
+  defdelegate set_servers(servers, old_registry), to: :beam_agent_mcp
+  defdelegate toggle_server(name, enabled, registry), to: :beam_agent_mcp
+  defdelegate reconnect_server(name, registry), to: :beam_agent_mcp
+  defdelegate unregister_server(name, registry), to: :beam_agent_mcp
+
+  # Tool registry — session-scoped registry (ETS-backed)
+  defdelegate register_session_registry(pid, registry), to: :beam_agent_mcp
+  defdelegate get_session_registry(pid), to: :beam_agent_mcp
+  defdelegate update_session_registry(pid, update_fun), to: :beam_agent_mcp
+  defdelegate unregister_session_registry(pid), to: :beam_agent_mcp
+  defdelegate ensure_registry_table(), to: :beam_agent_mcp
 
   # Protocol (beam_agent_mcp_protocol)
   defdelegate protocol_version(), to: :beam_agent_mcp
@@ -43,6 +56,7 @@ defmodule BeamAgent.MCP do
   defdelegate client_server_capabilities(state), to: :beam_agent_mcp
   defdelegate client_session_capabilities(state), to: :beam_agent_mcp
   defdelegate client_send_initialize(state), to: :beam_agent_mcp
+  defdelegate client_send_initialized(state), to: :beam_agent_mcp
   defdelegate client_send_ping(state), to: :beam_agent_mcp
   defdelegate client_send_tools_list(state), to: :beam_agent_mcp
   defdelegate client_send_tools_list(cursor, state), to: :beam_agent_mcp

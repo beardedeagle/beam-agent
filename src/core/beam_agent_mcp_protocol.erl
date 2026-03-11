@@ -13,7 +13,7 @@ This module is the protocol's pure-function layer. It owns:
 
 It deliberately has **no side effects** — no processes, no ETS, no I/O.
 The dispatch layer (`beam_agent_mcp_dispatch`, Phase 2) and the existing
-`beam_agent_mcp_core` both consume this module.
+`beam_agent_tool_registry` both consume this module.
 
 ## Protocol Version
 
@@ -146,6 +146,7 @@ resolves advertised capabilities into a session capability set.
     audio_content/2,
     resource_content/1,
     resource_link_content/2,
+    resource_link_content/3,
 
     %% Type constructors
     implementation_info/2,
@@ -306,6 +307,8 @@ resolves advertised capabilities into a session capability set.
 -type resource_link_content() :: #{
     type := resource_link,
     uri := binary(),
+    name => binary(),
+    description => binary(),
     mimeType => binary(),
     annotations => resource_annotation()
 }.
@@ -885,9 +888,12 @@ completion_complete_response(Id, CompletionResult)
 
 -doc "Construct a `logging/setLevel` request.".
 -spec logging_set_level_request(request_id(), log_level()) -> map().
-logging_set_level_request(Id, Level) when is_atom(Level) ->
+logging_set_level_request(Id, Level)
+  when Level =:= debug; Level =:= info; Level =:= notice;
+       Level =:= warning; Level =:= error; Level =:= critical;
+       Level =:= alert; Level =:= emergency ->
     request(Id, <<"logging/setLevel">>, #{
-        <<"level">> => atom_to_binary(Level, utf8)
+        <<"level">> => atom_to_binary(Level)
     }).
 
 -doc "Construct a `logging/setLevel` response (empty result).".
@@ -904,7 +910,7 @@ Construct a `notifications/message` logging notification.
 logging_message_notification(Level, Logger, Data)
   when is_atom(Level), is_binary(Logger) ->
     notification(<<"notifications/message">>, #{
-        <<"level">> => atom_to_binary(Level, utf8),
+        <<"level">> => atom_to_binary(Level),
         <<"logger">> => Logger,
         <<"data">> => Data
     }).
@@ -1051,6 +1057,19 @@ resource_link_content(Uri, MimeType)
   when is_binary(Uri), is_binary(MimeType) ->
     #{type => resource_link, uri => Uri, mimeType => MimeType}.
 
+-doc """
+Create a resource link content block with optional metadata.
+
+Accepted keys in `Opts`: `name`, `description`, `annotations`.
+Unknown keys are dropped.
+""".
+-spec resource_link_content(binary(), binary(), map()) -> resource_link_content().
+resource_link_content(Uri, MimeType, Opts)
+  when is_binary(Uri), is_binary(MimeType), is_map(Opts) ->
+    Base = #{type => resource_link, uri => Uri, mimeType => MimeType},
+    Allowed = maps:with([name, description, annotations], Opts),
+    maps:merge(Base, Allowed).
+
 %%====================================================================
 %% Type Constructors
 %%====================================================================
@@ -1184,7 +1203,7 @@ Does NOT require `"jsonrpc": "2.0"` to be present — some transports
 strip it. The presence of `method` + `id` (request), `method` only
 (notification), or `id` + `result`/`error` (response) determines type.
 """.
--spec validate_message(map()) -> jsonrpc_message().
+-spec validate_message(term()) -> jsonrpc_message().
 validate_message(#{<<"method">> := Method, <<"id">> := Id} = Msg)
   when is_binary(Method) ->
     Params = maps:get(<<"params">>, Msg, #{}),
@@ -1271,21 +1290,21 @@ encode_implementation_info(#{name := Name, version := Version} = Info) ->
 -spec encode_server_capabilities(server_capabilities()) -> map().
 encode_server_capabilities(Caps) ->
     maps:fold(fun(Key, Value, Acc) ->
-        Acc#{atom_to_binary(Key, utf8) => encode_capability_opts(Value)}
+        Acc#{atom_to_binary(Key) => encode_capability_opts(Value)}
     end, #{}, Caps).
 
 %% Encode client capabilities for the wire.
 -spec encode_client_capabilities(client_capabilities()) -> map().
 encode_client_capabilities(Caps) ->
     maps:fold(fun(Key, Value, Acc) ->
-        Acc#{atom_to_binary(Key, utf8) => encode_capability_opts(Value)}
+        Acc#{atom_to_binary(Key) => encode_capability_opts(Value)}
     end, #{}, Caps).
 
 %% Encode capability options (booleans to wire format).
 -spec encode_capability_opts(map()) -> map().
 encode_capability_opts(Opts) when is_map(Opts) ->
     maps:fold(fun(Key, Value, Acc) ->
-        Acc#{atom_to_binary(Key, utf8) => Value}
+        Acc#{atom_to_binary(Key) => Value}
     end, #{}, Opts).
 
 %% Encode a tool for the wire (tools/list response).
@@ -1306,7 +1325,7 @@ encode_tool(#{name := Name, inputSchema := Schema} = Tool) ->
 -spec encode_tool_annotation(tool_annotation()) -> map().
 encode_tool_annotation(Ann) ->
     maps:fold(fun(Key, Value, Acc) ->
-        Acc#{atom_to_binary(Key, utf8) => Value}
+        Acc#{atom_to_binary(Key) => Value}
     end, #{}, Ann).
 
 %% Encode a call_tool_result for the wire.
@@ -1337,9 +1356,12 @@ encode_content(#{type := resource, resource := Res} = C) ->
     maybe_encode_content_annotations(C, Base);
 encode_content(#{type := resource_link, uri := Uri} = C) ->
     Base = #{<<"type">> => <<"resource_link">>, <<"uri">> => Uri},
-    B1 = maybe_put(<<"mimeType">>,
-                   maps:get(mimeType, C, undefined), Base),
-    maybe_encode_content_annotations(C, B1).
+    B1 = maybe_put(<<"name">>, maps:get(name, C, undefined), Base),
+    B2 = maybe_put(<<"description">>,
+                   maps:get(description, C, undefined), B1),
+    B3 = maybe_put(<<"mimeType">>,
+                   maps:get(mimeType, C, undefined), B2),
+    maybe_encode_content_annotations(C, B3).
 
 %% Optionally add annotations to encoded content.
 -spec maybe_encode_content_annotations(content(), map()) -> map().
@@ -1456,8 +1478,9 @@ encode_create_message_result(#{role := Role, content := Content,
 
 %% Encode an elicitation result for the wire.
 -spec encode_elicitation_result(elicitation_result()) -> map().
-encode_elicitation_result(#{action := Action} = Result) ->
-    ActionBin = atom_to_binary(Action, utf8),
+encode_elicitation_result(#{action := Action} = Result)
+  when Action =:= accept; Action =:= decline; Action =:= cancel ->
+    ActionBin = atom_to_binary(Action),
     Base = #{<<"action">> => ActionBin},
     maybe_put(<<"content">>,
               maps:get(content, Result, undefined), Base).

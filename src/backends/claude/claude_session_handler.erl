@@ -78,7 +78,7 @@ Zero additional processes. The engine gen_statem IS the session process.
                               {ok, binary()} | {error, term()}) | undefined,
 
     %% SDK registries
-    sdk_mcp_registry   :: beam_agent_mcp_core:mcp_registry() | undefined,
+    sdk_mcp_registry   :: beam_agent_tool_registry:mcp_registry() | undefined,
     sdk_hook_registry  :: beam_agent_hooks_core:hook_registry() | undefined,
 
     %% CLI hook config (sent in init request)
@@ -103,7 +103,7 @@ init_handler(Opts) ->
     SessionId = maps:get(session_id, Opts, undefined),
     PermHandler = maps:get(permission_handler, Opts, undefined),
     UserInputHandler = maps:get(user_input_handler, Opts, undefined),
-    McpRegistry = beam_agent_mcp_core:build_registry(
+    McpRegistry = beam_agent_tool_registry:build_registry(
                       maps:get(sdk_mcp_servers, Opts, undefined)),
     HookRegistry = beam_agent_hooks_core:build_registry(
                        maps:get(sdk_hooks, Opts, undefined)),
@@ -496,7 +496,7 @@ build_inbound_response(<<"mcp_message">>, Request,
   when is_map(Registry) ->
     ServerName = maps:get(<<"server_name">>, Request, <<>>),
     Message = maps:get(<<"message">>, Request, #{}),
-    case beam_agent_mcp_core:handle_mcp_message(ServerName, Message,
+    case beam_agent_tool_registry:handle_mcp_message(ServerName, Message,
                                                  Registry) of
         {ok, McpResponse} ->
             #{<<"subtype">> => <<"ok">>,
@@ -941,7 +941,7 @@ build_query_message(Prompt, Params) ->
 %%====================================================================
 
 -spec build_init_request(map(),
-                         beam_agent_mcp_core:mcp_registry() | undefined,
+                         beam_agent_tool_registry:mcp_registry() | undefined,
                          map() | null) -> map().
 build_init_request(Opts, McpRegistry, HookConfig) ->
     Base = #{<<"subtype">> => <<"initialize">>,
@@ -968,7 +968,7 @@ build_init_request(Opts, McpRegistry, HookConfig) ->
     M2 = case McpRegistry of
         undefined -> M1;
         Reg when is_map(Reg), map_size(Reg) > 0 ->
-            Names = beam_agent_mcp_core:servers_for_init(Reg),
+            Names = beam_agent_tool_registry:servers_for_init(Reg),
             M1#{<<"sdkMcpServers">> => Names};
         _ -> M1
     end,
@@ -1282,12 +1282,12 @@ resolve_cli_path(Path) when is_atom(Path)   -> atom_to_list(Path).
 %% Internal: MCP config file management
 %%====================================================================
 
--spec write_mcp_config(beam_agent_mcp_core:mcp_registry() | undefined) ->
+-spec write_mcp_config(beam_agent_tool_registry:mcp_registry() | undefined) ->
     string() | undefined.
 write_mcp_config(undefined) -> undefined;
 write_mcp_config(Registry) when map_size(Registry) =:= 0 -> undefined;
 write_mcp_config(Registry) ->
-    ConfigMap = beam_agent_mcp_core:servers_for_cli(Registry),
+    ConfigMap = beam_agent_tool_registry:servers_for_cli(Registry),
     TmpPath = "/tmp/beam_sdk_mcp_"
               ++ integer_to_list(erlang:unique_integer([positive]))
               ++ ".json",

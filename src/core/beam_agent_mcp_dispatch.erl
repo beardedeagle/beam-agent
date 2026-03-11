@@ -5,7 +5,7 @@ MCP method dispatch, lifecycle state machine, and provider behaviour.
 This module routes incoming MCP JSON-RPC messages to the correct handler
 based on the negotiated session capabilities and current lifecycle state.
 It is a pure-function dispatch layer — **not** a process. The caller
-(typically `beam_agent_mcp_core` or a session handler) owns the state
+(typically `beam_agent_tool_registry` or a session handler) owns the state
 and passes it through on each call.
 
 ## Lifecycle
@@ -23,7 +23,7 @@ The `handle_message/2` function enforces these rules.
 Resource, prompt, completion, and logging operations delegate to a
 **provider** callback module implementing `beam_agent_mcp_provider`.
 If no provider is configured, those methods return `-32601` (method
-not found). Tool operations still route through `beam_agent_mcp_core`.
+not found). Tool operations still route through `beam_agent_tool_registry`.
 
 ## Usage
 
@@ -64,7 +64,7 @@ Callback behaviour for MCP capability providers.
 
 Implement this behaviour to supply resources, prompts, completions,
 and logging to the MCP dispatch layer. Tool dispatch is handled
-separately via `beam_agent_mcp_core`.
+separately via `beam_agent_tool_registry`.
 
 All callbacks receive the provider state and return
 `{ok, Result, NewProviderState}` or `{error, ErrorCode, ErrorMsg}`.
@@ -138,7 +138,7 @@ will never be called.
     server_info := beam_agent_mcp_protocol:implementation_info(),
     server_capabilities := beam_agent_mcp_protocol:server_capabilities(),
     session_capabilities => beam_agent_mcp_protocol:session_capabilities(),
-    tool_registry => beam_agent_mcp_core:mcp_registry(),
+    tool_registry => beam_agent_tool_registry:mcp_registry(),
     handler_timeout => pos_integer(),
     provider => module(),
     provider_state => term()
@@ -160,7 +160,7 @@ Create a new dispatch state.
 response. `ServerCaps` declares which capabilities this server supports.
 
 Options:
-  - `tool_registry` — `beam_agent_mcp_core:mcp_registry()` for tool dispatch
+  - `tool_registry` — `beam_agent_tool_registry:mcp_registry()` for tool dispatch
   - `handler_timeout` — timeout in ms for tool handlers (default: 30000)
   - `provider` — callback module implementing `beam_agent_mcp_provider`
   - `provider_state` — opaque state passed to provider callbacks
@@ -374,8 +374,8 @@ handle_tools_list(Id, _Params, State) ->
             Resp = beam_agent_mcp_protocol:tools_list_response(Id, []),
             {Resp, State};
         Registry ->
-            ToolDefs = beam_agent_mcp_core:all_tool_definitions(Registry),
-            %% Convert mcp_core tool_def() to mcp_protocol tool() format
+            ToolDefs = beam_agent_tool_registry:all_tool_definitions(Registry),
+            %% Convert tool_registry tool_def() to mcp_protocol tool() format
             ProtoTools = [core_tool_to_proto(T) || T <- ToolDefs],
             Resp = beam_agent_mcp_protocol:tools_list_response(
                        Id, ProtoTools),
@@ -385,33 +385,41 @@ handle_tools_list(Id, _Params, State) ->
 -spec handle_tools_call(beam_agent_mcp_protocol:request_id(), map(),
                         dispatch_state()) -> dispatch_result().
 handle_tools_call(Id, Params, State) ->
-    ToolName = maps:get(<<"name">>, Params, <<>>),
-    Arguments = maps:get(<<"arguments">>, Params, #{}),
-    Timeout = maps:get(handler_timeout, State, ?DEFAULT_HANDLER_TIMEOUT),
-    case maps:get(tool_registry, State, undefined) of
-        undefined ->
-            Resp = beam_agent_mcp_protocol:error_response(
-                       Id,
-                       beam_agent_mcp_protocol:error_invalid_params(),
-                       <<"Unknown tool: ", ToolName/binary>>),
-            {Resp, State};
-        Registry ->
-            case beam_agent_mcp_core:call_tool_by_name(
-                     ToolName, Arguments, Registry,
-                     #{handler_timeout => Timeout}) of
-                {ok, ContentResults} ->
-                    ProtoContent = [core_content_to_proto(C)
-                                    || C <- ContentResults],
-                    Result = #{content => ProtoContent},
-                    Resp = beam_agent_mcp_protocol:tools_call_response(
-                               Id, Result),
+    case maps:get(<<"name">>, Params, <<>>) of
+        <<>> ->
+            ErrResp = beam_agent_mcp_protocol:error_response(
+                          Id,
+                          beam_agent_mcp_protocol:error_invalid_params(),
+                          <<"Missing required parameter: name">>),
+            {ErrResp, State};
+        ToolName ->
+            Arguments = maps:get(<<"arguments">>, Params, #{}),
+            Timeout = maps:get(handler_timeout, State, ?DEFAULT_HANDLER_TIMEOUT),
+            case maps:get(tool_registry, State, undefined) of
+                undefined ->
+                    Resp = beam_agent_mcp_protocol:error_response(
+                               Id,
+                               beam_agent_mcp_protocol:error_method_not_found(),
+                               <<"No tool registry configured">>),
                     {Resp, State};
-                {error, Reason} ->
-                    ErrContent = [beam_agent_mcp_protocol:text_content(
-                                      Reason)],
-                    Resp = beam_agent_mcp_protocol:tools_call_response(
-                               Id, ErrContent, true),
-                    {Resp, State}
+                Registry ->
+                    case beam_agent_tool_registry:call_tool_by_name(
+                             ToolName, Arguments, Registry,
+                             #{handler_timeout => Timeout}) of
+                        {ok, ContentResults} ->
+                            ProtoContent = [core_content_to_proto(C)
+                                            || C <- ContentResults],
+                            Result = #{content => ProtoContent},
+                            Resp = beam_agent_mcp_protocol:tools_call_response(
+                                       Id, Result),
+                            {Resp, State};
+                        {error, Reason} ->
+                            ErrContent = [beam_agent_mcp_protocol:text_content(
+                                              Reason)],
+                            Resp = beam_agent_mcp_protocol:tools_call_response(
+                                       Id, ErrContent, true),
+                            {Resp, State}
+                    end
             end
     end.
 
@@ -422,7 +430,9 @@ handle_tools_call(Id, Params, State) ->
 %% Route a request to a provider callback if the capability is advertised
 %% and a provider is configured.
 -spec dispatch_provider(beam_agent_mcp_protocol:request_id(), binary(),
-                        atom(), fun(), map(), dispatch_state()) ->
+                        atom(),
+                        fun((beam_agent_mcp_protocol:request_id(), map(), dispatch_state()) -> dispatch_result()),
+                        map(), dispatch_state()) ->
     dispatch_result().
 dispatch_provider(Id, Method, Capability, HandlerFun, Params, State) ->
     ServerCaps = maps:get(server_capabilities, State),
@@ -634,15 +644,15 @@ handle_logging_set_level(Id, Params,
 %% Internal: Conversions
 %%--------------------------------------------------------------------
 
-%% Convert a beam_agent_mcp_core tool_def() to a protocol tool().
--spec core_tool_to_proto(beam_agent_mcp_core:tool_def()) ->
+%% Convert a beam_agent_tool_registry tool_def() to a protocol tool().
+-spec core_tool_to_proto(beam_agent_tool_registry:tool_def()) ->
     beam_agent_mcp_protocol:tool().
 core_tool_to_proto(#{name := Name, input_schema := Schema} = Tool) ->
     Base = #{name => Name, inputSchema => Schema},
     maybe_put(description, maps:get(description, Tool, undefined), Base).
 
-%% Convert a beam_agent_mcp_core content_result() to protocol content().
--spec core_content_to_proto(beam_agent_mcp_core:content_result()) ->
+%% Convert a beam_agent_tool_registry content_result() to protocol content().
+-spec core_content_to_proto(beam_agent_tool_registry:content_result()) ->
     beam_agent_mcp_protocol:content().
 core_content_to_proto(#{type := text, text := Text}) ->
     #{type => text, text => Text};

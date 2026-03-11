@@ -619,13 +619,13 @@ defmodule CodexEx do
   @spec mcp_tool(binary(), binary(), map(), (map() -> {:ok, list()} | {:error, binary()})) ::
           map()
   def mcp_tool(name, description, input_schema, handler) do
-    :beam_agent_mcp_core.tool(name, description, input_schema, handler)
+    :beam_agent_tool_registry.tool(name, description, input_schema, handler)
   end
 
   @doc "Create an in-process MCP server definition."
   @spec mcp_server(binary(), [map()]) :: map()
   def mcp_server(name, tools) do
-    :beam_agent_mcp_core.server(name, tools)
+    :beam_agent_tool_registry.server(name, tools)
   end
 
   # ── Supervisor Integration (exec) ───────────────────────────────────

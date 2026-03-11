@@ -92,7 +92,7 @@ Zero additional processes. The engine gen_statem IS the session process.
     init_response = #{}   :: map(),
 
     %% SDK registries
-    sdk_mcp_registry      :: beam_agent_mcp_core:mcp_registry() | undefined,
+    sdk_mcp_registry      :: beam_agent_tool_registry:mcp_registry() | undefined,
     sdk_hook_registry     :: beam_agent_hooks_core:hook_registry() | undefined,
 
     %% Cancel tracking
@@ -117,7 +117,7 @@ init_handler(Opts) ->
     ApprovalMode = normalize_approval_mode(
                        maps:get(approval_mode, Opts,
                                 maps:get(permission_mode, Opts, undefined))),
-    McpRegistry = beam_agent_mcp_core:build_registry(
+    McpRegistry = beam_agent_tool_registry:build_registry(
                       maps:get(sdk_mcp_servers, Opts, undefined)),
     HookRegistry = beam_agent_hooks_core:build_registry(
                        maps:get(sdk_hooks, Opts, undefined)),

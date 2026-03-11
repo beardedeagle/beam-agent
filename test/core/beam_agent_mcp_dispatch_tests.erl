@@ -34,19 +34,19 @@ make_state_with_tools() ->
     Info = beam_agent_mcp_protocol:implementation_info(
                <<"test-server">>, <<"1.0.0">>),
     Caps = #{tools => #{listChanged => true}},
-    Tool = beam_agent_mcp_core:tool(<<"echo">>, <<"Echo input">>,
+    Tool = beam_agent_tool_registry:tool(<<"echo">>, <<"Echo input">>,
         #{<<"type">> => <<"object">>,
           <<"properties">> => #{<<"text">> => #{<<"type">> => <<"string">>}}},
         fun(Input) ->
             Text = maps:get(<<"text">>, Input, <<"default">>),
             {ok, [#{type => text, text => Text}]}
         end),
-    Server = beam_agent_mcp_core:server(<<"test">>, [Tool]),
-    Registry = beam_agent_mcp_core:register_server(
-                   Server, beam_agent_mcp_core:new_registry()),
+    Server = beam_agent_tool_registry:server(<<"test">>, [Tool]),
+    Registry = beam_agent_tool_registry:register_server(
+                   Server, beam_agent_tool_registry:new_registry()),
     beam_agent_mcp_dispatch:new(Info, Caps, #{tool_registry => Registry}).
 
-%% Create a state with a mock provider.
+%% Create a state with a test provider.
 make_state_with_provider() ->
     Info = beam_agent_mcp_protocol:implementation_info(
                <<"test-server">>, <<"1.0.0">>),
@@ -227,7 +227,9 @@ resources_list_test() ->
     {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
     Result = maps:get(<<"result">>, Resp),
     Resources = maps:get(<<"resources">>, Result),
-    ?assertEqual(1, length(Resources)).
+    ?assertEqual(1, length(Resources)),
+    [Res] = Resources,
+    ?assert(maps:is_key(<<"uri">>, Res)).
 
 resources_read_test() ->
     State = do_initialize(make_state_with_provider()),
@@ -302,7 +304,9 @@ prompts_get_test() ->
                               <<"arguments">> => #{<<"user">> => <<"Alice">>}}},
     {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
     Result = maps:get(<<"result">>, Resp),
-    ?assert(maps:is_key(<<"messages">>, Result)).
+    ?assert(maps:is_key(<<"messages">>, Result)),
+    Messages = maps:get(<<"messages">>, Result),
+    ?assert(length(Messages) > 0).
 
 prompts_get_missing_name_test() ->
     State = do_initialize(make_state_with_provider()),
@@ -327,7 +331,9 @@ completion_complete_test() ->
     {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
     Result = maps:get(<<"result">>, Resp),
     Completion = maps:get(<<"completion">>, Result),
-    ?assert(is_list(maps:get(<<"values">>, Completion))).
+    Values = maps:get(<<"values">>, Completion),
+    ?assert(is_list(Values)),
+    ?assert(length(Values) > 0).
 
 %%====================================================================
 %% Provider Tests — Logging

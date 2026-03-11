@@ -593,6 +593,38 @@ resource_link_content_test() ->
     ?assertEqual(resource_link, maps:get(type, C)),
     ?assertEqual(<<"file:///a">>, maps:get(uri, C)).
 
+resource_link_content_with_name_description_test() ->
+    %% resource_link_content supports optional name and description per
+    %% MCP 2025-06-18: { type: "resource_link", uri, name?, description?,
+    %%                    mimeType?, annotations? }
+    C = #{type => resource_link,
+          uri => <<"file:///a">>,
+          name => <<"File A">>,
+          description => <<"A text file">>,
+          mimeType => <<"text/plain">>},
+    %% Verify wire encoding includes name and description
+    Result = #{content => [C]},
+    Msg = beam_agent_mcp_protocol:tools_call_response(1, Result),
+    [WireC] = maps:get(<<"content">>,
+                       maps:get(<<"result">>, Msg)),
+    ?assertEqual(<<"resource_link">>, maps:get(<<"type">>, WireC)),
+    ?assertEqual(<<"file:///a">>, maps:get(<<"uri">>, WireC)),
+    ?assertEqual(<<"File A">>, maps:get(<<"name">>, WireC)),
+    ?assertEqual(<<"A text file">>, maps:get(<<"description">>, WireC)),
+    ?assertEqual(<<"text/plain">>, maps:get(<<"mimeType">>, WireC)).
+
+resource_link_content_with_opts_constructor_test() ->
+    C = beam_agent_mcp_protocol:resource_link_content(
+            <<"file:///a">>, <<"text/plain">>,
+            #{name => <<"File A">>, description => <<"A file">>,
+              bogus_key => 42}),
+    ?assertEqual(resource_link, maps:get(type, C)),
+    ?assertEqual(<<"file:///a">>, maps:get(uri, C)),
+    ?assertEqual(<<"text/plain">>, maps:get(mimeType, C)),
+    ?assertEqual(<<"File A">>, maps:get(name, C)),
+    ?assertEqual(<<"A file">>, maps:get(description, C)),
+    ?assertNot(maps:is_key(bogus_key, C)).
+
 %%====================================================================
 %% Type Constructors
 %%====================================================================
