@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/social-preview.png" alt="BEAM Agent" width="100%">
+</p>
+
 # BEAM Agent
 
 Canonical BEAM SDKs for integrating subscription-backed coding agents into
