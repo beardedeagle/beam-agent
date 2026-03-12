@@ -383,7 +383,7 @@
       <div class="feature">
         <div class="feature-icon">&#9889;</div>
         <h3>Telemetry</h3>
-        <p>State changes, queries, buffer overflows &mdash; all instrumented via :telemetry for observability.</p>
+        <p>State changes, queries, buffer overflows &mdash; optionally instrumented via :telemetry (zero overhead when absent).</p>
       </div>
       <div class="feature">
         <div class="feature-icon">&#128274;</div>
@@ -436,7 +436,7 @@
         <span class="foundation-tag">JSONL / JSON-RPC</span>
         <span class="foundation-tag">Hooks</span>
         <span class="foundation-tag">MCP Registry</span>
-        <span class="foundation-tag">Telemetry</span>
+        <span class="foundation-tag">Telemetry (opt-in)</span>
         <span class="foundation-tag">Session Store</span>
         <span class="foundation-tag">Threads</span>
         <span class="foundation-tag">Checkpoints</span>
@@ -500,7 +500,7 @@
           <div class="pkg-name"><a href="elixir/GeminiEx.html">GeminiEx</a></div>
           <span class="pkg-tag">Google Gemini</span>
         </div>
-        <p>Google Gemini CLI agent SDK. JSONL stdio transport with schema-driven tool definitions.</p>
+        <p>Google Gemini CLI agent SDK. JSON-RPC over NDJSON with persistent ACP sessions.</p>
         <div class="pkg-links">
           <a href="erlang/gemini_cli_client.html">Erlang</a>
           <a href="elixir/GeminiEx.html">Elixir</a>
@@ -537,16 +537,19 @@
     <div id="tab-elixir" class="tab-content active">
       <div class="code-block">
 <span class="comment"># mix.exs</span>
-{<span class="atom">:claude_ex</span>, <span class="string">"~&gt; 0.1"</span>}
+{<span class="atom">:beam_agent_ex</span>, <span class="atom">path:</span> <span class="string">"beam_agent_ex"</span>}
 
-<span class="comment"># Start a session and send a query</span>
-{<span class="atom">:ok</span>, pid} = <span class="module">ClaudeEx</span>.<span class="func">start_session</span>(%{
-  <span class="atom">cli_path:</span> <span class="string">"claude"</span>,
-  <span class="atom">args:</span> [<span class="string">"--model"</span>, <span class="string">"claude-sonnet-4-6"</span>]
-})
+<span class="comment"># Start a session and stream results</span>
+{<span class="atom">:ok</span>, session} = <span class="module">BeamAgent</span>.<span class="func">start_session</span>(<span class="atom">backend:</span> <span class="atom">:claude</span>, <span class="atom">cli_path:</span> <span class="string">"claude"</span>)
 
-<span class="module">ClaudeEx</span>.<span class="func">stream!</span>(pid, <span class="string">"Explain OTP supervision"</span>, <span class="keyword">fn</span> msg <span class="keyword">-&gt;</span>
-  <span class="module">IO</span>.<span class="func">inspect</span>(msg, <span class="atom">label:</span> <span class="string">"event"</span>)
+session
+|&gt; <span class="module">BeamAgent</span>.<span class="func">stream!</span>(<span class="string">"Explain OTP supervision"</span>)
+|&gt; <span class="module">Enum</span>.<span class="func">each</span>(<span class="keyword">fn</span> msg <span class="keyword">-&gt;</span>
+  <span class="keyword">case</span> msg.type <span class="keyword">do</span>
+    <span class="atom">:text</span> <span class="keyword">-&gt;</span> <span class="module">IO</span>.<span class="func">write</span>(msg.content)
+    <span class="atom">:result</span> <span class="keyword">-&gt;</span> <span class="module">IO</span>.<span class="func">puts</span>(<span class="string">"\n--- Done ---"</span>)
+    _ <span class="keyword">-&gt;</span> <span class="atom">:ok</span>
+  <span class="keyword">end</span>
 <span class="keyword">end</span>)
       </div>
     </div>
@@ -554,15 +557,16 @@
     <div id="tab-erlang" class="tab-content">
       <div class="code-block">
 <span class="comment">%% rebar.config</span>
-{<span class="atom">deps</span>, [{<span class="atom">claude_agent_sdk</span>, <span class="string">"~> 0.1"</span>}]}.
+{<span class="atom">deps</span>, [{<span class="atom">beam_agent</span>, {<span class="atom">path</span>, <span class="string">"."</span>}}]}.
 
 <span class="comment">%% Start a session and send a query</span>
-{<span class="atom">ok</span>, Pid} = <span class="module">claude_agent_sdk</span>:<span class="func">start_link</span>(#{
+{<span class="atom">ok</span>, Session} = <span class="module">beam_agent</span>:<span class="func">start_session</span>(#{
+    <span class="atom">backend</span> =&gt; <span class="atom">claude</span>,
     <span class="atom">cli_path</span> =&gt; &lt;&lt;<span class="string">"claude"</span>&gt;&gt;,
-    <span class="atom">args</span> =&gt; [&lt;&lt;<span class="string">"--model"</span>&gt;&gt;, &lt;&lt;<span class="string">"claude-sonnet-4-6"</span>&gt;&gt;]
+    <span class="atom">permission_mode</span> =&gt; &lt;&lt;<span class="string">"bypassPermissions"</span>&gt;&gt;
 }),
 
-<span class="module">claude_agent_sdk</span>:<span class="func">query</span>(Pid, &lt;&lt;<span class="string">"Explain OTP supervision"</span>&gt;&gt;).
+{<span class="atom">ok</span>, Messages} = <span class="module">beam_agent</span>:<span class="func">query</span>(Session, &lt;&lt;<span class="string">"Explain OTP supervision"</span>&gt;&gt;).
       </div>
     </div>
   </section>
