@@ -11,6 +11,8 @@
         public_key
     ]},
     {env, []},
+    {licenses, ["MIT"]},
+    {links, [{"GitHub", "https://github.com/beardedeagle/beam-agent"}]},
     {modules, [
         beam_agent,
         beam_agent_capabilities,
