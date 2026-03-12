@@ -250,7 +250,7 @@ do_exec_query(From, Prompt, Params, Data) ->
     Ref = make_ref(),
     StartTime =
         beam_agent_telemetry_core:span_start(codex_exec, query,
-                                        #{prompt => Prompt}),
+                                        #{prompt_length => byte_size(Prompt)}),
     Model = maps:get(model, Params, Data#data.model),
     AP = maps:get(approval_policy, Params, Data#data.approval_policy),
     try

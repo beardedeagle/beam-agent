@@ -69,12 +69,16 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
 -doc "Ensure the runtime ETS table exists.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    case ets:info(?RUNTIME_TABLE) of
+    case ets:whereis(?RUNTIME_TABLE) of
         undefined ->
-            _ = ets:new(?RUNTIME_TABLE, [set, public, named_table,
-                {read_concurrency, true}]),
-            ok;
-        _ ->
+            try
+                _ = ets:new(?RUNTIME_TABLE, [set, public, named_table,
+                    {read_concurrency, true}]),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _Tid ->
             ok
     end.
 
