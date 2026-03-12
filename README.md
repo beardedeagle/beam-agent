@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/social-preview.png" alt="BEAM Agent" width="640">
+  <img src=".github/social-preview.png" alt="BEAM Agent" width="100%">
 </p>
 
 # BEAM Agent
