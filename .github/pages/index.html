@@ -342,10 +342,131 @@
       footer a { color: var(--mainLightest); }
     }
 
+    /* Architecture diagram */
+    .arch {
+      text-align: center;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .arch-layer {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.5rem;
+    }
+
+    .arch-layer.arch-api { border-color: var(--mainLight); }
+    .arch-layer.arch-engine { border-color: var(--mainDark); }
+
+    .arch-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 0.2rem;
+    }
+
+    .arch-content {
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      font-size: 0.875rem;
+    }
+
+    .arch-arrow {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      padding: 0.3rem 0;
+    }
+
+    .arch-handlers {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 0.3rem;
+    }
+
+    .arch-handler {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.9rem;
+      text-align: center;
+      font-weight: 600;
+      font-size: 0.85rem;
+      flex: 1;
+      min-width: 90px;
+      max-width: 140px;
+    }
+
+    .arch-handler span {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+    }
+
+    /* Capability matrix */
+    .cap-matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin-top: 1rem;
+    }
+
+    .cap-matrix th,
+    .cap-matrix td {
+      padding: 0.4rem 0.6rem;
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .cap-matrix th {
+      background: var(--bg-code);
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    .cap-matrix td:first-child {
+      text-align: left;
+      font-weight: 500;
+    }
+
+    .cap-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .cap-native { background: #34a853; }
+    .cap-universal { background: #4285f4; }
+    .cap-hybrid { background: #9b59b6; }
+
+    .cap-legend {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      justify-content: center;
+    }
+
+    .cap-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
     @media (max-width: 600px) {
       .hero h1 { font-size: 1.75rem; }
       .hero .tagline { font-size: 1rem; }
       .packages { grid-template-columns: 1fr; }
+      .arch-handlers { flex-direction: column; align-items: center; }
+      .arch-handler { max-width: 200px; }
+      .cap-matrix { font-size: 0.7rem; }
+      .cap-matrix th, .cap-matrix td { padding: 0.3rem; }
     }
   </style>
 </head>
@@ -404,6 +525,34 @@
         <div class="feature-icon">&#128257;</div>
         <h3>Content Blocks</h3>
         <p>Bidirectional conversion between messages and typed content blocks across all protocols.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture -->
+  <section>
+    <h2 class="section-title">Architecture</h2>
+    <p class="section-desc">
+      All five backends share a three-layer design. The public API delegates to a
+      shared session engine, which dispatches to per-backend protocol handlers.
+    </p>
+    <div class="arch">
+      <div class="arch-layer arch-api">
+        <div class="arch-label">Public API</div>
+        <div class="arch-content">beam_agent / BeamAgent</div>
+      </div>
+      <div class="arch-arrow">&#9660;</div>
+      <div class="arch-layer arch-engine">
+        <div class="arch-label">Session Engine (gen_statem)</div>
+        <div class="arch-content">lifecycle &middot; queue &middot; telemetry &middot; error recovery</div>
+      </div>
+      <div class="arch-arrow">&#9660;</div>
+      <div class="arch-handlers">
+        <div class="arch-handler">Claude<span>stdio / JSONL</span></div>
+        <div class="arch-handler">Codex<span>stdio / JSON-RPC</span></div>
+        <div class="arch-handler">Gemini<span>JSON-RPC / NDJSON</span></div>
+        <div class="arch-handler">OpenCode<span>HTTP / SSE</span></div>
+        <div class="arch-handler">Copilot<span>LSP framing</span></div>
       </div>
     </div>
   </section>
@@ -521,6 +670,59 @@
           <a href="https://github.com/beardedeagle/beam-agent/tree/main/src/backends/opencode">Source</a>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Capability Matrix -->
+  <section>
+    <h2 class="section-title">Capability Matrix</h2>
+    <p class="section-desc">
+      All capabilities are fully supported across every backend. The matrix shows
+      how each is implemented: native backend call, universal OTP shim, or both.
+    </p>
+    <div style="overflow-x: auto;">
+      <table class="cap-matrix">
+        <thead>
+          <tr>
+            <th style="text-align:left">Capability</th>
+            <th>Claude</th>
+            <th>Codex</th>
+            <th>Gemini</th>
+            <th>OpenCode</th>
+            <th>Copilot</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Session lifecycle</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Session info</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Model switch</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Interrupt</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Permission mode</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Session history</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Session mutation</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Thread management</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Metadata accessors</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>MCP servers</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>MCP management</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Hooks</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Checkpointing</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Thinking budget</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Task stop</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Commands</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Approval callbacks</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>User input callbacks</td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Realtime review</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-hybrid"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-hybrid"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Config management</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-hybrid"></span></td></tr>
+          <tr><td>Provider management</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-hybrid"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+          <tr><td>Attachments</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-native"></span></td></tr>
+          <tr><td>Event streaming</td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-hybrid"></span></td><td><span class="cap-dot cap-universal"></span></td><td><span class="cap-dot cap-native"></span></td><td><span class="cap-dot cap-universal"></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="cap-legend">
+      <div class="cap-legend-item"><span class="cap-dot cap-native"></span> Native</div>
+      <div class="cap-legend-item"><span class="cap-dot cap-universal"></span> Universal</div>
+      <div class="cap-legend-item"><span class="cap-dot cap-hybrid"></span> Both</div>
     </div>
   </section>
 
