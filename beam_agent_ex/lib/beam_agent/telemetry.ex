@@ -8,6 +8,14 @@ defmodule BeamAgent.Telemetry do
   Erlang/OTP `:telemetry` convention: the library emits events, applications
   handle them.
 
+  ## Optional dependency
+
+  The `:telemetry` library is an **optional** dependency. When present, events
+  are emitted via `:telemetry.execute/3`. When absent, all emission is a silent
+  no-op with zero overhead. To enable telemetry, add `{:telemetry, "~> 1.3"}` to
+  your application's `deps` in `mix.exs` and ensure the `:telemetry` application
+  is started.
+
   ## When to use directly vs through `BeamAgent`
 
   Backends call this module internally during session operation. Use it directly

@@ -8,8 +8,7 @@
         crypto,
         ssl,
         inets,
-        public_key,
-        telemetry
+        public_key
     ]},
     {env, []},
     {modules, [

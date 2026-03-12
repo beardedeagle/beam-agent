@@ -8,6 +8,14 @@ uniformly. No OTLP export or collector is built in — this module follows the
 Erlang/OTP `telemetry` convention: the library emits events, applications handle
 them.
 
+## Optional dependency
+
+The `telemetry` library is an **optional** dependency. When present, events are
+emitted via `telemetry:execute/3`. When absent, all emission is a silent no-op
+with zero overhead. To enable telemetry, add `{telemetry, "~> 1.3"}` to your
+application's `deps` in `rebar.config` and include `telemetry` in your
+application's `applications` list.
+
 ## Event namespace
 
 All events are published under the `[:beam_agent, ...]` prefix. The Agent
@@ -82,8 +90,9 @@ and operation-specific fields. state_change/3 and buffer_overflow/2 are
 standalone events outside the span pattern.
 
 Zero overhead when no handlers are attached -- the telemetry library
-short-circuits when the handler list is empty. This module delegates
-to beam_agent_telemetry_core for all emission logic.
+short-circuits when the handler list is empty. When the telemetry
+library is not present, all emission is a silent no-op. This module
+delegates to beam_agent_telemetry_core for all emission logic.
 """.
 
 -export([span_start/3, span_stop/3, span_exception/3, state_change/3, buffer_overflow/2]).
