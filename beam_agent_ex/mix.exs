@@ -46,6 +46,7 @@ defmodule BeamAgentEx.MixProject do
       extras: [
         "README.md",
         "../docs/guides/backend_integration_guide.md",
+        "../CONTRIBUTING.md",
         "LICENSE"
       ],
       groups_for_modules: [
