@@ -17,8 +17,7 @@ defmodule BeamAgentEx.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       elixirc_options: [warnings_as_errors: true],
       dialyzer: [
-        flags: [:error_handling, :underspecs, :unmatched_returns],
-        plt_add_apps: [:telemetry]
+        flags: [:error_handling, :underspecs, :unmatched_returns]
       ],
       test_coverage: [summary: [threshold: 80]]
     ]

@@ -17,7 +17,7 @@
 -spec span_start(atom(), atom(), map()) -> integer().
 span_start(Agent, EventSuffix, Metadata) ->
     StartTime = erlang:monotonic_time(),
-    telemetry:execute(
+    maybe_execute(
         [beam_agent, Agent, EventSuffix, start],
         #{system_time => erlang:system_time()},
         Metadata#{agent => Agent}
@@ -28,7 +28,7 @@ span_start(Agent, EventSuffix, Metadata) ->
 -spec span_stop(atom(), atom(), integer()) -> ok.
 span_stop(Agent, EventSuffix, StartTime) ->
     Duration = erlang:monotonic_time() - StartTime,
-    telemetry:execute(
+    maybe_execute(
         [beam_agent, Agent, EventSuffix, stop],
         #{duration => Duration},
         #{agent => Agent}
@@ -37,7 +37,7 @@ span_stop(Agent, EventSuffix, StartTime) ->
 -doc "Emit a span exception event.".
 -spec span_exception(atom(), atom(), term()) -> ok.
 span_exception(Agent, EventSuffix, Reason) ->
-    telemetry:execute(
+    maybe_execute(
         [beam_agent, Agent, EventSuffix, exception],
         #{system_time => erlang:system_time()},
         #{agent => Agent, reason => Reason}
@@ -46,7 +46,7 @@ span_exception(Agent, EventSuffix, Reason) ->
 -doc "Emit a state change event for gen_statem transitions.".
 -spec state_change(atom(), atom(), atom()) -> ok.
 state_change(Agent, FromState, ToState) ->
-    telemetry:execute(
+    maybe_execute(
         [beam_agent, session, state_change],
         #{system_time => erlang:system_time()},
         #{agent => Agent, from_state => FromState, to_state => ToState}
@@ -55,8 +55,21 @@ state_change(Agent, FromState, ToState) ->
 -doc "Emit a buffer overflow warning.".
 -spec buffer_overflow(pos_integer(), pos_integer()) -> ok.
 buffer_overflow(BufferSize, Max) ->
-    telemetry:execute(
+    maybe_execute(
         [beam_agent, buffer, overflow],
         #{buffer_size => BufferSize},
         #{max => Max}
     ).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
+
+-spec maybe_execute([atom()], map(), map()) -> ok.
+maybe_execute(Event, Measurements, Metadata) ->
+    case erlang:function_exported(telemetry, execute, 3) of
+        true ->
+            apply(telemetry, execute, [Event, Measurements, Metadata]);
+        false ->
+            ok
+    end.

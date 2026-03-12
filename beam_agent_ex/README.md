@@ -132,6 +132,11 @@ end)
 
 ### Telemetry
 
+The `:telemetry` library is an **optional** dependency. When present, all
+adapters emit events via `:telemetry.execute/3`. When absent, emission is a
+silent no-op. To opt in, add `{:telemetry, "~> 1.3"}` to your application's
+`deps` and ensure it is started, then attach handlers:
+
 ```elixir
 :telemetry.attach("my-handler",
   [:beam_agent, :claude, :query, :stop],
@@ -161,7 +166,7 @@ All adapters normalize messages into `BeamAgent.message()`:
 
 - Elixir ~> 1.17
 - Erlang/OTP 27+
-- `telemetry` ~> 1.3 (transitive via `beam_agent`)
+- Optional: `{:telemetry, "~> 1.3"}` for instrumentation (see [Telemetry](#telemetry))
 
 ## Backend Wrappers
 

@@ -364,7 +364,13 @@ Hook events: `pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `stop`,
 
 ### Telemetry
 
-All adapters emit `telemetry` events:
+All adapters emit telemetry events at key points (query lifecycle, state
+transitions, buffer overflow). The `telemetry` library is an **optional**
+dependency — when present, events are emitted via `telemetry:execute/3`; when
+absent, emission is a silent no-op with zero overhead.
+
+To opt in, add `{telemetry, "~> 1.3"}` to your application's `deps` and
+`applications` list, then attach handlers:
 
 ```erlang
 telemetry:attach(my_handler, [beam_agent, query, stop], fun handle/4, #{}).
@@ -453,9 +459,13 @@ mix dialyzer               # Static analysis (via Dialyxir)
 
 - Erlang/OTP 27+
 - Elixir 1.17+ (for wrappers)
-- `telemetry` ~> 1.3
 - OTP built-ins: `crypto`, `ssl`, `inets`, `public_key` (for HTTP/WebSocket transports)
+- Optional: `telemetry` ~> 1.3 (for instrumentation — see [Telemetry](#telemetry))
 - Test deps: `proper` ~> 1.4
+
+**Zero external runtime dependencies.** The SDK relies only on OTP standard
+libraries. All third-party integrations (telemetry, metrics, tracing) are
+opt-in by the consuming application.
 
 ## Package Documentation
 
