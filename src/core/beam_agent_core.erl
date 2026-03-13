@@ -18,6 +18,18 @@ v0.2.66 for protocol fidelity:
   - every message carries `uuid` and `session_id`
   - enrichment fields from upstream SDKs are preserved where possible
   - stop reasons are validated to atoms for pattern matching
+
+## ETS table ownership
+
+`beam_agent' is a library application with no supervision tree. ETS tables
+are created lazily by the first process that needs them (via `ensure_tables'
+or `ensure_registry_table' calls). The creating process becomes the table
+owner; if that process exits, the table is destroyed. This is an intentional
+design choice: zero runtime dependencies, no mandatory application start.
+
+For long-lived deployments, callers should ensure tables are owned by a
+durable process (e.g. a top-level supervisor in the host application) by
+calling the relevant `ensure_tables/0' functions from that process at boot.
 """.
 
 -export([
@@ -124,7 +136,7 @@ v0.2.66 for protocol fidelity:
 %% Type Definitions
 %%--------------------------------------------------------------------
 
-%% Normalized message types across all four wire protocols.
+%% Normalized message types across all five wire protocols.
 %% Cross-referenced against TS SDK v0.2.66 SDKMessage union (20+ types).
 -type message_type() :: text
                       | assistant

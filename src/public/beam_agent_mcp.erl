@@ -132,6 +132,15 @@ register_session_registry/2. The registry table allows cross-process
 access so transports and universal fallback handlers can look up tools
 without holding a reference to the session process state.
 
+## Schema validation
+
+The `input_schema' passed to `tool/4' is advisory — it tells the AI model
+what arguments the tool expects, but the SDK does not validate incoming
+tool arguments against the schema server-side. This matches the behavior
+of the official MCP SDKs (Claude TS SDK, Python SDK) where schema enforcement
+is left to the model and the tool handler. If your handler requires strict
+validation, perform it inside the handler function itself.
+
 ## Architecture: session-scoped ETS registries
 
 Each session process registers its `mcp_registry()` in a global ETS table via

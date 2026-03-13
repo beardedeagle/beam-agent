@@ -1,5 +1,43 @@
 -module(beam_agent_todo).
--moduledoc false.
+-moduledoc """
+Todo tracking helpers for BeamAgent message streams.
+
+This module extracts, filters, and summarizes todo items from the message
+history produced by any agentic coder backend. Backends emit structured
+todo lists as part of their message streams; this module provides a uniform
+API for consuming them regardless of which backend produced the messages.
+
+Use this module when you need to inspect task progress in a session — for
+example, to display a task dashboard, poll for completion, or gate
+downstream actions on todo status.
+
+## Getting Started
+
+```erlang
+{ok, Messages} = beam_agent_session_store:get_session_messages(SessionId),
+Todos = beam_agent_todo:extract_todos(Messages),
+InProgress = beam_agent_todo:filter_by_status(Todos, in_progress),
+Summary = beam_agent_todo:todo_summary(Todos).
+%% => #{total => 5, pending => 2, in_progress => 1, completed => 2}
+```
+
+## Core Concepts
+
+Todo items are maps with a `content' binary (the task description) and
+a `status' (`pending', `in_progress', or `completed'). Some items also
+carry an `active_form' field with the in-progress display variant.
+
+`extract_todos/1' scans a flat message list for assistant messages
+carrying `TodoWrite' tool-use blocks and returns all todo items found,
+in order. `todo_summary/1' returns a map with `total' and one key per
+distinct status value, giving counts at a glance.
+
+All functions are pure — no ETS, no processes, no side effects.
+
+## See Also
+
+- `beam_agent_session_store' — retrieve session messages to pass to `extract_todos/1'
+""".
 
 -export([
     extract_todos/1,

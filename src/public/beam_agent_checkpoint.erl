@@ -96,6 +96,15 @@ via the hook system (pre_tool_use fires before file mutations).
 - beam_agent_session_store: session-level history store
 - beam_agent: main SDK entry point
 
+## Design: file path handling
+
+This module accepts arbitrary file paths because it operates in an AI agent
+context. Paths originate from the AI model's tool invocations (e.g. Write,
+Edit), which the session has already granted permission to use. Path
+validation and sandboxing belong at the session permission layer
+(`beam_agent_runtime'), not in the checkpoint module. Checkpoint faithfully
+records and restores whatever paths it is given.
+
 ## Backend Integration
 
 Checkpointing is handled by the universal layer (beam_agent_checkpoint_core).
