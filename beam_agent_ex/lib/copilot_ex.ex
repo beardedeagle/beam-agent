@@ -459,7 +459,7 @@ defmodule CopilotEx do
   """
   @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
   def set_model(session, model) do
-    BeamAgent.set_model(session, model)
+    BeamAgent.Runtime.set_model(session, model)
   end
 
   @doc "Resume a native Copilot session by id."
@@ -482,13 +482,13 @@ defmodule CopilotEx do
   """
   @spec interrupt(pid()) :: :ok | {:error, term()}
   def interrupt(session) do
-    BeamAgent.interrupt(session)
+    BeamAgent.Runtime.interrupt(session)
   end
 
   @doc "Abort the current active query. Alias for `interrupt/1`."
   @spec abort(pid()) :: :ok | {:error, term()}
   def abort(session) do
-    BeamAgent.abort(session)
+    BeamAgent.Runtime.abort(session)
   end
 
   # ── Arbitrary Control ────────────────────────────────────────────
@@ -923,7 +923,7 @@ defmodule CopilotEx do
   @doc "Change the permission mode at runtime via universal control."
   @spec set_permission_mode(pid(), binary()) :: {:ok, map()}
   def set_permission_mode(session, mode) do
-    BeamAgent.set_permission_mode(session, mode)
+    BeamAgent.Runtime.set_permission_mode(session, mode)
   end
 
   @doc "Set maximum thinking tokens via universal control."

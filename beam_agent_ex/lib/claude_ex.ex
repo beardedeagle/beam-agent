@@ -470,7 +470,7 @@ defmodule ClaudeEx do
   """
   @spec set_model(session(), binary()) :: {:ok, term()} | {:error, term()}
   def set_model(session, model) do
-    BeamAgent.set_model(session, model)
+    BeamAgent.Runtime.set_model(session, model)
   end
 
   @doc """
@@ -482,7 +482,7 @@ defmodule ClaudeEx do
   """
   @spec set_permission_mode(session(), binary()) :: {:ok, term()} | {:error, term()}
   def set_permission_mode(session, mode) do
-    BeamAgent.set_permission_mode(session, mode)
+    BeamAgent.Runtime.set_permission_mode(session, mode)
   end
 
   @doc """
@@ -1045,7 +1045,7 @@ defmodule ClaudeEx do
   """
   @spec interrupt(pid()) :: :ok | {:error, term()}
   def interrupt(session) do
-    BeamAgent.interrupt(session)
+    BeamAgent.Runtime.interrupt(session)
   end
 
   @doc """

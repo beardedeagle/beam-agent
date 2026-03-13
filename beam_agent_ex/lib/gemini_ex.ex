@@ -326,13 +326,13 @@ defmodule GeminiEx do
   @doc "Change the model at runtime."
   @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
   def set_model(session, model) do
-    BeamAgent.set_model(session, model)
+    BeamAgent.Runtime.set_model(session, model)
   end
 
   @doc "Interrupt the current query."
   @spec interrupt(pid()) :: :ok | {:error, term()}
   def interrupt(session) do
-    BeamAgent.interrupt(session)
+    BeamAgent.Runtime.interrupt(session)
   end
 
   # ── SDK Hook Constructors ──────────────────────────────────────────
@@ -423,7 +423,7 @@ defmodule GeminiEx do
   @doc "Change the permission mode at runtime via universal control."
   @spec set_permission_mode(pid(), binary()) :: {:ok, map()}
   def set_permission_mode(session, mode) do
-    BeamAgent.set_permission_mode(session, mode)
+    BeamAgent.Runtime.set_permission_mode(session, mode)
   end
 
   @doc "Send a raw control message via universal control dispatch."

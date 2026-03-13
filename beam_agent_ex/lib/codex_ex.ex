@@ -696,13 +696,13 @@ defmodule CodexEx do
   @doc "Change the model at runtime."
   @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
   def set_model(session, model) do
-    BeamAgent.set_model(session, model)
+    BeamAgent.Runtime.set_model(session, model)
   end
 
   @doc "Interrupt the current turn."
   @spec interrupt(pid()) :: :ok | {:error, term()}
   def interrupt(session) do
-    BeamAgent.interrupt(session)
+    BeamAgent.Runtime.interrupt(session)
   end
 
   # ── SDK Hook Constructors ──────────────────────────────────────────
@@ -779,7 +779,7 @@ defmodule CodexEx do
   @doc "Change the permission mode at runtime."
   @spec set_permission_mode(pid(), binary()) :: {:ok, term()} | {:error, term()}
   def set_permission_mode(session, mode) do
-    BeamAgent.set_permission_mode(session, mode)
+    BeamAgent.Runtime.set_permission_mode(session, mode)
   end
 
   @doc """

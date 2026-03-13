@@ -257,4 +257,46 @@ defmodule BeamAgent.Capabilities do
   @spec supports(capability(), atom() | binary()) ::
           {:ok, true} | {:error, {:unknown_capability, capability()} | {:unknown_backend, term()}}
   defdelegate supports(capability, backend), to: :beam_agent_capabilities
+
+  @doc """
+  Return the full capability matrix as a list of capability info maps.
+
+  Each entry describes one capability with its support level across all five
+  backends. Equivalent to `all/0` — this is the convenience name used by the
+  top-level `BeamAgent` module.
+
+  ## Example
+
+  ```elixir
+  caps = BeamAgent.Capabilities.capabilities()
+  for cap <- caps, do: IO.puts(cap[:id])
+  ```
+  """
+  @spec capabilities() :: [capability_info()]
+  defdelegate capabilities(), to: :beam_agent_capabilities
+
+  @doc """
+  List capabilities for a specific session or backend.
+
+  When given a pid, queries the live session for its backend and returns
+  that backend's capability set. When given a backend atom or binary,
+  returns the static capability set for that backend without requiring
+  a running session.
+
+  ## Parameters
+
+  - `value` -- a session pid, backend atom (e.g., `:claude`), or binary.
+
+  ## Returns
+
+  - `{:ok, capabilities}` -- list of capability maps.
+  - `{:error, reason}` on failure.
+
+  ## Examples
+
+      {:ok, caps} = BeamAgent.Capabilities.capabilities(:claude)
+      {:ok, caps} = BeamAgent.Capabilities.capabilities(session)
+  """
+  @spec capabilities(pid() | atom() | binary()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate capabilities(value), to: :beam_agent_capabilities
 end

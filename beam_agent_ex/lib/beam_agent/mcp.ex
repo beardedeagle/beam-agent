@@ -909,4 +909,188 @@ defmodule BeamAgent.MCP do
   """
   @spec client_pending_count(client_state()) :: non_neg_integer()
   defdelegate client_pending_count(state), to: :beam_agent_mcp
+
+  # ---------------------------------------------------------------------------
+  # Session-scoped MCP management
+  # ---------------------------------------------------------------------------
+  #
+  # These functions operate on a live session (pid) rather than an in-memory
+  # registry. Where the function name would conflict with the registry-scoped
+  # variant at the same arity, a `session_` prefix is used.
+
+  @doc """
+  Get the MCP status for a live session.
+
+  Returns the combined status of all MCP servers registered with the
+  session, including connection state and tool availability. This is
+  the session-scoped equivalent of inspecting a registry's server status.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, status_map}` or `{:error, reason}`.
+
+  ## Examples
+
+      {:ok, status} = BeamAgent.MCP.status(session)
+      for {name, info} <- status do
+        IO.puts("\#{name}: \#{info[:status]}")
+      end
+  """
+  @spec status(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate status(session), to: :beam_agent_mcp
+
+  @doc """
+  Register a new MCP tool server with a live session.
+
+  `body` describes the server to add. It must contain a `:name` (binary)
+  and a `:tools` list (list of tool definition maps).
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `body` -- server definition map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+
+  ## Examples
+
+      server = %{name: "my-tools", tools: [%{name: "greet", description: "Say hello"}]}
+      {:ok, _} = BeamAgent.MCP.add_server(session, server)
+  """
+  @spec add_server(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate add_server(session, body), to: :beam_agent_mcp
+
+  @doc """
+  Get the status of all MCP servers for a live session.
+
+  Session-scoped variant — takes a session pid instead of a registry.
+  Use `server_status/1` for registry-scoped (pure data) status queries.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, status_map}` or `{:error, reason}`.
+  """
+  @spec session_server_status(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_server_status(session), to: :beam_agent_mcp, as: :server_status
+
+  @doc """
+  Replace all MCP servers for a live session.
+
+  Session-scoped variant — takes a session pid and server list.
+  Use `set_servers/2` for registry-scoped (pure data) operations.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `servers` -- list of server definition maps.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec session_set_servers(pid(), [map()]) :: {:ok, term()} | {:error, term()}
+  defdelegate session_set_servers(session, servers), to: :beam_agent_mcp, as: :set_servers
+
+  @doc """
+  Reconnect a disconnected MCP server on a live session.
+
+  Session-scoped variant — takes a session pid.
+  Use `reconnect_server/2` for registry-scoped operations.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `server_name` -- binary server name.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
+  """
+  @spec session_reconnect_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate session_reconnect_server(session, server_name),
+    to: :beam_agent_mcp,
+    as: :reconnect_server
+
+  @doc """
+  Enable or disable an MCP server on a live session.
+
+  Session-scoped variant — takes a session pid.
+  Use `toggle_server/3` for registry-scoped operations.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `server_name` -- binary server name.
+  - `enabled` -- boolean.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
+  """
+  @spec session_toggle_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  defdelegate session_toggle_server(session, server_name, enabled),
+    to: :beam_agent_mcp,
+    as: :toggle_server
+
+  @doc """
+  Initiate an OAuth login flow for an MCP server.
+
+  This operation requires native backend support; the universal fallback
+  returns a `status: :not_supported` result.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- OAuth parameters map (server name, client_id, redirect_uri, scopes).
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec server_oauth_login(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate server_oauth_login(session, opts), to: :beam_agent_mcp
+
+  @doc """
+  Reload all MCP server configurations for a live session.
+
+  Forces a refresh of tool definitions from all registered servers.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec server_reload(pid()) :: {:ok, term()} | {:error, term()}
+  defdelegate server_reload(session), to: :beam_agent_mcp
+
+  @doc """
+  List the status of all MCP servers as a single response.
+
+  An alias for `server_status/1` when called with a session pid,
+  provided for backends that distinguish between a single-server status
+  query and a bulk list operation. Returns the same map-of-maps structure.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, status_map}` or `{:error, reason}`.
+  """
+  @spec status_list(pid()) :: {:ok, term()} | {:error, term()}
+  defdelegate status_list(session), to: :beam_agent_mcp
 end

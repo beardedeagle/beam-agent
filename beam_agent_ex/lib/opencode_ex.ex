@@ -341,7 +341,7 @@ defmodule OpencodeEx do
   @doc "Abort the current active query."
   @spec abort(pid()) :: :ok | {:error, term()}
   def abort(session) do
-    BeamAgent.abort(session)
+    BeamAgent.Runtime.abort(session)
   end
 
   # ── Session Info & Runtime Control ─────────────────────────────────
@@ -361,7 +361,7 @@ defmodule OpencodeEx do
   @doc "Change the model at runtime."
   @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
   def set_model(session, model) do
-    BeamAgent.set_model(session, model)
+    BeamAgent.Runtime.set_model(session, model)
   end
 
   # ── SDK Hook Constructors ──────────────────────────────────────────
@@ -666,13 +666,13 @@ defmodule OpencodeEx do
   """
   @spec interrupt(pid()) :: :ok | {:error, term()}
   def interrupt(session) do
-    BeamAgent.interrupt(session)
+    BeamAgent.Runtime.interrupt(session)
   end
 
   @doc "Change the permission mode at runtime via universal control."
   @spec set_permission_mode(pid(), binary()) :: {:ok, map()}
   def set_permission_mode(session, mode) do
-    BeamAgent.set_permission_mode(session, mode)
+    BeamAgent.Runtime.set_permission_mode(session, mode)
   end
 
   @doc "Send a raw control message via universal control dispatch."

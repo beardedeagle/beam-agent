@@ -221,4 +221,150 @@ defmodule BeamAgent.Threads do
   """
   @spec thread_rollback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_rollback(session, thread_id, selector), to: :beam_agent_threads
+
+  @doc """
+  Resume an existing thread with backend-specific options.
+
+  Like `thread_resume/2` but passes additional options to the backend's
+  native implementation. Falls back to `thread_resume/2` if the backend
+  does not support extended resume options.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `opts` -- backend-specific resume options.
+
+  ## Returns
+
+  - `{:ok, thread_meta}` or `{:error, :not_found}`.
+  """
+  @spec thread_resume(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_resume(session, thread_id, opts), to: :beam_agent_threads
+
+  @doc """
+  List threads for a session with backend-specific options.
+
+  Falls back to `thread_list/1` if the backend does not support filtered
+  thread listing.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- backend-specific listing options.
+
+  ## Returns
+
+  - `{:ok, threads}` or `{:error, reason}`.
+  """
+  @spec thread_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate thread_list(session, opts), to: :beam_agent_threads
+
+  @doc """
+  Unsubscribe from a thread and clear it as the active thread if applicable.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+
+  ## Returns
+
+  - `{:ok, result_map}` with `:thread_id` and `:unsubscribed` fields.
+  - `{:error, :not_found}`.
+  """
+  @spec thread_unsubscribe(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_unsubscribe(session, thread_id), to: :beam_agent_threads
+
+  @doc """
+  Rename a thread.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `name` -- new thread name as a binary.
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, :not_found}`.
+  """
+  @spec thread_name_set(pid(), binary(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_name_set(session, thread_id, name), to: :beam_agent_threads
+
+  @doc """
+  Merge a metadata patch into a thread's metadata map.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `metadata_patch` -- map of key-value pairs to merge into the thread's
+    existing metadata.
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, :not_found}`.
+  """
+  @spec thread_metadata_update(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_metadata_update(session, thread_id, metadata_patch), to: :beam_agent_threads
+
+  @doc """
+  List loaded (in-memory) threads for a session.
+
+  Returns threads with their active state, optionally filtered by the
+  backend's native implementation.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result_map}` with `:threads`, `:active_thread_id`, and `:count`.
+  - `{:error, reason}`.
+  """
+  @spec thread_loaded_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_loaded_list(session), to: :beam_agent_threads
+
+  @doc """
+  List loaded threads for a session with filter options.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- filter options map. Optional keys:
+    - `:include_archived` -- include archived threads (default `true`)
+    - `:thread_id` -- filter to a specific thread
+    - `:status` -- filter by thread status
+    - `:limit` -- maximum number of results
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, reason}`.
+  """
+  @spec thread_loaded_list(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_loaded_list(session, opts), to: :beam_agent_threads
+
+  @doc """
+  Compact a thread by reducing its visible message history.
+
+  Uses `thread_rollback` internally with a selector derived from the
+  options map.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- compaction options map. Optional keys:
+    - `:thread_id` -- target thread (defaults to active thread)
+    - `:count` -- number of messages to hide from the end
+    - `:visible_message_count` -- set boundary directly
+    - `:selector` -- explicit rollback selector map
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, :not_found}`.
+  """
+  @spec thread_compact(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate thread_compact(session, opts), to: :beam_agent_threads
 end
