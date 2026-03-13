@@ -21,16 +21,6 @@ rebar3.crashdump
 *.ez
 doc/
 logs/
-.omc/
-.omx/
-.DS_Store
-.claude/
-.backup/
-rule-tests/
-rules/
-utils/
-AGENTS.md
-sgconfig.yml
 
 # Dolt database files (added by bd init)
 .dolt/

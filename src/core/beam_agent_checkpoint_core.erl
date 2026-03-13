@@ -22,7 +22,7 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% Checkpoint operations
     snapshot/3,
@@ -63,15 +63,15 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
 %%--------------------------------------------------------------------
 
 -doc "Ensure the checkpoints ETS table exists. Idempotent.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?CHECKPOINTS_TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all checkpoint data.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?CHECKPOINTS_TABLE),
     ok.
 
@@ -88,7 +88,7 @@ exist are recorded as non-existent (rewind will delete them).
     {ok, checkpoint()}.
 snapshot(SessionId, UUID, FilePaths)
   when is_binary(SessionId), is_binary(UUID), is_list(FilePaths) ->
-    ensure_table(),
+    ensure_tables(),
     Now = erlang:system_time(millisecond),
     Files = lists:map(fun snapshot_file/1, FilePaths),
     Checkpoint = #{
@@ -111,7 +111,7 @@ exist at checkpoint time.
     ok | {error, not_found | {restore_failed, binary(), file:posix()}}.
 rewind(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, UUID},
     case ets:lookup(?CHECKPOINTS_TABLE, Key) of
         [{_, #{files := Files}}] ->
@@ -123,7 +123,7 @@ rewind(SessionId, UUID)
 -doc "List all checkpoints for a session, newest first.".
 -spec list_checkpoints(binary()) -> {ok, [checkpoint()]}.
 list_checkpoints(SessionId) when is_binary(SessionId) ->
-    ensure_table(),
+    ensure_tables(),
     Checkpoints = ets:foldl(fun
         ({{SId, _}, CP}, Acc) when SId =:= SessionId ->
             [CP | Acc];
@@ -140,7 +140,7 @@ list_checkpoints(SessionId) when is_binary(SessionId) ->
     {ok, checkpoint()} | {error, not_found}.
 get_checkpoint(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, UUID},
     case ets:lookup(?CHECKPOINTS_TABLE, Key) of
         [{_, CP}] -> {ok, CP};
@@ -151,7 +151,7 @@ get_checkpoint(SessionId, UUID)
 -spec delete_checkpoint(binary(), binary()) -> ok.
 delete_checkpoint(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, UUID},
     beam_agent_ets:delete(?CHECKPOINTS_TABLE, Key),
     ok.

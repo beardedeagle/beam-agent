@@ -3418,21 +3418,6 @@ defmodule BeamAgent do
   """
   defdelegate mcp_server_reload(session), to: :beam_agent_mcp, as: :server_reload
 
-  @doc """
-  List the status of all MCP servers as a single response.
-
-  Alias for `mcp_server_status/1`.
-
-  ## Parameters
-
-  - `session` -- pid of a running session.
-
-  ## Returns
-
-  - `{:ok, status_map}` or `{:error, reason}`.
-  """
-  defdelegate mcp_server_status_list(session), to: :beam_agent_mcp, as: :status_list
-
   # ---------------------------------------------------------------------------
   # Account Management
   # ---------------------------------------------------------------------------

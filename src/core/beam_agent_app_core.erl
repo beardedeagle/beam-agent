@@ -3,7 +3,7 @@
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% App operations
     register_app/3,
@@ -47,15 +47,15 @@
 %%--------------------------------------------------------------------
 
 -doc "Ensure the apps ETS table exists. Idempotent.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all app data.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?TABLE),
     ok.
 
@@ -79,7 +79,7 @@ Opts:
 register_app(Session, AppId, Opts)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(AppId), is_map(Opts) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {session_key(Session), AppId},
     Existing = case ets:lookup(?TABLE, Key) of
         [{_, E}] -> E;
@@ -112,7 +112,7 @@ Opts:
 -spec apps_list(pid() | binary(), apps_list_opts()) -> {ok, [app_entry()]}.
 apps_list(Session, Opts)
   when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
-    ensure_table(),
+    ensure_tables(),
     SK = session_key(Session),
     All = ets:foldl(fun
         ({{S, _}, Entry}, Acc) when S =:= SK ->
@@ -175,7 +175,7 @@ Returns `{error, no_app}` if no app is registered for the session.
 """.
 -spec app_log(pid() | binary(), term()) -> ok | {error, no_app}.
 app_log(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
-    ensure_table(),
+    ensure_tables(),
     SK = session_key(Session),
     case app_info(Session) of
         {error, no_app} ->
@@ -212,7 +212,7 @@ app_modes(Session) when is_pid(Session) orelse is_binary(Session) ->
 -spec unregister_app(pid() | binary(), binary()) -> ok.
 unregister_app(Session, AppId)
   when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {session_key(Session), AppId},
     beam_agent_ets:delete(?TABLE, Key),
     ok.

@@ -3,7 +3,7 @@
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% Search
     fuzzy_file_search/2,
@@ -55,15 +55,15 @@
 %%--------------------------------------------------------------------
 
 -doc "Ensure the search sessions ETS table exists. Idempotent.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?SESSIONS_TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Delete all search session data.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
     ok.
 
@@ -113,7 +113,7 @@ Stores the session with its roots in ETS under key `{SessionKey, SearchSessionId
     {ok, search_session()}.
 session_start(Session, SearchSessionId, Roots)
   when is_binary(SearchSessionId), is_list(Roots) ->
-    ensure_table(),
+    ensure_tables(),
     Now = erlang:system_time(millisecond),
     SKey = session_key(Session),
     Entry = #{
@@ -137,7 +137,7 @@ Returns `{error, not_found}` if the session does not exist.
     {ok, [search_match()]} | {error, not_found}.
 session_update(Session, SearchSessionId, Query)
   when is_binary(SearchSessionId), is_binary(Query) ->
-    ensure_table(),
+    ensure_tables(),
     SKey = session_key(Session),
     EtsKey = {SKey, SearchSessionId},
     case ets:lookup(?SESSIONS_TABLE, EtsKey) of
@@ -155,7 +155,7 @@ session_update(Session, SearchSessionId, Query)
 -spec session_stop(pid() | binary(), binary()) -> ok.
 session_stop(Session, SearchSessionId)
   when is_binary(SearchSessionId) ->
-    ensure_table(),
+    ensure_tables(),
     SKey = session_key(Session),
     beam_agent_ets:delete(?SESSIONS_TABLE, {SKey, SearchSessionId}),
     ok.

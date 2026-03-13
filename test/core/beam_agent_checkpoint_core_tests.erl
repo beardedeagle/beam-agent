@@ -2,7 +2,7 @@
 %%% @doc EUnit tests for beam_agent_checkpoint_core (file snapshot/rewind).
 %%%
 %%% Tests cover:
-%%%   - Table lifecycle (ensure_table, clear)
+%%%   - Table lifecycle (ensure_tables, clear)
 %%%   - Snapshot creation with real temp files
 %%%   - Rewind: restore existing files, delete non-existent-at-checkpoint files
 %%%   - Rewind: {error, not_found} for unknown UUID
@@ -21,13 +21,13 @@
 %%====================================================================
 
 ensure_table_idempotent_test() ->
-    ok = beam_agent_checkpoint_core:ensure_table(),
-    ok = beam_agent_checkpoint_core:ensure_table(),
-    ok = beam_agent_checkpoint_core:ensure_table(),
+    ok = beam_agent_checkpoint_core:ensure_tables(),
+    ok = beam_agent_checkpoint_core:ensure_tables(),
+    ok = beam_agent_checkpoint_core:ensure_tables(),
     beam_agent_checkpoint_core:clear().
 
 clear_removes_all_data_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-clear-test">>,
     UUID = <<"uuid-clear-1">>,
     Path = tmp_path("clear_test"),
@@ -43,7 +43,7 @@ clear_removes_all_data_test() ->
 %%====================================================================
 
 snapshot_existing_file_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-snap-1">>,
     UUID = <<"uuid-snap-1">>,
     Path = tmp_path("snap_existing"),
@@ -60,7 +60,7 @@ snapshot_existing_file_test() ->
     beam_agent_checkpoint_core:clear().
 
 snapshot_nonexistent_file_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-snap-2">>,
     UUID = <<"uuid-snap-2">>,
     Path = tmp_path("snap_nonexistent_ghost"),
@@ -72,7 +72,7 @@ snapshot_nonexistent_file_test() ->
     beam_agent_checkpoint_core:clear().
 
 snapshot_multiple_files_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-snap-3">>,
     UUID = <<"uuid-snap-3">>,
     Path1 = tmp_path("snap_multi_a"),
@@ -86,7 +86,7 @@ snapshot_multiple_files_test() ->
     beam_agent_checkpoint_core:clear().
 
 snapshot_string_path_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-snap-4">>,
     UUID = <<"uuid-snap-4">>,
     Path = tmp_path("snap_string_path"),
@@ -103,7 +103,7 @@ snapshot_string_path_test() ->
 %%====================================================================
 
 rewind_restores_file_content_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-rewind-1">>,
     UUID = <<"uuid-rewind-1">>,
     Path = tmp_path("rewind_restore"),
@@ -118,7 +118,7 @@ rewind_restores_file_content_test() ->
     beam_agent_checkpoint_core:clear().
 
 rewind_deletes_file_not_at_checkpoint_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-rewind-2">>,
     UUID = <<"uuid-rewind-2">>,
     Path = tmp_path("rewind_new_file"),
@@ -133,7 +133,7 @@ rewind_deletes_file_not_at_checkpoint_test() ->
     beam_agent_checkpoint_core:clear().
 
 rewind_not_found_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     Result = beam_agent_checkpoint_core:rewind(<<"sess-no">>, <<"uuid-no">>),
     ?assertEqual({error, not_found}, Result),
     beam_agent_checkpoint_core:clear().
@@ -143,13 +143,13 @@ rewind_not_found_test() ->
 %%====================================================================
 
 list_checkpoints_empty_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     {ok, List} = beam_agent_checkpoint_core:list_checkpoints(<<"sess-empty-list">>),
     ?assertEqual([], List),
     beam_agent_checkpoint_core:clear().
 
 list_checkpoints_newest_first_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-list-order">>,
     Path = tmp_path("list_order"),
     write_tmp(Path, <<"x">>),
@@ -168,7 +168,7 @@ list_checkpoints_newest_first_test() ->
     beam_agent_checkpoint_core:clear().
 
 list_checkpoints_only_own_session_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     Path = tmp_path("list_session_isolation"),
     write_tmp(Path, <<"y">>),
     {ok, _} = beam_agent_checkpoint_core:snapshot(<<"sess-A">>, <<"uuid-A1">>, [Path]),
@@ -187,7 +187,7 @@ list_checkpoints_only_own_session_test() ->
 %%====================================================================
 
 get_checkpoint_found_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-get-1">>,
     UUID = <<"uuid-get-1">>,
     Path = tmp_path("get_found"),
@@ -199,7 +199,7 @@ get_checkpoint_found_test() ->
     beam_agent_checkpoint_core:clear().
 
 get_checkpoint_not_found_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     Result = beam_agent_checkpoint_core:get_checkpoint(<<"sess-no">>, <<"uuid-no">>),
     ?assertEqual({error, not_found}, Result),
     beam_agent_checkpoint_core:clear().
@@ -209,7 +209,7 @@ get_checkpoint_not_found_test() ->
 %%====================================================================
 
 delete_checkpoint_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     SessionId = <<"sess-del-1">>,
     UUID = <<"uuid-del-1">>,
     Path = tmp_path("delete_cp"),
@@ -223,7 +223,7 @@ delete_checkpoint_test() ->
     beam_agent_checkpoint_core:clear().
 
 delete_checkpoint_nonexistent_is_ok_test() ->
-    beam_agent_checkpoint_core:ensure_table(),
+    beam_agent_checkpoint_core:ensure_tables(),
     ok = beam_agent_checkpoint_core:delete_checkpoint(<<"sess-x">>, <<"uuid-x">>),
     beam_agent_checkpoint_core:clear().
 

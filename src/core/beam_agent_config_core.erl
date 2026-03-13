@@ -335,13 +335,7 @@ maybe_resolve_request(Session, RequestId, Body) ->
 
 -spec session_identity(pid()) -> binary().
 session_identity(Session) ->
-    case beam_agent_router:session_info(Session) of
-        {ok, #{session_id := SessionId}} when is_binary(SessionId),
-                                              byte_size(SessionId) > 0 ->
-            SessionId;
-        _ ->
-            unicode:characters_to_binary(erlang:pid_to_list(Session))
-    end.
+    beam_agent_core:session_identity(Session).
 
 -spec normalize_map(term()) -> map().
 normalize_map(Map) when is_map(Map) ->

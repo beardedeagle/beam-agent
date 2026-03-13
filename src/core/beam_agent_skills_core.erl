@@ -3,7 +3,7 @@
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% Skill registration
     register_skill/3,
@@ -67,15 +67,15 @@
 %%--------------------------------------------------------------------
 
 -doc "Ensure the ETS table exists. Idempotent — safe to call multiple times.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?SKILLS_TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Delete all skill and config data from the ETS table.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?SKILLS_TABLE),
     ok.
 
@@ -100,7 +100,7 @@ Returns `{ok, skill_entry()}` on success.
 register_skill(Session, SkillId, Opts)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(SkillId), is_map(Opts) ->
-    ensure_table(),
+    ensure_tables(),
     Key = session_key(Session),
     Entry = build_entry(SkillId, Opts),
     beam_agent_ets:insert(?SKILLS_TABLE, {{Key, skill, SkillId}, Entry}),
@@ -111,7 +111,7 @@ register_skill(Session, SkillId, Opts)
 unregister_skill(Session, SkillId)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(SkillId) ->
-    ensure_table(),
+    ensure_tables(),
     Key = session_key(Session),
     beam_agent_ets:delete(?SKILLS_TABLE, {Key, skill, SkillId}),
     ok.
@@ -137,7 +137,7 @@ Returns `{ok, [skill_entry()]}`.
 -spec skills_list(pid() | binary(), list_opts()) -> {ok, [skill_entry()]}.
 skills_list(Session, Opts)
   when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
-    ensure_table(),
+    ensure_tables(),
     Skills = get_skills(Session),
     Filtered = apply_skill_filters(Skills, Opts),
     {ok, Filtered}.
@@ -183,7 +183,7 @@ The `exported_at` value is a Unix timestamp in milliseconds.
     {ok, #{skills := [skill_entry()], exported_at := integer()}}.
 skills_remote_export(Session, _Opts)
   when is_pid(Session) orelse is_binary(Session) ->
-    ensure_table(),
+    ensure_tables(),
     Skills = get_skills(Session),
     ExportedAt = erlang:system_time(millisecond),
     {ok, #{skills => Skills, exported_at => ExportedAt}}.
@@ -205,7 +205,7 @@ Returns `ok`.
 skills_config_write(Session, Path, Enabled)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(Path), is_boolean(Enabled) ->
-    ensure_table(),
+    ensure_tables(),
     Key = session_key(Session),
     Now = erlang:system_time(millisecond),
     Config = #{path => Path, enabled => Enabled, updated_at => Now},
@@ -230,7 +230,7 @@ Returns `{ok, [skill_config()]}`.
     {ok, [skill_config()]}.
 skills_config_read(Session, _Opts)
   when is_pid(Session) orelse is_binary(Session) ->
-    ensure_table(),
+    ensure_tables(),
     Configs = get_configs(Session),
     {ok, Configs}.
 

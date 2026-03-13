@@ -112,7 +112,7 @@ All thread operations are session-scoped.
 """.
 
 -export([
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     start_thread/2,
     fork_thread/3,
@@ -200,8 +200,8 @@ Creates the beam_agent_threads_core and beam_agent_active_threads
 tables if they do not already exist. This function is idempotent
 and safe to call from any process.
 """.
--spec ensure_table() -> ok.
-ensure_table() -> beam_agent_threads_core:ensure_table().
+-spec ensure_tables() -> ok.
+ensure_tables() -> beam_agent_threads_core:ensure_tables().
 
 -doc """
 Clear all thread data from the store.
