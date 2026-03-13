@@ -32,8 +32,7 @@
             {append_output_event, 2},
             {stage_event, 3},
             {review_metrics, 4},
-            {increment_input_summary, 2},
-            {ensure_ets, 2}]}).
+            {increment_input_summary, 2}]}).
 
 -define(REVIEWS_TABLE, beam_agent_review_sessions).
 -define(REALTIME_TABLE, beam_agent_realtime_sessions).
@@ -89,9 +88,9 @@
 -doc "Ensure collaboration ETS tables exist.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    ensure_ets(?REVIEWS_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?REVIEWS_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    ensure_ets(?REALTIME_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?REALTIME_TABLE, [set, named_table,
         {read_concurrency, true}]),
     ok.
 
@@ -99,8 +98,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    ets:delete_all_objects(?REVIEWS_TABLE),
-    ets:delete_all_objects(?REALTIME_TABLE),
+    beam_agent_ets:delete_all_objects(?REVIEWS_TABLE),
+    beam_agent_ets:delete_all_objects(?REALTIME_TABLE),
     ok.
 
 -doc "Start a universal review session for the canonical API.".
@@ -142,7 +141,7 @@ start_review(SessionId, Params)
         updated_at => Now,
         params => Params
     },
-    ets:insert(?REVIEWS_TABLE, {{SessionId, ReviewId}, Review}),
+    beam_agent_ets:insert(?REVIEWS_TABLE, {{SessionId, ReviewId}, Review}),
     ok = record_thread_event(SessionId, ThreadId, <<"review_started">>, #{
         review_id => ReviewId,
         backend => Backend,
@@ -231,7 +230,7 @@ start_realtime(SessionId, Params)
               metadata => TransportMetadata}
         ]
     },
-    ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Session}),
+    beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Session}),
     ok = record_thread_event(SessionId, ThreadId, <<"thread_realtime_started">>, #{
         realtime_id => RealtimeId,
         backend => Backend,
@@ -272,7 +271,7 @@ append_realtime_text(SessionId, ThreadId, Params)
                     sequence => EventCount
                 })
             },
-            ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
             {ok, Updated};
         {error, not_found} ->
             {error, not_found}
@@ -314,7 +313,7 @@ append_realtime_audio(SessionId, ThreadId, Params)
                     sequence => EventCount
                 })
             },
-            ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
             {ok, Updated};
         {error, not_found} ->
             {error, not_found}
@@ -340,7 +339,7 @@ stop_realtime(SessionId, ThreadId)
                     sequence => EventCount
                 })
             },
-            ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
             ok = record_thread_event(SessionId, ThreadId, <<"thread_realtime_stopped">>, #{}),
             {ok, Updated};
         {error, not_found} ->
@@ -520,16 +519,3 @@ normalize_map(_) ->
 now_ms() ->
     erlang:system_time(millisecond).
 
--spec ensure_ets(atom(), [term()]) -> ok.
-ensure_ets(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.

@@ -48,24 +48,14 @@ small, contention is low, and lookups are on the hot path for query routing.
 -doc "Ensure the pid-to-backend ETS table exists.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?SESSIONS_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?SESSIONS_TABLE, [set, public, named_table,
-                    {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?SESSIONS_TABLE,
+        [set, named_table, {read_concurrency, true}]).
 
 -doc "Clear the backend registry.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?SESSIONS_TABLE),
+    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
     ok.
 
 -doc "Return the canonical backend atoms supported by the unified SDK.".
@@ -123,7 +113,7 @@ register_session(Session, BackendLike) when is_pid(Session) ->
     ensure_table(),
     case normalize(BackendLike) of
         {ok, Backend} ->
-            ets:insert(?SESSIONS_TABLE, {Session, Backend}),
+            beam_agent_ets:insert(?SESSIONS_TABLE, {Session, Backend}),
             {ok, Backend};
         {error, _} = Error ->
             Error
@@ -133,7 +123,7 @@ register_session(Session, BackendLike) when is_pid(Session) ->
 -spec unregister_session(pid()) -> ok.
 unregister_session(Session) when is_pid(Session) ->
     ensure_table(),
-    ets:delete(?SESSIONS_TABLE, Session),
+    beam_agent_ets:delete(?SESSIONS_TABLE, Session),
     ok.
 
 -doc """

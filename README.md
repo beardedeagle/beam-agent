@@ -383,12 +383,31 @@ telemetry:attach(my_handler, [beam_agent, query, stop], fun handle/4, #{}).
 Events: `[beam_agent, query, start|stop|exception]`,
 `[beam_agent, message, received]`, `[beam_agent, session, start|stop]`.
 
+### ETS Initialization
+
+Call `beam_agent:init/0,1` before starting sessions to initialize the
+SDK's ETS tables. In the default `public` mode all tables use public
+access (zero overhead). Opt into `hardened` mode to protect tables and
+proxy writes through a linked owner process:
+
+```erlang
+%% Default — public access, zero overhead
+ok = beam_agent:init().
+
+%% Hardened — protected tables, proxied writes, zero-cost reads
+ok = beam_agent:init(#{table_access => hardened}).
+```
+
+If `init/1` is never called, tables are created lazily with public access
+on first use.
+
 ### Supervisor Integration
 
 Embed sessions in your supervision tree:
 
 ```erlang
 %% In your supervisor init/1
+ok = beam_agent:init(),
 Children = [
     beam_agent:child_spec(#{
         backend => claude,

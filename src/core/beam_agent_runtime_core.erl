@@ -69,24 +69,14 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
 -doc "Ensure the runtime ETS table exists.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    case ets:whereis(?RUNTIME_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?RUNTIME_TABLE, [set, public, named_table,
-                    {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?RUNTIME_TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Clear all runtime state.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    ets:delete_all_objects(?RUNTIME_TABLE),
+    beam_agent_ets:delete_all_objects(?RUNTIME_TABLE),
     ok.
 
 -doc """
@@ -109,7 +99,7 @@ register_session(Session, Opts) when is_map(Opts) ->
 -spec clear_session(pid() | binary()) -> ok.
 clear_session(Session) ->
     ensure_tables(),
-    ets:delete(?RUNTIME_TABLE, session_key(Session)),
+    beam_agent_ets:delete(?RUNTIME_TABLE, session_key(Session)),
     ok.
 
 -doc "Read the current runtime state map for a session.".
@@ -374,7 +364,7 @@ put_state(Session, Updates) when is_map(Updates) ->
         [] ->
             defaulted_state(Updates)
     end,
-    ets:insert(?RUNTIME_TABLE, {Key, State}),
+    beam_agent_ets:insert(?RUNTIME_TABLE, {Key, State}),
     ok.
 
 -spec update_state(pid() | binary(), fun((map()) -> map())) -> ok.
@@ -382,7 +372,7 @@ update_state(Session, Fun) ->
     {ok, State} = get_state(Session),
     ensure_tables(),
     Key = session_key(Session),
-    ets:insert(?RUNTIME_TABLE, {Key, defaulted_state(Fun(State))}),
+    beam_agent_ets:insert(?RUNTIME_TABLE, {Key, defaulted_state(Fun(State))}),
     ok.
 
 -spec infer_provider(pid() | binary()) -> {ok, binary()} | {error, not_set}.

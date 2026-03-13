@@ -172,6 +172,8 @@ in docs/guides/backend_integration_guide.md.
 """.
 
 -export([
+    init/0,
+    init/1,
     start_session/1,
     child_spec/1,
     stop/1,
@@ -533,6 +535,42 @@ checks for type => result.
 %% Dialyzer: the options map for universal_prompt_async/3 is
 %% deliberately open; encoding every possible key adds no safety.
 -dialyzer({nowarn_function, [universal_prompt_async/3]}).
+
+-doc """
+Initialize ETS tables with default settings (public access).
+
+Equivalent to `init(#{})`. Must be called before any SDK functions that
+touch ETS. This is idempotent — calling it again after initialization is
+a no-op.
+
+```erlang
+ok = beam_agent:init().
+```
+""".
+-spec init() -> ok.
+init() -> beam_agent_table_owner:init().
+
+-doc """
+Initialize ETS tables with the given options.
+
+Options:
+  - `table_access` — `public` (default) or `hardened`
+
+In `public` mode, all tables use public access. Any process can read and
+write. In `hardened` mode, a linked helper process is spawned to own
+protected tables and proxy writes, while reads remain zero-cost from any
+process.
+
+This function is idempotent. Calling it again after initialization is a
+no-op that returns `ok`. Should be called early in the consumer's `init/1`
+callback, before any SDK functions that touch ETS.
+
+```erlang
+ok = beam_agent:init(#{table_access => hardened}).
+```
+""".
+-spec init(beam_agent_table_owner:init_opts()) -> ok.
+init(Opts) -> beam_agent_table_owner:init(Opts).
 
 -doc """
 Start a new agent session connected to a backend.

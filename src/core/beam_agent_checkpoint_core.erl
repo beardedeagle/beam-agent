@@ -36,8 +36,6 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
 
 -export_type([checkpoint/0, file_snapshot/0]).
 
--dialyzer({no_underspecs, [ensure_ets/2]}).
-
 %%--------------------------------------------------------------------
 %% Types
 %%--------------------------------------------------------------------
@@ -67,15 +65,14 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
 -doc "Ensure the checkpoints ETS table exists. Idempotent.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    ensure_ets(?CHECKPOINTS_TABLE, [set, public, named_table,
-        {read_concurrency, true}]),
-    ok.
+    beam_agent_ets:ensure_table(?CHECKPOINTS_TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Clear all checkpoint data.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?CHECKPOINTS_TABLE),
+    beam_agent_ets:delete_all_objects(?CHECKPOINTS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -101,7 +98,7 @@ snapshot(SessionId, UUID, FilePaths)
         files => Files
     },
     Key = {SessionId, UUID},
-    ets:insert(?CHECKPOINTS_TABLE, {Key, Checkpoint}),
+    beam_agent_ets:insert(?CHECKPOINTS_TABLE, {Key, Checkpoint}),
     {ok, Checkpoint}.
 
 -doc """
@@ -156,7 +153,7 @@ delete_checkpoint(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
     ensure_table(),
     Key = {SessionId, UUID},
-    ets:delete(?CHECKPOINTS_TABLE, Key),
+    beam_agent_ets:delete(?CHECKPOINTS_TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------
@@ -249,16 +246,3 @@ extract_path(Input) ->
             end
     end.
 
--spec ensure_ets(atom(), [term()]) -> ok.
-ensure_ets(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.

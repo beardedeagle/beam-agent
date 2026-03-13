@@ -93,15 +93,6 @@ Usage:
 %% Active thread per session.
 -define(ACTIVE_TABLE, beam_agent_active_threads).
 
--type thread_store_table() ::
-    beam_agent_active_threads |
-    beam_agent_threads_core.
--type thread_store_table_option() ::
-    named_table |
-    public |
-    set |
-    {read_concurrency, true}.
-
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
@@ -109,17 +100,18 @@ Usage:
 -doc "Ensure the threads ETS table exists. Idempotent.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    ensure_ets(?THREADS_TABLE, [set, public, named_table,
-        {read_concurrency, true}]),
-    ensure_ets(?ACTIVE_TABLE, [set, public, named_table]),
+    beam_agent_ets:ensure_table(?THREADS_TABLE,
+        [set, named_table, {read_concurrency, true}]),
+    beam_agent_ets:ensure_table(?ACTIVE_TABLE,
+        [set, named_table]),
     ok.
 
 -doc "Clear all thread data.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?THREADS_TABLE),
-    ets:delete_all_objects(?ACTIVE_TABLE),
+    beam_agent_ets:delete_all_objects(?THREADS_TABLE),
+    beam_agent_ets:delete_all_objects(?ACTIVE_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -156,7 +148,7 @@ start_thread(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
             Thread
     end,
     Key = {SessionId, ThreadId},
-    ets:insert(?THREADS_TABLE, {Key, Thread1}),
+    beam_agent_ets:insert(?THREADS_TABLE, {Key, Thread1}),
     %% Set as active thread for this session
     set_active_thread(SessionId, ThreadId),
     {ok, Thread1}.
@@ -216,7 +208,7 @@ resume_thread(SessionId, ThreadId)
                 status => active,
                 updated_at => Now
             },
-            ets:insert(?THREADS_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated}),
             set_active_thread(SessionId, ThreadId),
             {ok, Updated};
         [] ->
@@ -284,7 +276,7 @@ delete_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_table(),
     Key = {SessionId, ThreadId},
-    ets:delete(?THREADS_TABLE, Key),
+    beam_agent_ets:delete(?THREADS_TABLE, Key),
     %% Clear active thread if this was it
     case active_thread(SessionId) of
         {ok, ThreadId} -> clear_active_thread(SessionId);
@@ -395,7 +387,7 @@ record_thread_message(SessionId, ThreadId, Message)
                 visible_message_count => Count,
                 updated_at => Now
             },
-            ets:insert(?THREADS_TABLE, {Key, Updated});
+            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated});
         [] ->
             ok
     end,
@@ -455,14 +447,14 @@ active_thread(SessionId) when is_binary(SessionId) ->
 set_active_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_table(),
-    ets:insert(?ACTIVE_TABLE, {SessionId, ThreadId}),
+    beam_agent_ets:insert(?ACTIVE_TABLE, {SessionId, ThreadId}),
     ok.
 
 -doc "Clear the active thread for a session.".
 -spec clear_active_thread(binary()) -> ok.
 clear_active_thread(SessionId) when is_binary(SessionId) ->
     ensure_table(),
-    ets:delete(?ACTIVE_TABLE, SessionId),
+    beam_agent_ets:delete(?ACTIVE_TABLE, SessionId),
     ok.
 
 %%--------------------------------------------------------------------
@@ -481,7 +473,7 @@ update_thread(SessionId, ThreadId, Fun)
     case ets:lookup(?THREADS_TABLE, Key) of
         [{_, Thread}] ->
             Updated = Fun(Thread),
-            ets:insert(?THREADS_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated}),
             {ok, Updated};
         [] ->
             {error, not_found}
@@ -524,17 +516,3 @@ message_matches(Message, MessageId) ->
     [beam_agent_core:message()].
 limit_visible_messages(Messages, VisibleCount) when VisibleCount >= 0 ->
     lists:sublist(Messages, min(VisibleCount, length(Messages))).
-
--spec ensure_ets(thread_store_table(), [thread_store_table_option(), ...]) -> ok.
-ensure_ets(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.

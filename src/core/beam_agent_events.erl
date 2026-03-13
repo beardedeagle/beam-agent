@@ -11,17 +11,15 @@
     receive_event/2
 ]).
 
--dialyzer({no_underspecs, [ensure_ets/2]}).
-
 -define(SUBSCRIPTIONS_TABLE, beam_agent_event_subscriptions).
 -define(SESSIONS_TABLE, beam_agent_event_session_refs).
 
 -doc "Ensure ETS tables exist for the universal event stream.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    ensure_ets(?SUBSCRIPTIONS_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?SUBSCRIPTIONS_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    ensure_ets(?SESSIONS_TABLE, [bag, public, named_table,
+    beam_agent_ets:ensure_table(?SESSIONS_TABLE, [bag, named_table,
         {read_concurrency, true}]),
     ok.
 
@@ -29,8 +27,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    ets:delete_all_objects(?SUBSCRIPTIONS_TABLE),
-    ets:delete_all_objects(?SESSIONS_TABLE),
+    beam_agent_ets:delete_all_objects(?SUBSCRIPTIONS_TABLE),
+    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
     ok.
 
 -doc "Subscribe the calling process to future events for a session.".
@@ -40,8 +38,8 @@ subscribe(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     Ref = make_ref(),
     Owner = self(),
     Metadata = #{session_id => SessionId, owner => Owner},
-    ets:insert(?SUBSCRIPTIONS_TABLE, {Ref, Metadata}),
-    ets:insert(?SESSIONS_TABLE, {SessionId, Ref}),
+    beam_agent_ets:insert(?SUBSCRIPTIONS_TABLE, {Ref, Metadata}),
+    beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Ref}),
     {ok, Ref}.
 
 -doc "Remove a universal event subscription.".
@@ -51,8 +49,8 @@ unsubscribe(SessionId, Ref)
     ensure_tables(),
     case ets:lookup(?SUBSCRIPTIONS_TABLE, Ref) of
         [{Ref, #{session_id := SessionId}}] ->
-            ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
-            ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref}),
+            beam_agent_ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
+            beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref}),
             flush_subscription_mailbox(Ref),
             ok;
         _ ->
@@ -110,11 +108,11 @@ publish_to_refs(SessionId, SendFun) ->
                     true ->
                         SendFun(Owner, Ref);
                     false ->
-                        ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
-                        ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
+                        beam_agent_ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
+                        beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
                 end;
             [] ->
-                ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
+                beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
         end
     end, ets:lookup(?SESSIONS_TABLE, SessionId)),
     ok.
@@ -130,16 +128,3 @@ flush_subscription_mailbox(Ref) ->
         ok
     end.
 
--spec ensure_ets(atom(), [term()]) -> ok.
-ensure_ets(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.

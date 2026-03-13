@@ -40,31 +40,19 @@
 
 -doc """
 Ensure the accounts ETS table exists. Idempotent -- safe to call multiple times.
-The table is public and named so any process can access it without bottlenecking
-on a single owner.
+The table is named and its access mode is resolved by `beam_agent_ets` based on
+the global configuration.
 """.
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?TABLE, [set, public, named_table,
-                    {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg ->
-                    %% Race condition: another process created it first
-                    ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Delete all account data from the ETS table.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?TABLE),
+    beam_agent_ets:delete_all_objects(?TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -214,5 +202,5 @@ get_auth_state(Session) ->
 -spec put_auth_state(pid() | binary(), auth_state()) -> ok.
 put_auth_state(Session, State) ->
     Key = session_key(Session),
-    ets:insert(?TABLE, {Key, State}),
+    beam_agent_ets:insert(?TABLE, {Key, State}),
     ok.

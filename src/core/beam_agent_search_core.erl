@@ -57,26 +57,14 @@
 -doc "Ensure the search sessions ETS table exists. Idempotent.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?SESSIONS_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?SESSIONS_TABLE, [set, public, named_table,
-                    {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg ->
-                    %% Race condition: another process created it first
-                    ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?SESSIONS_TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Delete all search session data.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?SESSIONS_TABLE),
+    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -136,7 +124,7 @@ session_start(Session, SearchSessionId, Roots)
         last_results => [],
         created_at   => Now
     },
-    ets:insert(?SESSIONS_TABLE, {{SKey, SearchSessionId}, Entry}),
+    beam_agent_ets:insert(?SESSIONS_TABLE, {{SKey, SearchSessionId}, Entry}),
     {ok, Entry}.
 
 -doc """
@@ -157,7 +145,7 @@ session_update(Session, SearchSessionId, Query)
             Roots = maps:get(roots, Entry),
             {ok, Matches} = fuzzy_file_search(Query, Roots, #{}),
             Updated = Entry#{last_query => Query, last_results => Matches},
-            ets:insert(?SESSIONS_TABLE, {EtsKey, Updated}),
+            beam_agent_ets:insert(?SESSIONS_TABLE, {EtsKey, Updated}),
             {ok, Matches};
         [] ->
             {error, not_found}
@@ -169,7 +157,7 @@ session_stop(Session, SearchSessionId)
   when is_binary(SearchSessionId) ->
     ensure_table(),
     SKey = session_key(Session),
-    ets:delete(?SESSIONS_TABLE, {SKey, SearchSessionId}),
+    beam_agent_ets:delete(?SESSIONS_TABLE, {SKey, SearchSessionId}),
     ok.
 
 %%--------------------------------------------------------------------

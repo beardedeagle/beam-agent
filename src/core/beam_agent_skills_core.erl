@@ -69,26 +69,14 @@
 -doc "Ensure the ETS table exists. Idempotent — safe to call multiple times.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?SKILLS_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?SKILLS_TABLE,
-                    [set, public, named_table, {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg ->
-                    %% Race: another process created it first.
-                    ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?SKILLS_TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Delete all skill and config data from the ETS table.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?SKILLS_TABLE),
+    beam_agent_ets:delete_all_objects(?SKILLS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -115,7 +103,7 @@ register_skill(Session, SkillId, Opts)
     ensure_table(),
     Key = session_key(Session),
     Entry = build_entry(SkillId, Opts),
-    ets:insert(?SKILLS_TABLE, {{Key, skill, SkillId}, Entry}),
+    beam_agent_ets:insert(?SKILLS_TABLE, {{Key, skill, SkillId}, Entry}),
     {ok, Entry}.
 
 -doc "Remove a skill from a session. Returns `ok` whether or not the skill existed.".
@@ -125,7 +113,7 @@ unregister_skill(Session, SkillId)
        is_binary(SkillId) ->
     ensure_table(),
     Key = session_key(Session),
-    ets:delete(?SKILLS_TABLE, {Key, skill, SkillId}),
+    beam_agent_ets:delete(?SKILLS_TABLE, {Key, skill, SkillId}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -221,7 +209,7 @@ skills_config_write(Session, Path, Enabled)
     Key = session_key(Session),
     Now = erlang:system_time(millisecond),
     Config = #{path => Path, enabled => Enabled, updated_at => Now},
-    ets:insert(?SKILLS_TABLE, {{Key, config, Path}, Config}),
+    beam_agent_ets:insert(?SKILLS_TABLE, {{Key, config, Path}, Config}),
     ok.
 
 -doc "Read all skill config entries for a session. Equivalent to `skills_config_read(Session, #{})`.".
