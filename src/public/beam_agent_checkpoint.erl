@@ -105,7 +105,7 @@ fallback system.
 """.
 
 -export([
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     snapshot/3,
     rewind/2,
@@ -148,8 +148,8 @@ Ensure the checkpoint ETS table exists.
 Creates the beam_agent_checkpoints table if it does not already
 exist. This function is idempotent and safe to call from any process.
 """.
--spec ensure_table() -> ok.
-ensure_table() -> beam_agent_checkpoint_core:ensure_table().
+-spec ensure_tables() -> ok.
+ensure_tables() -> beam_agent_checkpoint_core:ensure_tables().
 
 -doc """
 Clear all checkpoint data from the store.

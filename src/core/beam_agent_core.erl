@@ -28,6 +28,7 @@ v0.2.66 for protocol fidelity:
     query/2,
     query/3,
     session_info/1,
+    session_identity/1,
     health/1,
     backend/1,
     list_backends/0,
@@ -469,6 +470,24 @@ query(Session, Prompt, Params)
 -spec session_info(pid()) -> {ok, map()} | {error, term()}.
 session_info(Session) when is_pid(Session) ->
     beam_agent_router:session_info(Session).
+
+-doc """
+Derive a stable string identifier for a session.
+
+Extracts the `session_id` from `session_info/1` when available, otherwise
+falls back to the pid stringified via `erlang:pid_to_list/1`. This is the
+canonical implementation — all modules should delegate here rather than
+duplicating the logic.
+""".
+-spec session_identity(pid()) -> binary().
+session_identity(Session) ->
+    case session_info(Session) of
+        {ok, #{session_id := SessionId}} when is_binary(SessionId),
+                                              byte_size(SessionId) > 0 ->
+            SessionId;
+        _ ->
+            unicode:characters_to_binary(erlang:pid_to_list(Session))
+    end.
 
 -doc "Return the current health state for a live unified session.".
 -spec health(pid()) -> atom().

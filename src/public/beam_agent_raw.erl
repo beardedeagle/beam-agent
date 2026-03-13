@@ -274,10 +274,4 @@ without going through `beam_agent:session_info/1`.
 
 -spec session_identity(pid()) -> binary().
 session_identity(Session) ->
-    case beam_agent:session_info(Session) of
-        {ok, #{session_id := SessionId}} when is_binary(SessionId),
-                                              byte_size(SessionId) > 0 ->
-            SessionId;
-        _ ->
-            unicode:characters_to_binary(erlang:pid_to_list(Session))
-    end.
+    beam_agent_core:session_identity(Session).
