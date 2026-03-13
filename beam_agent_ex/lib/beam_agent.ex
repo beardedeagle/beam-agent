@@ -152,8 +152,8 @@ defmodule BeamAgent do
     the adapter doesn't export the function. Universal fallbacks use ETS-backed
     core modules (`beam_agent_*_core`).
   - **Transport architecture**: Three transport types --
-    `beam_agent_transport_port` (stdio), `beam_agent_transport_http_sse`
-    (HTTP+SSE), and `beam_agent_transport_ws` (WebSocket). The handler's
+    `beam_agent_transport_port` (stdio), `beam_agent_transport_http`
+    (HTTP), and `beam_agent_transport_ws` (WebSocket). The handler's
     `init_handler/1` callback selects the transport.
   - **Thick framework, thin adapters**: The session engine handles lifecycle,
     queuing, telemetry, buffering, and consumer management. Backend handlers

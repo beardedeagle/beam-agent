@@ -65,7 +65,7 @@ beam_agent_runtime_core (ETS state, provider catalog, inference)
         +-- gen_statem:call (session_info for inference)
 ```
 
-== Core concepts ==
+## Core concepts
 
 Runtime state tracks what model, provider, and agent a session is
 currently using. Think of it as the session's "settings panel" -- you
@@ -80,7 +80,7 @@ Use current_provider/1 and set_provider/2 to check and change the
 active provider. Use current_agent/1 and set_agent/2 for models.
 merge_query_opts/2 combines stored defaults with explicit query params.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Runtime state is ETS-backed via beam_agent_runtime_core, keyed by
 session pid or session ID binary. The ETS table stores a map per

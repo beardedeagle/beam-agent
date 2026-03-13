@@ -7,7 +7,7 @@ This module is the single stable entry point for all callers. Every
 user-visible feature works identically across all five backends thanks to
 native-first routing with universal fallbacks.
 
-== Getting Started ==
+## Getting Started
 
 Start a session, send a query, and process the response:
 
@@ -49,16 +49,16 @@ loop(Session, Ref) ->
     end.
 ```
 
-== Key Concepts ==
+## Key Concepts
 
-=== Sessions ===
+### Sessions
 
 A session is a supervised gen_statem process that owns a single transport
 connection to a backend CLI. Sessions are started with start_session/1
 and stopped with stop/1. Each session has a unique binary session_id,
 tracks message history, and can host multiple conversation threads.
 
-=== Events ===
+### Events
 
 Events provide a streaming view of session activity. Call
 event_subscribe/1 to register the calling process as a subscriber,
@@ -66,35 +66,35 @@ then receive_event/2 to pull events one at a time. Events are
 delivered as normalized message() maps. The stream ends with an
 {error, complete} sentinel after a result or error message.
 
-=== Threads ===
+### Threads
 
 Threads group related queries into named conversation contexts within
 a session. Use thread_start/2 to create a thread, thread_resume/2 to
 switch to it, and thread_list/1 to enumerate threads. Each thread
 tracks its own message history as a subset of the session history.
 
-=== Hooks ===
+### Hooks
 
 SDK-level lifecycle hooks fire at well-defined points (session start,
 query start, tool use, etc.). Pass hook definitions in session_opts()
 via the sdk_hooks key. Hooks run in-process and cannot block the
 engine state machine.
 
-=== MCP (Model Context Protocol) ===
+### MCP (Model Context Protocol)
 
 MCP lets you define custom tools as Erlang functions that the backend
 can invoke in-process. Use add_mcp_server/2 to register a server with
 its tools, mcp_status/1 to inspect registered servers, and
 toggle_mcp_server/3 to enable/disable servers at runtime.
 
-=== Providers ===
+### Providers
 
 Providers represent authentication/API endpoints for a backend. Use
 current_provider/1 and set_provider/2 to manage which provider is
 active. Provider management is most relevant for backends that support
 multiple API endpoints (e.g., OpenCode with different LLM providers).
 
-== Architecture ==
+## Architecture
 
 Every public function in this module follows the native_or routing
 pattern: it first attempts the backend's native implementation via
@@ -108,7 +108,7 @@ The call chain is: beam_agent -> beam_agent_core -> beam_agent_router
 design means beam_agent contains zero business logic -- it is purely
 a delegation layer.
 
-== Core concepts ==
+## Core concepts
 
 A session is a live connection to one of the five backends (Claude, Codex,
 Gemini, OpenCode, Copilot). The typical lifecycle is: start a session with
@@ -125,7 +125,7 @@ Events let you stream responses in real time instead of waiting for the
 full answer. Subscribe with event_subscribe/1 and pull events one at a
 time with receive_event/2.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 beam_agent is a pure delegation layer with zero business logic. The call
 chain is: beam_agent -> beam_agent_core -> beam_agent_router ->
@@ -143,7 +143,7 @@ Session state includes the MCP registry, hook registry, message history,
 and thread tracking. All mutable state lives in the engine -- this module
 holds none.
 
-== Backend Integration ==
+## Backend Integration
 
 If you are implementing a new backend, this module is your primary
 integration surface. Functions use a native_or routing pattern: each
@@ -162,7 +162,7 @@ When adding a new backend, you need to:
 For the full step-by-step process, see the Backend Integration Guide
 in docs/guides/backend_integration_guide.md.
 
-== See Also ==
+## See Also
 
   - beam_agent_raw: escape-hatch functions for backend-native calls
   - beam_agent_capabilities: introspection of per-backend feature support
@@ -506,7 +506,7 @@ for messages that should continue collection. The default predicate
 checks for type => result.
 """.
 -type terminal_pred() :: beam_agent_core:terminal_pred().
--type capability_error() :: backend_not_present
+-type backend_resolution_error() :: backend_not_present
                           | {invalid_session_info, term()}
                           | {session_backend_lookup_failed, term()}
                           | {unknown_backend, term()}.
@@ -3621,7 +3621,7 @@ a running session.
 """.
 -spec capabilities(pid() | backend() | binary() | atom()) ->
     {ok, [map()]} |
-    {error, capability_error()}.
+    {error, backend_resolution_error()}.
 capabilities(Session) when is_pid(Session) ->
     beam_agent_capabilities:for_session(Session);
 capabilities(BackendLike) ->

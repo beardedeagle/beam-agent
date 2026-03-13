@@ -71,7 +71,7 @@ Tables are public and named so any process can read and write without
 bottlenecking on a single owner. They are created lazily on first
 access and persist for the lifetime of the BEAM node.
 
-== Core concepts ==
+## Core concepts
 
 The session store is like version control for conversations. It saves
 every message exchanged during a session so you can look back at the
@@ -88,7 +88,7 @@ Sharing lets you make a session visible externally (e.g., for
 collaboration), and summarization generates a text summary of the
 conversation history.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 The store is backed by three ETS tables: beam_agent_sessions (metadata),
 beam_agent_session_messages (ordered-set with auto-incrementing sequence

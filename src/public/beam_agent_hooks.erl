@@ -71,7 +71,7 @@ Hooks are entirely in-process -- no ETS tables or inter-process
 communication. The hook registry is typically stored in the session
 handler state and passed to fire/3 when lifecycle events occur.
 
-== Core concepts ==
+## Core concepts
 
 Hooks are callback functions that run at specific points in a session
 lifecycle. Think of them as event listeners: you register a function,
@@ -87,7 +87,7 @@ Matchers let you filter which tools trigger a hook. For example, you can
 write a hook that only fires when the Bash tool is used by adding a
 tool_name matcher. Matchers support exact strings and regex patterns.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Hooks are entirely in-process -- no ETS tables, no inter-process
 communication. The hook registry is a map from hook_event() to an

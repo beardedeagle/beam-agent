@@ -39,7 +39,7 @@ passed to `sh -c`.
 The exit code of the command is in `exit_code`. A non-zero exit code is NOT
 returned as `{error, ...}` -- it is up to the caller to inspect `exit_code`.
 
-== Core concepts ==
+## Core concepts
 
 This module runs shell commands from your Erlang code. Use run/1 with a
 command string to execute it and get back the output and exit code. Use
@@ -55,7 +55,7 @@ You can also pass a list of binaries instead of a single command string.
 Each segment is shell-escaped automatically, which avoids quoting issues
 with spaces or special characters.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Execution uses spawn_executable ports via beam_agent_command_core. The
 command is passed to sh -c for shell interpretation. List-form arguments

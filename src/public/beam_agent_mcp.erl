@@ -99,7 +99,7 @@ State0 = beam_agent_mcp:new_client(ClientInfo, ClientCaps, #{}),
 {ok, State5} = beam_agent_mcp:client_handle_message(ToolsListResponse, State4).
 ```
 
-== Core concepts ==
+## Core concepts
 
 MCP (Model Context Protocol) is a standard for connecting AI tools. It
 lets you define Erlang functions that the AI agent can call during a
@@ -115,7 +115,7 @@ The wire protocol is JSON-RPC 2.0 -- structured request/response messages.
 You do not need to handle the protocol directly; the dispatch and client
 state machines manage it for you.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 This module re-exports from four core modules: beam_agent_tool_registry
 (tool and server management), beam_agent_mcp_protocol (wire format),

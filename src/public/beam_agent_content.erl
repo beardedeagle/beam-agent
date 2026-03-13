@@ -60,7 +60,7 @@ beam_agent_content (public API, re-exports content_block/0 type)
 beam_agent_content_core (pure functions, no processes, no side effects)
 ```
 
-== Core concepts ==
+## Core concepts
 
 Different backends format their messages differently. Claude uses nested
 content blocks, while Codex and Gemini use flat message maps. This module
@@ -76,7 +76,7 @@ Round-tripping is safe: you can convert a message to a block and back
 without losing information. Unknown block types are preserved as raw
 blocks for forward compatibility.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 All functions in this module are pure -- no processes, no ETS, no side
 effects. The module delegates to beam_agent_content_core which contains

@@ -64,7 +64,7 @@ beam_agent_control_core (ETS state, dispatch logic, callback broker)
   ETS tables: config, tasks, feedback, callbacks, pending
 ```
 
-== Core concepts ==
+## Core concepts
 
 The control plane lets you manage a session without sending queries.
 You can change settings (like permission mode or thinking token budget),
@@ -80,7 +80,7 @@ Pending requests represent a turn-based interaction: the agent stores
 a question, and your code resolves it later with an answer. This is
 how interactive approval workflows work under the hood.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 All control state is ETS-backed via beam_agent_control_core, keyed by
 session ID. Five separate ETS tables back config, tasks, feedback,

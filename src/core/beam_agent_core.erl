@@ -182,12 +182,12 @@ v0.2.66 for protocol fidelity:
                            | {allow, map(), map() | [map()]}
                            | map().
 
--type capability_error() :: backend_not_present
+-type backend_resolution_error() :: backend_not_present
                           | {invalid_session_info, term()}
                           | {session_backend_lookup_failed, term()}
                           | {unknown_backend, term()}.
 
--type supports_error() :: capability_error() | {unknown_capability, term()}.
+-type supports_error() :: backend_resolution_error() | {unknown_capability, term()}.
 
 %% Unified message record. Required field: `type`.
 %% All other fields are optional and depend on message_type().
@@ -740,7 +740,7 @@ capabilities() ->
 
 -doc "Return the capability view for a backend or live session.".
 -spec capabilities(pid() | backend() | binary() | atom()) ->
-    {ok, [map()]} | {error, capability_error()}.
+    {ok, [map()]} | {error, backend_resolution_error()}.
 capabilities(Session) when is_pid(Session) ->
     beam_agent_capabilities:for_session(Session);
 capabilities(BackendLike) ->

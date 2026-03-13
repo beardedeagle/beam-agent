@@ -60,7 +60,7 @@ The ETS table uses {SessionId, UUID} composite keys in a set table
 with public access, so any process can create and query checkpoints
 without bottlenecking.
 
-== Core concepts ==
+## Core concepts
 
 Checkpointing is like saving your game before a boss fight. Before the
 agent modifies files, the SDK snapshots their current state. If something
@@ -74,7 +74,7 @@ list_checkpoints/1 shows all save points for a session. get_checkpoint/2
 retrieves one by UUID. rewind/2 restores files to their checkpointed
 state, including deleting files that were created after the checkpoint.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Checkpoints are managed by beam_agent_checkpoint_core, the universal
 layer. All state lives in the beam_agent_checkpoints ETS table using

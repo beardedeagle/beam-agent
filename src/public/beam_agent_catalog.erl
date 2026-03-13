@@ -56,7 +56,7 @@ beam_agent_catalog_core (native listing, fallback metadata, entry lookup)
         +-- gen_statem:call (session_info fallback)
 ```
 
-== Core concepts ==
+## Core concepts
 
 The catalog is the directory of everything a session can use: tools
 (functions the agent can call), skills (higher-level capabilities),
@@ -71,7 +71,7 @@ the catalog stores it for easy lookup.
 Each session has its own catalog. Different sessions may have different
 tools available depending on their backend and MCP server configuration.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Catalog data is stored in ETS tables managed by beam_agent_catalog_core.
 The tables are populated during session init and updated in handle_data
