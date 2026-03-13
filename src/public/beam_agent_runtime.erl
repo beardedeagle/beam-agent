@@ -121,7 +121,18 @@ level deep. The built-in provider catalog is compiled-in static data.
     provider_status/1,
     provider_status/2,
     validate_provider_config/2,
-    merge_query_opts/2
+    merge_query_opts/2,
+    set_model/2,
+    set_permission_mode/2,
+    interrupt/1,
+    abort/1,
+    send_control/3,
+    get_status/1,
+    get_auth_status/1,
+    get_last_session_id/1,
+    windows_sandbox_setup_start/2,
+    set_max_thinking_tokens/2,
+    stop_task/2
 ]).
 
 %%--------------------------------------------------------------------
@@ -371,3 +382,231 @@ runtime defaults are applied.
 """.
 -spec merge_query_opts(pid() | binary(), map()) -> map().
 merge_query_opts(Session, Params) -> beam_agent_runtime_core:merge_query_opts(Session, Params).
+
+%%--------------------------------------------------------------------
+%% Session Control
+%%--------------------------------------------------------------------
+
+-doc """
+Change the model for a running session.
+
+Sends a set_model control message to the session engine. The backend
+handler may process this natively (e.g., sending a protocol message)
+or the engine stores it in its own state.
+
+Parameters:
+  - Session: pid of a running session.
+  - Model: binary model identifier (e.g., <<"claude-sonnet-4-20250514">>).
+
+Returns {ok, Model} on success or {error, Reason}.
+""".
+-spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+set_model(Session, Model) -> beam_agent_core:set_model(Session, Model).
+
+-doc """
+Change the permission mode for a running session.
+
+Controls how the backend handles tool execution and file edit approval.
+
+Parameters:
+  - Session: pid of a running session.
+  - Mode: binary permission mode (e.g., <<"default">>, <<"accept_edits">>).
+
+Returns {ok, Mode} on success or {error, Reason}.
+""".
+-spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+set_permission_mode(Session, Mode) -> beam_agent_core:set_permission_mode(Session, Mode).
+
+-doc """
+Interrupt the currently active query on a session.
+
+Sends an interrupt signal to the backend. If the backend supports
+native interrupts (e.g., sending a protocol-level cancel), it uses
+that; otherwise falls back to an OS-level signal for port-based
+transports.
+
+Parameters:
+  - Session: pid of a running session.
+
+Returns ok if the interrupt was sent, or {error, not_supported} if the
+backend does not support interrupts, or {error, Reason} on failure.
+""".
+-spec interrupt(pid()) -> ok | {error, term()}.
+interrupt(Session) -> beam_agent_core:interrupt(Session).
+
+-doc """
+Abort the currently active query and reset the session to ready state.
+
+Stronger than interrupt/1: forcibly cancels the query and transitions
+the session engine back to the ready state.
+
+Parameters:
+  - Session: pid of a running session.
+
+Returns ok or {error, Reason}.
+""".
+-spec abort(pid()) -> ok | {error, term()}.
+abort(Session) -> beam_agent_core:abort(Session).
+
+-doc """
+Send a backend-specific control message to a session.
+
+Control messages provide a generic extension point for features not
+covered by the typed API. The Method string identifies the operation
+and Params carries its arguments. The backend handler processes the
+message via its handle_control/4 callback.
+
+Parameters:
+  - Session: pid of a running session.
+  - Method: binary method name (e.g., <<"mcp_message">>, <<"set_config">>).
+  - Params: map of method-specific parameters.
+
+Returns {ok, Result} on success or {error, not_supported} if the
+backend does not handle this method, or {error, Reason} on failure.
+""".
+-spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+send_control(Session, Method, Params) ->
+    beam_agent_core:send_control(Session, Method, Params).
+
+%%--------------------------------------------------------------------
+%% Session Status
+%%--------------------------------------------------------------------
+
+-doc """
+Return the overall status of a running session.
+
+Assembles a composite status view including session health, connection
+state, active backend, and session metadata. Use this for dashboards,
+health checks, or debugging connectivity issues.
+
+Tries the backend-native implementation first; falls back to the
+universal layer, which assembles a status map from session_info/1
+and health/1.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, Map} on success, where Map includes keys such as
+status, backend, health, and session_id. Returns {error, Reason}
+if the session is unreachable.
+""".
+-spec get_status(pid()) -> {ok, term()} | {error, term()}.
+get_status(Session) ->
+    beam_agent_core:native_or(Session, get_status, [], fun() ->
+        universal_get_status(Session)
+    end).
+
+-doc """
+Return the authentication status for a session's provider.
+
+Checks whether the session holds valid credentials for its backend
+provider. Use this to verify that API keys or OAuth tokens are still
+valid before issuing queries.
+
+Tries the backend-native implementation first; falls back to the
+universal layer, which assembles status from account_info/1.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, Map} on success, where Map includes whether the session
+is authenticated, the authentication method, and token expiration if
+applicable. Returns {error, Reason} on failure.
+""".
+-spec get_auth_status(pid()) -> {ok, term()} | {error, term()}.
+get_auth_status(Session) ->
+    beam_agent_core:native_or(Session, get_auth_status, [], fun() ->
+        universal_get_auth_status(Session)
+    end).
+
+-doc """
+Return the backend's own session identifier for a running session.
+
+Retrieves the session ID assigned by the backend service, which is
+distinct from the Erlang pid. Use this when you need to correlate
+BEAM-side state with backend logs, API calls, or external tooling.
+
+Tries the backend-native implementation first; falls back to the
+universal layer, which derives the identifier from session_identity/1.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, SessionId} where SessionId is typically a binary string,
+or {error, Reason} if the identifier cannot be determined.
+""".
+-spec get_last_session_id(pid()) -> {ok, term()} | {error, term()}.
+get_last_session_id(Session) ->
+    beam_agent_core:native_or(Session, get_last_session_id, [], fun() ->
+        {ok, beam_agent_core:session_identity(Session)}
+    end).
+
+%%--------------------------------------------------------------------
+%% Extended Backend Controls
+%%--------------------------------------------------------------------
+
+-doc """
+Start the Windows sandbox setup process.
+
+Initiates sandbox configuration for backends that run in a Windows
+environment. On non-Windows platforms the universal fallback returns
+status => not_applicable with the current platform architecture.
+""".
+-spec windows_sandbox_setup_start(pid(), map()) -> {ok, term()} | {error, term()}.
+windows_sandbox_setup_start(Session, Opts) ->
+    beam_agent_core:native_or(Session, windows_sandbox_setup_start, [Opts], fun() ->
+        {ok, beam_agent_core:with_universal_source(Session, #{
+            status => not_applicable,
+            reason => <<"Windows sandbox not applicable on this platform">>,
+            platform => list_to_binary(erlang:system_info(system_architecture))})}
+    end).
+
+-doc """
+Set the maximum number of thinking tokens for the session.
+
+Controls how many tokens the backend's reasoning model may use for
+internal chain-of-thought before producing a visible response. Higher
+values allow deeper reasoning at the cost of latency and token usage.
+The universal fallback persists this as a configuration value.
+""".
+-spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, term()} | {error, term()}.
+set_max_thinking_tokens(Session, MaxTokens) ->
+    beam_agent_core:native_or(Session, set_max_thinking_tokens, [MaxTokens], fun() ->
+        _ = beam_agent_config_core:config_value_write(
+            Session, <<"max_thinking_tokens">>, MaxTokens, #{}),
+        {ok, beam_agent_core:with_universal_source(Session, #{
+            max_thinking_tokens => MaxTokens})}
+    end).
+
+-doc """
+Stop a running task by its identifier.
+
+Sends an interrupt to the session and marks the task as stopped.
+TaskId identifies the specific task (query or sub-agent invocation)
+to cancel. The universal fallback calls interrupt/1 on the session
+process.
+""".
+-spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
+stop_task(Session, TaskId) ->
+    beam_agent_core:native_or(Session, stop_task, [TaskId], fun() ->
+        _ = beam_agent_core:interrupt(Session),
+        {ok, beam_agent_core:with_universal_source(Session, #{
+            status => stopped, task_id => TaskId})}
+    end).
+
+%%--------------------------------------------------------------------
+%% Private Helpers
+%%--------------------------------------------------------------------
+
+-spec universal_get_status(pid()) -> {ok, map()} | {error, term()}.
+universal_get_status(Session) ->
+    case beam_agent_core:session_info(Session) of
+        {ok, Info} ->
+            {ok, beam_agent_core:with_universal_source(Session, Info#{
+                health => beam_agent_core:safe_session_health(Session)
+            })};
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec universal_get_auth_status(pid()) -> {ok, map()}.
+universal_get_auth_status(Session) ->
+    {ok, Status} = beam_agent_runtime_core:provider_status(Session),
+    {ok, beam_agent_core:with_universal_source(Session, Status)}.

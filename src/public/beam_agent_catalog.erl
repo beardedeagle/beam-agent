@@ -101,6 +101,12 @@ catalog population works.
 """.
 
 -export([
+    supported_commands/1,
+    supported_models/1,
+    supported_agents/1,
+    list_commands/1,
+    model_list/1,
+    model_list/2,
     list_tools/1,
     list_skills/1,
     list_plugins/1,
@@ -114,6 +120,116 @@ catalog population works.
     set_default_agent/2,
     clear_default_agent/1
 ]).
+
+%%--------------------------------------------------------------------
+%% Supported / Static Catalog Functions
+%%--------------------------------------------------------------------
+
+-doc """
+Return the list of CLI commands the backend supports.
+
+Returns a static list of commands declared by the backend adapter
+(e.g., query, edit, review). The list does not change during the
+lifetime of a session because it reflects the adapter's compiled
+capability table rather than runtime state.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of command maps, each containing at minimum a
+name and description, or {error, Reason} on failure.
+""".
+-spec supported_commands(pid()) -> {ok, list()} | {error, term()}.
+supported_commands(Session) -> beam_agent_core:supported_commands(Session).
+
+-doc """
+Return the list of LLM models the backend can use.
+
+Queries the backend adapter for its declared model catalog. The
+available models depend on the backend: Claude backends list models
+such as claude-sonnet and claude-opus, while OpenAI-based backends
+list GPT variants.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of model maps, each containing at minimum a model
+name and its capabilities, or {error, Reason} on failure.
+""".
+-spec supported_models(pid()) -> {ok, list()} | {error, term()}.
+supported_models(Session) -> beam_agent_core:supported_models(Session).
+
+-doc """
+Return the list of sub-agents the backend exposes.
+
+Sub-agents are specialized assistants (e.g., code reviewer, test
+writer) that the primary agent can delegate tasks to. This function
+returns the static list declared by the backend adapter rather than
+any runtime-registered agents.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of agent maps, each containing at minimum a name
+and description, or {error, Reason} on failure.
+""".
+-spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
+supported_agents(Session) -> beam_agent_core:supported_agents(Session).
+
+%%--------------------------------------------------------------------
+%% Command and Model Listing (native_or routing)
+%%--------------------------------------------------------------------
+
+-doc """
+List commands available for a session.
+
+Tries the backend-native command listing first; falls back to the
+static supported_commands/1 catalog if the backend does not provide
+a native implementation. Prefer this over supported_commands/1 when
+you want the most accurate view of what is currently available at
+runtime.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of command maps, each containing at minimum a
+name and description, or {error, Reason} on failure.
+""".
+-spec list_commands(pid()) -> {ok, list()} | {error, term()}.
+list_commands(Session) ->
+    beam_agent_core:native_or(Session, list_commands, [], fun() -> supported_commands(Session) end).
+
+-doc """
+List models available for a session using native-or routing.
+
+Convenience wrapper that calls model_list/2 with an empty options
+map. See model_list/2 for full details.
+
+Tries the backend-native model listing first; falls back to the
+static supported_models/1 catalog if the backend does not provide
+one.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of model maps, or {error, Reason} on failure.
+""".
+-spec model_list(pid()) -> {ok, term()} | {error, term()}.
+model_list(Session) ->
+    beam_agent_core:native_or(Session, model_list, [], fun() -> supported_models(Session) end).
+
+-doc """
+List models available for a session with optional filter criteria.
+
+Tries the backend-native model listing first; falls back to the
+static supported_models/1 catalog if the backend does not provide
+one. When the fallback is used, filtering is applied client-side.
+
+Session is the pid of a running beam_agent session. Opts is a map
+of optional filters that are backend-specific (e.g., capability
+requirements, model family).
+
+Returns {ok, List} of model maps on success, or {error, Reason}
+on failure.
+""".
+-spec model_list(pid(), map()) -> {ok, term()} | {error, term()}.
+model_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, model_list, [Opts], fun() -> supported_models(Session) end).
 
 %%--------------------------------------------------------------------
 %% List Functions

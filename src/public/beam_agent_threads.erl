@@ -133,6 +133,38 @@ All thread operations are session-scoped.
     clear_active_thread/1
 ]).
 
+%% Session-based thread operations (native-first routing via beam_agent_core)
+-export([
+    thread_start/2,
+    thread_resume/2,
+    thread_resume/3,
+    thread_list/1,
+    thread_list/2,
+    thread_fork/2,
+    thread_fork/3,
+    thread_read/2,
+    thread_read/3,
+    thread_archive/2,
+    thread_unarchive/2,
+    thread_rollback/3,
+    thread_unsubscribe/2,
+    thread_name_set/3,
+    thread_metadata_update/3,
+    thread_loaded_list/1,
+    thread_loaded_list/2,
+    thread_compact/2
+]).
+
+-dialyzer({no_underspecs, [
+    universal_thread_unsubscribe/2,
+    universal_thread_name_set/3,
+    universal_thread_metadata_update/3,
+    universal_thread_loaded_list/2,
+    universal_thread_compact/2,
+    include_thread/2,
+    maybe_put_selector/3
+]}).
+
 -export_type([thread_meta/0, thread_opts/0]).
 
 %%--------------------------------------------------------------------
@@ -474,3 +506,507 @@ SessionId is the binary session identifier.
 -spec clear_active_thread(binary()) -> ok.
 clear_active_thread(SessionId) ->
     beam_agent_threads_core:clear_active_thread(SessionId).
+
+%%--------------------------------------------------------------------
+%% Session-based Thread Operations (native-first routing)
+%%--------------------------------------------------------------------
+
+-doc """
+Start a new conversation thread within a live session.
+
+Tries the backend's native thread_start implementation first; falls
+back to beam_agent_core:thread_start/2 if the backend does not
+provide one.
+
+Parameters:
+  - Session: pid of a running session.
+  - Opts: thread options map. Optional keys:
+    - name: human-readable thread name (defaults to the thread_id)
+    - thread_id: explicit id (auto-generated if omitted)
+    - metadata: arbitrary metadata map
+    - parent_thread_id: id of the parent thread (for fork lineage)
+
+Returns {ok, ThreadMeta} or {error, Reason}.
+
+```erlang
+{ok, Thread} = beam_agent_threads:thread_start(Session, #{
+    name => <<"refactor-discussion">>
+}),
+ThreadId = maps:get(thread_id, Thread).
+```
+""".
+-spec thread_start(pid(), map()) -> {ok, map()} | {error, term()}.
+thread_start(Session, Opts) ->
+    beam_agent_core:thread_start(Session, Opts).
+
+-doc """
+Resume an existing thread by its identifier.
+
+Sets the thread as the active thread for the session and updates its
+status to active. Subsequent queries will be associated with this thread.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+
+Returns {ok, ThreadMeta} or {error, not_found}.
+
+```erlang
+{ok, Thread} = beam_agent_threads:thread_resume(Session, <<"thread_abc123">>),
+io:format("Resumed: ~s~n", [maps:get(name, Thread)]).
+```
+""".
+-spec thread_resume(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_resume(Session, ThreadId) ->
+    beam_agent_core:thread_resume(Session, ThreadId).
+
+-doc """
+Resume an existing thread with backend-specific options.
+
+Like thread_resume/2 but passes additional options to the backend's
+native implementation. Falls back to thread_resume/2 if the backend
+does not support extended resume options.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - Opts: backend-specific resume options.
+
+Returns {ok, ThreadMeta} or {error, not_found}.
+""".
+-spec thread_resume(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+thread_resume(Session, ThreadId, Opts) ->
+    beam_agent_core:native_or(Session, thread_resume, [ThreadId, Opts],
+        fun() -> thread_resume(Session, ThreadId) end).
+
+-doc """
+List all threads for a session, sorted by updated_at descending.
+
+Parameters:
+  - Session: pid of a running session.
+
+Returns {ok, ThreadList} where each entry is a thread metadata map.
+""".
+-spec thread_list(pid()) -> {ok, [map()]} | {error, term()}.
+thread_list(Session) ->
+    beam_agent_core:thread_list(Session).
+
+-doc """
+List threads for a session with backend-specific options.
+
+Falls back to thread_list/1 if the backend does not support filtered
+thread listing.
+
+Parameters:
+  - Session: pid of a running session.
+  - Opts: backend-specific listing options.
+
+Returns {ok, ThreadList} or {error, Reason}.
+""".
+-spec thread_list(pid(), map()) -> {ok, term()} | {error, term()}.
+thread_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, thread_list, [Opts],
+        fun() -> thread_list(Session) end).
+
+-doc """
+Fork an existing thread, copying its visible message history.
+
+Creates a new thread with a copy of all visible messages from the source
+thread. Message thread_id fields are rewritten to the new thread id.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary identifier of the source thread.
+
+Returns {ok, ForkedThreadMeta} or {error, not_found}.
+""".
+-spec thread_fork(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_fork(Session, ThreadId) ->
+    beam_agent_core:thread_fork(Session, ThreadId).
+
+-doc """
+Fork an existing thread with options.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary identifier of the source thread.
+  - Opts: fork options map. Optional keys:
+    - thread_id: explicit id for the fork
+    - name: name for the forked thread
+    - parent_thread_id: override the parent reference
+
+Returns {ok, ForkedThreadMeta} or {error, not_found}.
+""".
+-spec thread_fork(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+thread_fork(Session, ThreadId, Opts) ->
+    beam_agent_core:thread_fork(Session, ThreadId, Opts).
+
+-doc """
+Read thread metadata and optionally its message history.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+
+Returns {ok, #{thread => ThreadMeta}} or {error, not_found}.
+""".
+-spec thread_read(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_read(Session, ThreadId) ->
+    beam_agent_core:thread_read(Session, ThreadId).
+
+-doc """
+Read thread metadata with options.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - Opts: options map. Optional keys:
+    - include_messages: if true, includes the messages key in the result
+
+Returns {ok, #{thread => ThreadMeta, messages => [message()]}} or
+{error, not_found}.
+""".
+-spec thread_read(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+thread_read(Session, ThreadId, Opts) ->
+    beam_agent_core:thread_read(Session, ThreadId, Opts).
+
+-doc """
+Archive a thread, marking it as archived and inactive.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+
+Returns {ok, UpdatedThreadMeta} or {error, not_found}.
+""".
+-spec thread_archive(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_archive(Session, ThreadId) ->
+    beam_agent_core:thread_archive(Session, ThreadId).
+
+-doc """
+Unarchive a previously archived thread, restoring it to active status.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+
+Returns {ok, UpdatedThreadMeta} or {error, not_found}.
+""".
+-spec thread_unarchive(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_unarchive(Session, ThreadId) ->
+    beam_agent_core:thread_unarchive(Session, ThreadId).
+
+-doc """
+Rollback a thread's visible message history to a prior boundary.
+
+The underlying messages are preserved; only the visible window changes.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - Selector: boundary selector map. Accepts one of:
+    - #{count => N}: hide the last N visible messages
+    - #{visible_message_count => N}: set boundary directly
+    - #{message_id => Id} or #{uuid => Id}: set boundary to a message
+
+Returns {ok, UpdatedThreadMeta} or {error, not_found | invalid_selector}.
+""".
+-spec thread_rollback(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+thread_rollback(Session, ThreadId, Selector) ->
+    beam_agent_core:thread_rollback(Session, ThreadId, Selector).
+
+-doc """
+Unsubscribe from a thread and clear it as the active thread if applicable.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+
+Returns {ok, ResultMap} with thread_id and unsubscribed fields, or
+{error, not_found}.
+""".
+-spec thread_unsubscribe(pid(), binary()) -> {ok, term()} | {error, term()}.
+thread_unsubscribe(Session, ThreadId) ->
+    beam_agent_core:native_or(Session, thread_unsubscribe, [ThreadId], fun() ->
+        universal_thread_unsubscribe(Session, ThreadId)
+    end).
+
+-doc """
+Rename a thread.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - Name: new thread name as a binary.
+
+Returns {ok, ResultMap} or {error, not_found}.
+""".
+-spec thread_name_set(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+thread_name_set(Session, ThreadId, Name) ->
+    beam_agent_core:native_or(Session, thread_name_set, [ThreadId, Name], fun() ->
+        universal_thread_name_set(Session, ThreadId, Name)
+    end).
+
+-doc """
+Merge a metadata patch into a thread's metadata map.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - MetadataPatch: map of key-value pairs to merge into the thread's
+    existing metadata.
+
+Returns {ok, ResultMap} or {error, not_found}.
+""".
+-spec thread_metadata_update(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+thread_metadata_update(Session, ThreadId, MetadataPatch) ->
+    beam_agent_core:native_or(Session, thread_metadata_update, [ThreadId, MetadataPatch], fun() ->
+        universal_thread_metadata_update(Session, ThreadId, MetadataPatch)
+    end).
+
+-doc """
+List loaded (in-memory) threads for a session.
+
+Returns threads with their active state, optionally filtered by the
+backend's native implementation.
+
+Parameters:
+  - Session: pid of a running session.
+
+Returns {ok, ResultMap} with threads, active_thread_id, and count fields.
+""".
+-spec thread_loaded_list(pid()) -> {ok, map()} | {error, term()}.
+thread_loaded_list(Session) ->
+    beam_agent_core:native_or(Session, thread_loaded_list, [], fun() ->
+        universal_thread_loaded_list(Session, #{})
+    end).
+
+-doc """
+List loaded threads for a session with filter options.
+
+Parameters:
+  - Session: pid of a running session.
+  - Opts: filter options map. Optional keys:
+    - include_archived: include archived threads (default true)
+    - thread_id: filter to a specific thread
+    - status: filter by thread status
+    - limit: maximum number of results
+
+Returns {ok, ResultMap} or {error, Reason}.
+""".
+-spec thread_loaded_list(pid(), map()) -> {ok, map()} | {error, term()}.
+thread_loaded_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, thread_loaded_list, [Opts], fun() ->
+        universal_thread_loaded_list(Session, Opts)
+    end).
+
+-doc """
+Compact a thread by reducing its visible message history.
+
+Uses thread_rollback internally with a selector derived from the
+options map. If no selector is provided, compacts to zero visible
+messages.
+
+Parameters:
+  - Session: pid of a running session.
+  - Opts: compaction options map. Optional keys:
+    - thread_id: target thread (defaults to active thread)
+    - count: number of messages to hide from the end
+    - visible_message_count: set boundary directly
+    - selector: explicit rollback selector map
+
+Returns {ok, ResultMap} or {error, not_found}.
+""".
+-spec thread_compact(pid(), map()) -> {ok, map()} | {error, term()}.
+thread_compact(Session, Opts) ->
+    beam_agent_core:native_or(Session, thread_compact, [Opts], fun() ->
+        universal_thread_compact(Session, Opts)
+    end).
+
+%%--------------------------------------------------------------------
+%% Private Helpers (universal fallbacks)
+%%--------------------------------------------------------------------
+
+-spec universal_thread_unsubscribe(pid(), binary()) -> {ok, map()} | {error, term()}.
+universal_thread_unsubscribe(Session, ThreadId) ->
+    SessionId = beam_agent_core:session_identity(Session),
+    case beam_agent_threads_core:get_thread(SessionId, ThreadId) of
+        {ok, _Thread} ->
+            case beam_agent_threads_core:active_thread(SessionId) of
+                {ok, ThreadId} ->
+                    ok = beam_agent_threads_core:clear_active_thread(SessionId);
+                _ ->
+                    ok
+            end,
+            {ok, beam_agent_core:with_universal_source(Session, #{
+                thread_id => ThreadId,
+                unsubscribed => true,
+                active_thread_id => active_thread_id(SessionId)
+            })};
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec universal_thread_name_set(pid(), binary(), binary()) ->
+    {ok, map()} | {error, term()}.
+universal_thread_name_set(Session, ThreadId, Name) ->
+    SessionId = beam_agent_core:session_identity(Session),
+    case beam_agent_threads_core:rename_thread(SessionId, ThreadId, Name) of
+        {ok, Thread} ->
+            {ok, beam_agent_core:with_universal_source(Session, #{
+                thread_id => ThreadId,
+                name => Name,
+                thread => Thread
+            })};
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec universal_thread_metadata_update(pid(), binary(), map()) ->
+    {ok, map()} | {error, term()}.
+universal_thread_metadata_update(Session, ThreadId, MetadataPatch) ->
+    SessionId = beam_agent_core:session_identity(Session),
+    case beam_agent_threads_core:update_thread_metadata(SessionId, ThreadId, MetadataPatch) of
+        {ok, Thread} ->
+            {ok, beam_agent_core:with_universal_source(Session, #{
+                thread_id => ThreadId,
+                metadata => maps:get(metadata, Thread, #{}),
+                thread => Thread
+            })};
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec universal_thread_loaded_list(pid(), map()) -> {ok, map()}.
+universal_thread_loaded_list(Session, Opts) ->
+    SessionId = beam_agent_core:session_identity(Session),
+    {ok, Threads0} = beam_agent_threads_core:list_threads(SessionId),
+    Threads = filter_loaded_threads(Threads0, Opts),
+    {ok, beam_agent_core:with_universal_source(Session, #{
+        threads => Threads,
+        active_thread_id => active_thread_id(SessionId),
+        count => length(Threads)
+    })}.
+
+-spec universal_thread_compact(pid(), map()) -> {ok, map()} | {error, term()}.
+universal_thread_compact(Session, Opts) ->
+    SessionId = beam_agent_core:session_identity(Session),
+    case resolve_thread_id(SessionId, Opts) of
+        {ok, ThreadId} ->
+            Selector = thread_compact_selector(Opts),
+            case beam_agent_threads_core:rollback_thread(SessionId, ThreadId, Selector) of
+                {ok, Thread} ->
+                    {ok, beam_agent_core:with_universal_source(Session, #{
+                        thread_id => ThreadId,
+                        compacted => true,
+                        selector => Selector,
+                        thread => Thread
+                    })};
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec active_thread_id(binary()) -> binary() | undefined.
+active_thread_id(SessionId) ->
+    case beam_agent_threads_core:active_thread(SessionId) of
+        {ok, ThreadId} ->
+            ThreadId;
+        {error, _} ->
+            undefined
+    end.
+
+-spec filter_loaded_threads([map()], map()) -> [map()].
+filter_loaded_threads(Threads, Opts) ->
+    IncludeArchived = beam_agent_core:opt_value(
+        [include_archived, <<"include_archived">>, <<"includeArchived">>],
+        Opts,
+        true),
+    ThreadIdFilter = beam_agent_core:opt_value(
+        [thread_id, <<"thread_id">>, <<"threadId">>], Opts, undefined),
+    StatusFilter = beam_agent_core:opt_value(
+        [status, <<"status">>], Opts, undefined),
+    Limit = beam_agent_core:opt_value(
+        [limit, <<"limit">>], Opts, undefined),
+    Threads1 = [Thread || Thread <- Threads, include_thread(Thread, IncludeArchived)],
+    Threads2 = case ThreadIdFilter of
+        undefined ->
+            Threads1;
+        ThreadId ->
+            [Thread || Thread <- Threads1,
+             maps:get(thread_id, Thread, undefined) =:= ThreadId]
+    end,
+    Threads3 = case StatusFilter of
+        undefined ->
+            Threads2;
+        Status ->
+            [Thread || Thread <- Threads2,
+             maps:get(status, Thread, undefined) =:= Status]
+    end,
+    case Limit of
+        N when is_integer(N), N >= 0 ->
+            lists:sublist(Threads3, N);
+        _ ->
+            Threads3
+    end.
+
+-spec include_thread(map(), boolean()) -> boolean().
+include_thread(Thread, true) ->
+    is_map(Thread);
+include_thread(Thread, false) ->
+    maps:get(archived, Thread, false) =/= true.
+
+-spec resolve_thread_id(binary(), map()) -> {ok, binary()} | {error, not_found}.
+resolve_thread_id(SessionId, Opts) ->
+    case beam_agent_core:opt_value(
+             [thread_id, <<"thread_id">>, <<"threadId">>], Opts, undefined) of
+        ThreadId when is_binary(ThreadId) ->
+            {ok, ThreadId};
+        _ ->
+            case beam_agent_threads_core:active_thread(SessionId) of
+                {ok, ThreadId} ->
+                    {ok, ThreadId};
+                {error, _} ->
+                    {error, not_found}
+            end
+    end.
+
+-spec thread_compact_selector(map()) -> map().
+thread_compact_selector(Opts) ->
+    case beam_agent_core:opt_value([selector, <<"selector">>], Opts, undefined) of
+        Selector when is_map(Selector) ->
+            Selector;
+        _ ->
+            Selector0 =
+                maybe_put_selector(count,
+                    beam_agent_core:opt_value(
+                        [count, <<"count">>], Opts, undefined),
+                    maybe_put_selector(visible_message_count,
+                        beam_agent_core:opt_value(
+                            [visible_message_count,
+                             <<"visible_message_count">>,
+                             <<"visibleMessageCount">>],
+                            Opts,
+                            undefined),
+                        maybe_put_selector(message_id,
+                            beam_agent_core:opt_value(
+                                [message_id, <<"message_id">>, <<"messageId">>],
+                                Opts,
+                                undefined),
+                            maybe_put_selector(uuid,
+                                beam_agent_core:opt_value(
+                                    [uuid, <<"uuid">>], Opts, undefined),
+                                #{})))),
+            case map_size(Selector0) of
+                0 -> #{visible_message_count => 0};
+                _ -> Selector0
+            end
+    end.
+
+-spec maybe_put_selector(atom(), term(), map()) -> map().
+maybe_put_selector(_Key, undefined, Acc) ->
+    Acc;
+maybe_put_selector(Key, Value, Acc) ->
+    Acc#{Key => Value}.
