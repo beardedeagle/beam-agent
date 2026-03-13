@@ -43,7 +43,7 @@ which is useful for backend-scoped helpers that are not tied to an active sessio
 options are Claude-native operations that go directly to the Claude SDK session
 store. They are not available on other backends.
 
-== Core concepts ==
+## Core concepts
 
 This module is the escape hatch for backend-specific features that do
 not yet have a wrapper in the main beam_agent module. You almost
@@ -59,7 +59,7 @@ Functions like backend/1 and adapter_module/1 let you inspect which
 backend and adapter module a session is using. The server_health and
 get_status functions probe transport-level state directly.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 call/3 prepends the session pid to the args list and delegates to
 beam_agent_raw_core:call/3. call_backend/3 does not prepend a pid

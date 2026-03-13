@@ -45,7 +45,7 @@ attachments             event_streaming
 {ok, Caps} = beam_agent_capabilities:for_session(SessionPid).
 ```
 
-== Core concepts ==
+## Core concepts
 
 Every capability/backend combination has three attributes: support level
 (missing, partial, baseline, or full), implementation route (direct
@@ -60,7 +60,7 @@ for a live session.
 This module is read-only metadata. It does not execute features -- it
 tells you whether a feature is available and how it is wired.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 beam_agent_capabilities is the sole capability registry for the project
 and the normative source for docs/architecture matrix artifacts. All
@@ -151,14 +151,6 @@ for details.
     {invalid_session_info, term()} |
     {session_backend_lookup_failed, term()}.
 -type status_error() :: capability_error() | {unknown_backend, term()}.
--type support_entry_info() :: #{
-    support_level := support_level(),
-    implementation := implementation(),
-    fidelity := fidelity(),
-    available_paths => [implementation()],
-    notes => binary()
-}.
-
 -dialyzer({no_underspecs, [support/3, support/4]}).
 
 -type capability_info() :: #{
@@ -497,11 +489,11 @@ capability(Id, Title, Support) ->
 all_backends(SupportLevel, Implementation, Fidelity) ->
     maps:from_list([{Backend, support(SupportLevel, Implementation, Fidelity)} || Backend <- backends()]).
 
--spec support(support_level(), implementation(), fidelity()) -> support_entry_info().
+-spec support(support_level(), implementation(), fidelity()) -> support_info().
 support(SupportLevel, Implementation, Fidelity) ->
     #{support_level => SupportLevel, implementation => Implementation, fidelity => Fidelity}.
 
--spec support(support_level(), implementation(), fidelity(), map()) -> support_entry_info().
+-spec support(support_level(), implementation(), fidelity(), map()) -> support_info().
 support(SupportLevel, Implementation, Fidelity, Extra) ->
     maps:merge(support(SupportLevel, Implementation, Fidelity), Extra).
 

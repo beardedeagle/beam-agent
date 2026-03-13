@@ -61,7 +61,7 @@ telemetry:attach_many(
 
 See the `telemetry` library documentation for handler function signature details.
 
-== Core concepts ==
+## Core concepts
 
 Telemetry is event-based instrumentation. The SDK emits events at key
 points (session start, query start, query complete, errors) and your
@@ -77,7 +77,7 @@ A span covers a unit of work: span_start/3 begins it (returning a
 timestamp), and span_stop/3 or span_exception/3 ends it. The SDK
 computes the duration automatically from the start timestamp.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Events follow the Erlang telemetry library convention: event names are
 lists of atoms under the [beam_agent, ...] prefix. The Agent atom

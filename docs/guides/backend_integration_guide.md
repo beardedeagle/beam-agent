@@ -1077,11 +1077,11 @@ extract_message(Buffer) ->
 
 **SSE framing** (Server-Sent Events):
 
-Use `beam_agent_transport_http_sse` which delegates to `opencode_sse`:
+Use `opencode_sse` for SSE parsing:
 
 ```erlang
-State0 = beam_agent_transport_http_sse:new_state(),
-{Events, State1} = beam_agent_transport_http_sse:parse_chunk(Chunk, State0),
+State0 = opencode_sse:new_state(),
+{Events, State1} = opencode_sse:parse_chunk(Chunk, State0),
 ```
 
 #### Protocol Translation
@@ -2001,9 +2001,9 @@ Use this checklist to verify your backend is complete before merging.
 | `src/transports/beam_agent_transport_port.erl` | Stdio port transport |
 | `src/transports/beam_agent_transport_http.erl` | HTTP transport |
 | `src/transports/beam_agent_transport_ws.erl` | WebSocket transport |
-| `src/transports/beam_agent_transport_http_sse.erl` | SSE parsing helpers |
-| `src/transports/beam_agent_transport_stdio_jsonl.erl` | JSONL framing helpers |
-| `src/transports/beam_agent_transport_stdio_rpc.erl` | JSON-RPC framing helpers |
+| `src/backends/opencode/opencode_sse.erl` | SSE parsing helpers |
+| `src/core/beam_agent_jsonl.erl` | JSONL framing helpers |
+| `src/core/beam_agent_jsonrpc.erl` | JSON-RPC framing helpers |
 | `src/backends/copilot/copilot_session_handler.erl` | Reference handler implementation |
 | `src/backends/copilot/copilot_session.erl` | Reference session wrapper |
 | `src/backends/copilot/copilot_client.erl` | Reference adapter module |

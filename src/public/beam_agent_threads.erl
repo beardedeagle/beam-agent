@@ -72,7 +72,7 @@ Thread messages are stored in the session-level message store
 (beam_agent_session_store_core) with a thread_id tag. This keeps
 all messages queryable at both the session and thread level.
 
-== Core concepts ==
+## Core concepts
 
 Threads are named conversation branches within a session. Think of them
 like tabs in a browser -- each thread has its own conversation history,
@@ -88,7 +88,7 @@ Rollback hides recent messages so you can "undo" the last few exchanges.
 These operations are non-destructive -- the data is still there, just
 hidden from the active view.
 
-== Architecture deep dive ==
+## Architecture deep dive
 
 Thread state is managed by beam_agent_threads_core using two ETS tables:
 beam_agent_threads_core for thread metadata and beam_agent_active_threads

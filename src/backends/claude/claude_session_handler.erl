@@ -668,8 +668,10 @@ handle_hook_callback(Request, HookCallbacks, SessionId) ->
                 Result -> normalize_hook_output(Result)
             catch
                 Class:Reason:Stack ->
+                    SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                                 || {M, F, A, L} <- Stack],
                     logger:error("hook callback crashed: ~p:~p~n~p",
-                                 [Class, Reason, Stack]),
+                                 [Class, Reason, SafeStack]),
                     #{<<"decision">> => <<"block">>,
                       <<"reason">> => <<"Hook callback crashed">>}
             end
@@ -1287,7 +1289,7 @@ write_mcp_config(Registry) ->
               ++ integer_to_list(erlang:unique_integer([positive]))
               ++ ".json",
     JsonBin = iolist_to_binary(json:encode(ConfigMap)),
-    ok = file:write_file(TmpPath, JsonBin),
+    ok = file:write_file(TmpPath, JsonBin, [exclusive]),
     TmpPath.
 
 -spec cleanup_mcp_config(string() | undefined) -> ok.

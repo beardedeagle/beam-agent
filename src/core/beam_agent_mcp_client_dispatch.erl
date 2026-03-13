@@ -752,8 +752,10 @@ dispatch_sampling(Id, Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
+            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_sampling_create_message">>, Class, Reason, Stack]),
+                         [<<"handle_sampling_create_message">>, Class, Reason, SafeStack]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),
@@ -774,8 +776,10 @@ dispatch_elicitation(Id, Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
+            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_elicitation_create">>, Class, Reason, Stack]),
+                         [<<"handle_elicitation_create">>, Class, Reason, SafeStack]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),
@@ -795,8 +799,10 @@ dispatch_roots_list(Id, _Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
+            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_roots_list">>, Class, Reason, Stack]),
+                         [<<"handle_roots_list">>, Class, Reason, SafeStack]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),

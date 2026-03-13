@@ -564,9 +564,11 @@ call_handler(Handler, Input, Timeout) ->
             R -> R
         catch
             Class:Reason:Stack ->
+                SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                             || {M, F, A, L} <- Stack],
                 ErrMsg = iolist_to_binary(
                     io_lib:format("Handler ~p:~p~n~p",
-                                  [Class, Reason, Stack])),
+                                  [Class, Reason, SafeStack])),
                 {error, ErrMsg}
         end,
         Self ! {Ref, Result}
