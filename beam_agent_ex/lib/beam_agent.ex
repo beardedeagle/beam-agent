@@ -2485,7 +2485,9 @@ defmodule BeamAgent do
 
       {:ok, _} = BeamAgent.skills_config_write(session, "/skills/review.md", false)
   """
-  defdelegate skills_config_write(session, path, enabled), to: :beam_agent_skills, as: :config_write
+  defdelegate skills_config_write(session, path, enabled),
+    to: :beam_agent_skills,
+    as: :config_write
 
   # ---------------------------------------------------------------------------
   # Apps
@@ -3043,7 +3045,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate config_value_write(session, key_path, value), to: :beam_agent_config, as: :value_write
+  defdelegate config_value_write(session, key_path, value),
+    to: :beam_agent_config,
+    as: :value_write
 
   @doc """
   Write a single configuration value at the given key path with options.
@@ -3064,7 +3068,9 @@ defmodule BeamAgent do
   - `{:ok, result}` on success.
   - `{:error, reason}` if the key is read-only or the value is invalid.
   """
-  defdelegate config_value_write(session, key_path, value, opts), to: :beam_agent_config, as: :value_write
+  defdelegate config_value_write(session, key_path, value, opts),
+    to: :beam_agent_config,
+    as: :value_write
 
   @doc """
   Write multiple configuration values in a single batch.
@@ -3130,7 +3136,9 @@ defmodule BeamAgent do
 
   - `{:ok, configs}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_detect(session), to: :beam_agent_config, as: :external_agent_detect
+  defdelegate external_agent_config_detect(session),
+    to: :beam_agent_config,
+    as: :external_agent_detect
 
   @doc """
   Detect external agent configuration files with options.
@@ -3147,7 +3155,9 @@ defmodule BeamAgent do
 
   - `{:ok, configs}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_detect(session, opts), to: :beam_agent_config, as: :external_agent_detect
+  defdelegate external_agent_config_detect(session, opts),
+    to: :beam_agent_config,
+    as: :external_agent_detect
 
   @doc """
   Import an external agent configuration into the session.
@@ -3166,7 +3176,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_import(session, opts), to: :beam_agent_config, as: :external_agent_import
+  defdelegate external_agent_config_import(session, opts),
+    to: :beam_agent_config,
+    as: :external_agent_import
 
   # ---------------------------------------------------------------------------
   # Providers & OAuth
@@ -3237,7 +3249,9 @@ defmodule BeamAgent do
     (binary URL the user should visit to authorize).
   - `{:error, reason}` on failure.
   """
-  defdelegate provider_oauth_authorize(session, provider_id, body), to: :beam_agent_provider, as: :oauth_authorize
+  defdelegate provider_oauth_authorize(session, provider_id, body),
+    to: :beam_agent_provider,
+    as: :oauth_authorize
 
   @doc """
   Handle an OAuth callback to complete the authorization flow.
@@ -3261,7 +3275,9 @@ defmodule BeamAgent do
     such as `:access_token`, `:token_type`, and `:expires_in`.
   - `{:error, reason}` on failure (e.g., invalid code or state mismatch).
   """
-  defdelegate provider_oauth_callback(session, provider_id, body), to: :beam_agent_provider, as: :oauth_callback
+  defdelegate provider_oauth_callback(session, provider_id, body),
+    to: :beam_agent_provider,
+    as: :oauth_callback
 
   # ---------------------------------------------------------------------------
   # MCP (Model Context Protocol)
@@ -3365,7 +3381,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  defdelegate reconnect_mcp_server(session, server_name), to: :beam_agent_mcp, as: :reconnect_server
+  defdelegate reconnect_mcp_server(session, server_name),
+    to: :beam_agent_mcp,
+    as: :reconnect_server
 
   @doc """
   Enable or disable an MCP server by name.
@@ -3384,7 +3402,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  defdelegate toggle_mcp_server(session, server_name, enabled), to: :beam_agent_mcp, as: :toggle_server
+  defdelegate toggle_mcp_server(session, server_name, enabled),
+    to: :beam_agent_mcp,
+    as: :toggle_server
 
   @doc """
   Initiate an OAuth login flow for an MCP server.
@@ -3548,7 +3568,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate fuzzy_file_search_session_start(session, search_session_id, roots), to: :beam_agent_search, as: :session_start
+  defdelegate fuzzy_file_search_session_start(session, search_session_id, roots),
+    to: :beam_agent_search,
+    as: :session_start
 
   @doc """
   Update a search session with a new query string.
@@ -3566,7 +3588,9 @@ defmodule BeamAgent do
 
   - `{:ok, matches}` or `{:error, :not_found}`.
   """
-  defdelegate fuzzy_file_search_session_update(session, search_session_id, query), to: :beam_agent_search, as: :session_update
+  defdelegate fuzzy_file_search_session_update(session, search_session_id, query),
+    to: :beam_agent_search,
+    as: :session_update
 
   @doc """
   Stop and clean up a fuzzy file search session.
@@ -3584,7 +3608,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate fuzzy_file_search_session_stop(session, search_session_id), to: :beam_agent_search, as: :session_stop
+  defdelegate fuzzy_file_search_session_stop(session, search_session_id),
+    to: :beam_agent_search,
+    as: :session_stop
 
   # ---------------------------------------------------------------------------
   # Miscellaneous

@@ -57,7 +57,7 @@ defmodule BeamAgent.Threads do
   ## Architecture deep dive
 
   This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent` module (the canonical entry point for thread operations).
+  Erlang `:beam_agent_threads` module.
   The underlying implementation lives in `:beam_agent_threads_core`, which owns
   two ETS tables: `beam_agent_threads_core` for thread metadata and
   `beam_agent_active_threads` for active-thread tracking.
@@ -91,7 +91,7 @@ defmodule BeamAgent.Threads do
   ```
   """
   @spec thread_start(pid(), map()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_start(session, opts), to: :beam_agent
+  defdelegate thread_start(session, opts), to: :beam_agent_threads
 
   @doc """
   Resume an existing thread by ID, making it the active thread.
@@ -102,7 +102,7 @@ defmodule BeamAgent.Threads do
   Returns `{:ok, thread_meta}` or `{:error, :not_found}`.
   """
   @spec thread_resume(pid(), binary()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_resume(session, thread_id), to: :beam_agent
+  defdelegate thread_resume(session, thread_id), to: :beam_agent_threads
 
   @doc """
   List all threads for a session, sorted by most-recently updated.
@@ -117,7 +117,7 @@ defmodule BeamAgent.Threads do
   ```
   """
   @spec thread_list(pid()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate thread_list(session), to: :beam_agent
+  defdelegate thread_list(session), to: :beam_agent_threads
 
   @doc """
   Fork an existing thread.
@@ -142,7 +142,7 @@ defmodule BeamAgent.Threads do
   ```
   """
   @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_fork(session, thread_id), to: :beam_agent
+  defdelegate thread_fork(session, thread_id), to: :beam_agent_threads
 
   @doc """
   Fork an existing thread with options.
@@ -151,7 +151,7 @@ defmodule BeamAgent.Threads do
   explicit thread ID, and parent thread ID.
   """
   @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_fork(session, thread_id, opts), to: :beam_agent
+  defdelegate thread_fork(session, thread_id, opts), to: :beam_agent_threads
 
   @doc """
   Read a thread's metadata.
@@ -160,7 +160,7 @@ defmodule BeamAgent.Threads do
   Equivalent to `thread_read/3` with an empty opts map.
   """
   @spec thread_read(pid(), binary()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_read(session, thread_id), to: :beam_agent
+  defdelegate thread_read(session, thread_id), to: :beam_agent_threads
 
   @doc """
   Read a thread with optional message history.
@@ -173,7 +173,7 @@ defmodule BeamAgent.Threads do
   `{:error, :not_found}`.
   """
   @spec thread_read(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_read(session, thread_id, opts), to: :beam_agent
+  defdelegate thread_read(session, thread_id, opts), to: :beam_agent_threads
 
   @doc """
   Archive a thread.
@@ -184,7 +184,7 @@ defmodule BeamAgent.Threads do
   Returns `{:ok, updated_meta}` or `{:error, :not_found}`.
   """
   @spec thread_archive(pid(), binary()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_archive(session, thread_id), to: :beam_agent
+  defdelegate thread_archive(session, thread_id), to: :beam_agent_threads
 
   @doc """
   Unarchive a thread, restoring it to active status.
@@ -192,7 +192,7 @@ defmodule BeamAgent.Threads do
   Returns `{:ok, updated_meta}` or `{:error, :not_found}`.
   """
   @spec thread_unarchive(pid(), binary()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_unarchive(session, thread_id), to: :beam_agent
+  defdelegate thread_unarchive(session, thread_id), to: :beam_agent_threads
 
   @doc """
   Roll back the visible thread history.
@@ -220,5 +220,5 @@ defmodule BeamAgent.Threads do
   ```
   """
   @spec thread_rollback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
-  defdelegate thread_rollback(session, thread_id, selector), to: :beam_agent
+  defdelegate thread_rollback(session, thread_id, selector), to: :beam_agent_threads
 end
