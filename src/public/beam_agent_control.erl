@@ -130,7 +130,27 @@ modify ETS state that the session engine reads on its next tick.
     store_pending_request/3,
     resolve_pending_request/3,
     get_pending_response/2,
-    list_pending_requests/1
+    list_pending_requests/1,
+    %% Turn steering and interrupts
+    turn_steer/4,
+    turn_steer/5,
+    turn_interrupt/3,
+    %% Realtime collaboration
+    thread_realtime_start/2,
+    thread_realtime_append_audio/3,
+    thread_realtime_append_text/3,
+    thread_realtime_stop/2,
+    %% Collaboration and experimental features
+    review_start/2,
+    collaboration_mode_list/1,
+    experimental_feature_list/1,
+    experimental_feature_list/2,
+    %% Server management
+    server_health/1,
+    list_server_sessions/1,
+    get_server_session/2,
+    delete_server_session/2,
+    list_server_agents/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -553,3 +573,425 @@ request, status, created_at, and optionally response and resolved_at.
 """.
 -spec list_pending_requests(binary()) -> {ok, [beam_agent_control_core:pending_request()]}.
 list_pending_requests(SessionId) -> beam_agent_control_core:list_pending_requests(SessionId).
+
+%%--------------------------------------------------------------------
+%% Turn Steering and Interrupts
+%%--------------------------------------------------------------------
+
+-doc """
+Steer an active turn by injecting additional input mid-conversation.
+
+Allows you to redirect or refine the agent's current turn within a
+thread. The backend processes the steer natively if supported; the
+universal fallback records the steer intent as a system message.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - TurnId: binary identifier of the active turn.
+  - Input: steering input, either a binary prompt or a list of
+    structured content block maps.
+
+Returns {ok, ResultMap} or {error, Reason}.
+""".
+-spec turn_steer(pid(), binary(), binary(), binary() | [map()]) ->
+    {ok, term()} | {error, term()}.
+turn_steer(Session, ThreadId, TurnId, Input) ->
+    turn_steer(Session, ThreadId, TurnId, Input, #{}).
+
+-doc """
+Steer an active turn with additional options.
+
+Like turn_steer/4 but accepts an options map for backend-specific
+steering parameters.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - TurnId: binary identifier of the active turn.
+  - Input: steering input (binary or structured content blocks).
+  - Opts: backend-specific options map.
+
+Returns {ok, ResultMap} or {error, Reason}.
+""".
+-spec turn_steer(pid(), binary(), binary(), binary() | [map()], map()) ->
+    {ok, term()} | {error, term()}.
+turn_steer(Session, ThreadId, TurnId, Input, Opts) ->
+    beam_agent_core:native_or(Session, turn_steer, [ThreadId, TurnId, Input, Opts], fun() ->
+        %% Universal: record steer intent as a thread message
+        SessionId = beam_agent_core:session_identity(Session),
+        SteerMsg = #{type => system,
+                     content => <<"steer">>,
+                     raw => #{role => <<"system">>, turn_id => TurnId,
+                              input => Input, opts => Opts}},
+        beam_agent_threads_core:record_thread_message(SessionId, ThreadId,
+            SteerMsg),
+        {ok, beam_agent_core:with_universal_source(Session, #{
+            status => steered, thread_id => ThreadId,
+            turn_id => TurnId})}
+    end).
+
+-doc """
+Interrupt a specific turn within a thread.
+
+Cancels the identified turn. The universal fallback delegates to
+interrupt/1 on the session.
+
+Parameters:
+  - Session: pid of a running session.
+  - ThreadId: binary thread identifier.
+  - TurnId: binary turn identifier.
+
+Returns {ok, ResultMap} with status => interrupted, or {error, Reason}.
+""".
+-spec turn_interrupt(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+turn_interrupt(Session, ThreadId, TurnId) ->
+    beam_agent_core:native_or(Session, turn_interrupt, [ThreadId, TurnId], fun() ->
+        universal_turn_interrupt(Session, ThreadId, TurnId)
+    end).
+
+%%--------------------------------------------------------------------
+%% Realtime Collaboration
+%%--------------------------------------------------------------------
+
+-doc """
+Start a realtime collaboration thread for voice or audio streaming.
+
+Opens a persistent bidirectional channel between the caller and the
+backend, suitable for streaming audio or text in real time. Use this
+when building interactive voice assistants or live pair-programming
+sessions that require continuous input rather than request/response
+turns.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:start_realtime/2) if the
+backend does not provide one.
+
+Session is the pid of a running beam_agent session. Params is a map
+that configures the channel:
+
+  mode   - binary, the channel type (e.g., <<"voice">>, <<"text">>).
+  model  - binary, optional model override for the realtime session.
+
+Backend-specific keys in Params are forwarded unchanged.
+
+Returns {ok, Map} on success, where Map contains at minimum
+thread_id (the binary identifier for the new channel) and status.
+Returns {error, Reason} if the channel cannot be opened.
+
+Example:
+
+  Params = #{mode => <<"voice">>, model => <<"claude-sonnet">>},
+  {ok, #{thread_id := Tid}} = beam_agent_control:thread_realtime_start(Session, Params).
+""".
+-spec thread_realtime_start(pid(), map()) -> {ok, map()} | {error, term()}.
+thread_realtime_start(Session, Params) ->
+    beam_agent_core:native_or(Session, thread_realtime_start, [Params], fun() ->
+        beam_agent_collaboration:start_realtime(
+            beam_agent_core:session_identity(Session),
+            beam_agent_core:with_session_backend(Session, Params))
+    end).
+
+-doc """
+Append audio data to an active realtime thread.
+
+Sends an audio chunk to a previously started realtime collaboration
+channel. Call this repeatedly to stream audio frames into the session.
+The backend processes each chunk and may emit intermediate responses
+depending on the realtime mode.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:append_realtime_audio/3)
+if the backend does not provide one.
+
+Session is the pid of a running beam_agent session. ThreadId is the
+binary identifier returned by thread_realtime_start/2. Params is a
+map containing the audio payload:
+
+  audio    - binary, the encoded audio data.
+  encoding - binary, optional encoding format (e.g., <<"pcm16">>,
+             <<"opus">>). Defaults to the format negotiated at
+             channel start.
+
+Returns {ok, Map} with an acknowledgment on success, or
+{error, Reason} if the thread is not active or the data is invalid.
+""".
+-spec thread_realtime_append_audio(pid(), binary(), map()) ->
+    {ok, map()} | {error, term()}.
+thread_realtime_append_audio(Session, ThreadId, Params) ->
+    beam_agent_core:native_or(Session, thread_realtime_append_audio, [ThreadId, Params], fun() ->
+        beam_agent_collaboration:append_realtime_audio(
+            beam_agent_core:session_identity(Session), ThreadId, Params)
+    end).
+
+-doc """
+Append text data to an active realtime thread.
+
+Injects a text message into a previously started realtime collaboration
+channel. Use this to send typed input alongside or instead of audio in
+a realtime session, for example to provide corrections or commands
+while voice streaming is active.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:append_realtime_text/3)
+if the backend does not provide one.
+
+Session is the pid of a running beam_agent session. ThreadId is the
+binary identifier returned by thread_realtime_start/2. Params is a
+map containing the text payload:
+
+  text - binary, the text content to inject into the realtime stream.
+
+Returns {ok, Map} on success, or {error, Reason} if the thread is
+not active or the payload is invalid.
+""".
+-spec thread_realtime_append_text(pid(), binary(), map()) ->
+    {ok, map()} | {error, term()}.
+thread_realtime_append_text(Session, ThreadId, Params) ->
+    beam_agent_core:native_or(Session, thread_realtime_append_text, [ThreadId, Params], fun() ->
+        beam_agent_collaboration:append_realtime_text(
+            beam_agent_core:session_identity(Session), ThreadId, Params)
+    end).
+
+-doc """
+Stop and tear down an active realtime collaboration thread.
+
+Closes the bidirectional channel identified by ThreadId, releasing
+any backend resources associated with it. After this call the
+ThreadId is no longer valid and further append calls will return
+an error.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:stop_realtime/2) if the
+backend does not provide one.
+
+Session is the pid of a running beam_agent session. ThreadId is the
+binary identifier returned by thread_realtime_start/2.
+
+Returns {ok, Map} with the final channel status on success, or
+{error, Reason} if the thread was already stopped or never existed.
+""".
+-spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, term()}.
+thread_realtime_stop(Session, ThreadId) ->
+    beam_agent_core:native_or(Session, thread_realtime_stop, [ThreadId], fun() ->
+        beam_agent_collaboration:stop_realtime(
+            beam_agent_core:session_identity(Session), ThreadId)
+    end).
+
+%%--------------------------------------------------------------------
+%% Collaboration and Experimental Features
+%%--------------------------------------------------------------------
+
+-doc """
+Start a code review collaboration session.
+
+Opens a review context where the backend analyzes code changes and
+provides structured feedback. Use this when you want the agent to
+review a diff, a set of files, or a pull request and return comments,
+suggestions, and severity ratings.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:start_review/2) if the
+backend does not provide one.
+
+Session is the pid of a running beam_agent session. Params is a map
+configuring the review scope:
+
+  files       - list of binary file paths to include in the review.
+  diff        - binary, a unified diff to review instead of files.
+  review_type - binary, optional review flavour (e.g., <<"security">>,
+                <<"style">>, <<"correctness">>).
+
+Returns {ok, Map} on success, where Map includes a review_id and
+initial review metadata. Returns {error, Reason} if the review
+cannot be started.
+
+Example:
+
+  Params = #{files => [<<"src/app.erl">>], review_type => <<"correctness">>},
+  {ok, #{review_id := Rid}} = beam_agent_control:review_start(Session, Params).
+""".
+-spec review_start(pid(), map()) -> {ok, map()} | {error, term()}.
+review_start(Session, Params) ->
+    beam_agent_core:native_or(Session, review_start, [Params], fun() ->
+        beam_agent_collaboration:start_review(
+            beam_agent_core:session_identity(Session),
+            beam_agent_core:with_session_backend(Session, Params))
+    end).
+
+-doc """
+List the collaboration modes supported by the session's backend.
+
+Returns a map describing each mode the backend can operate in for
+collaborative workflows. Common modes include review (structured code
+review) and realtime (streaming audio/text). Use this to discover
+what collaboration features are available before starting a session.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:collaboration_modes/1)
+if the backend does not provide one.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, Map} keyed by mode name, where each value describes the
+mode's capabilities, or {error, Reason} on failure.
+""".
+-spec collaboration_mode_list(pid()) -> {ok, map()} | {error, term()}.
+collaboration_mode_list(Session) ->
+    beam_agent_core:native_or(Session, collaboration_mode_list, [], fun() ->
+        beam_agent_collaboration:collaboration_modes(
+            beam_agent_core:session_identity(Session))
+    end).
+
+-doc """
+List experimental or beta features available for a session.
+
+Convenience wrapper that calls experimental_feature_list/2 with an
+empty options map. See experimental_feature_list/2 for full details.
+
+Session is the pid of a running beam_agent session.
+
+Returns {ok, List} of feature maps, or {error, Reason} on failure.
+""".
+-spec experimental_feature_list(pid()) -> {ok, term()} | {error, term()}.
+experimental_feature_list(Session) ->
+    experimental_feature_list(Session, #{}).
+
+-doc """
+List experimental or beta features available for a session, with
+optional filters.
+
+Queries the backend for features that are experimental, in preview,
+or otherwise not yet part of the stable API surface. Use this to
+discover and inspect opt-in capabilities before enabling them.
+
+Tries the backend-native implementation first; falls back to the
+universal layer (beam_agent_collaboration:experimental_features/2)
+if the backend does not provide one.
+
+Session is the pid of a running beam_agent session. Opts is a map
+of optional filters:
+
+  category - binary, restrict results to a feature category.
+  name     - binary, match features by name pattern.
+
+Returns {ok, List} of feature maps on success. Each map contains
+at minimum id, name, description, and enabled (boolean). Returns
+{error, Reason} on failure.
+""".
+-spec experimental_feature_list(pid(), map()) -> {ok, term()} | {error, term()}.
+experimental_feature_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, experimental_feature_list, [Opts], fun() ->
+        beam_agent_collaboration:experimental_features(
+            beam_agent_core:session_identity(Session), Opts)
+    end).
+
+%%--------------------------------------------------------------------
+%% Server Management
+%%--------------------------------------------------------------------
+
+-doc """
+Check the health of the backend server.
+
+Returns a status map with health indicators including the backend
+name, session identifier, and uptime in milliseconds. The universal
+fallback derives health from session_info/1. Returns
+status => unknown when session info is unavailable.
+""".
+-spec server_health(pid()) -> {ok, term()} | {error, term()}.
+server_health(Session) ->
+    beam_agent_core:native_or(Session, server_health, [], fun() ->
+        case beam_agent_core:session_info(Session) of
+            {ok, Info} ->
+                {ok, beam_agent_core:with_universal_source(Session, #{
+                    status => healthy,
+                    backend => maps:get(backend, Info, unknown),
+                    session_id => maps:get(session_id, Info, undefined),
+                    uptime_ms => erlang:system_time(millisecond)
+                        - maps:get(started_at, Info, erlang:system_time(millisecond))})};
+            {error, _} ->
+                {ok, beam_agent_core:with_universal_source(Session, #{
+                    status => unknown,
+                    reason => <<"Session info unavailable">>})}
+        end
+    end).
+
+-doc """
+List all persisted sessions known to the backend server.
+
+Queries the session store for every session associated with the current
+backend. Each entry in the returned list is a map containing at minimum
+a session_id key. Backends that support server-side session persistence
+return richer metadata (creation time, model, message count).
+
+The universal fallback delegates to beam_agent_session_store_core.
+""".
+-spec list_server_sessions(pid()) -> {ok, [map()]} | {error, term()}.
+list_server_sessions(Session) ->
+    beam_agent_core:native_or(Session, list_server_sessions, [], fun() ->
+        case beam_agent_core:backend(Session) of
+            {ok, Backend} ->
+                beam_agent_session_store_core:list_sessions(#{adapter => Backend});
+            {error, _} = Error ->
+                Error
+        end
+    end).
+
+-doc """
+Retrieve a single persisted session by its identifier.
+
+Returns the full session map for SessionId, including message history
+when the backend supports it. Returns {error, not_found} if the
+session does not exist in the store.
+""".
+-spec get_server_session(pid(), binary()) -> {ok, map()} | {error, term()}.
+get_server_session(Session, SessionId) ->
+    beam_agent_core:native_or(Session, get_server_session, [SessionId], fun() ->
+        beam_agent_core:get_session(SessionId)
+    end).
+
+-doc """
+Delete a persisted session from the backend server.
+
+Removes the session identified by SessionId from the session store.
+Returns a confirmation map with the session_id and deleted flag on
+success. Does not affect the currently running in-memory session.
+""".
+-spec delete_server_session(pid(), binary()) -> {ok, term()} | {error, term()}.
+delete_server_session(Session, SessionId) ->
+    beam_agent_core:native_or(Session, delete_server_session, [SessionId], fun() ->
+        ok = beam_agent_core:delete_session(SessionId),
+        {ok, #{session_id => SessionId, deleted => true}}
+    end).
+
+-doc """
+List all sub-agents registered on the backend server.
+
+Returns the set of sub-agents the backend exposes. Sub-agents are
+specialized assistants (e.g., a code reviewer or test writer) that the
+primary agent can delegate to. The universal fallback queries the
+in-memory agent registry.
+""".
+-spec list_server_agents(pid()) -> {ok, term()} | {error, term()}.
+list_server_agents(Session) ->
+    beam_agent_core:native_or(Session, list_server_agents, [], fun() ->
+        beam_agent_core:list_agents(Session)
+    end).
+
+%%--------------------------------------------------------------------
+%% Internal Helpers
+%%--------------------------------------------------------------------
+
+-spec universal_turn_interrupt(pid(), binary(), binary()) ->
+    {ok, map()} | {error, term()}.
+universal_turn_interrupt(Session, ThreadId, TurnId) ->
+    case beam_agent_core:interrupt(Session) of
+        ok ->
+            {ok, beam_agent_core:with_universal_source(Session, #{
+                thread_id => ThreadId,
+                turn_id => TurnId,
+                status => interrupted
+            })};
+        {error, _} = Error ->
+            Error
+    end.

@@ -109,6 +109,7 @@ fallback system.
     clear/0,
     snapshot/3,
     rewind/2,
+    rewind_files/2,
     list_checkpoints/1,
     get_checkpoint/2,
     delete_checkpoint/2,
@@ -281,3 +282,24 @@ is not a recognized file-mutating tool.
 -spec extract_file_paths(binary(), map()) -> [binary()].
 extract_file_paths(ToolName, ToolInput) ->
     beam_agent_checkpoint_core:extract_file_paths(ToolName, ToolInput).
+
+-doc """
+Rewind files to a previous checkpoint.
+
+Restores the file state captured at CheckpointUuid. This undoes all
+file modifications made after the checkpoint was created, effectively
+rolling back the working tree. The session's message history is not
+affected. Returns {error, not_found} if the checkpoint does not exist.
+
+Uses native-first routing via beam_agent_core:native_or/4, falling
+back to beam_agent_checkpoint_core:rewind/2 when the backend does not
+support the rewind_files operation natively.
+
+Session is the session pid.
+CheckpointUuid is the binary checkpoint identifier.
+""".
+-spec rewind_files(pid(), binary()) -> {ok, term()} | {error, term()}.
+rewind_files(Session, CheckpointUuid) ->
+    beam_agent_core:native_or(Session, rewind_files, [CheckpointUuid], fun() ->
+        beam_agent_checkpoint_core:rewind(Session, CheckpointUuid)
+    end).

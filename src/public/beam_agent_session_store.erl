@@ -122,6 +122,8 @@ session history at any time.
     delete_session/1,
     list_sessions/0,
     list_sessions/1,
+    list_native_sessions/0,
+    list_native_sessions/1,
     fork_session/2,
     revert_session/2,
     unrevert_session/1,
@@ -136,6 +138,8 @@ session history at any time.
     record_messages/2,
     get_session_messages/1,
     get_session_messages/2,
+    get_native_session_messages/1,
+    get_native_session_messages/2,
     session_count/0,
     message_count/1
 ]).
@@ -337,6 +341,39 @@ Opts is a map with optional filter keys:
 """.
 -spec list_sessions(list_opts()) -> {ok, [session_meta()]}.
 list_sessions(Opts) -> beam_agent_session_store_core:list_sessions(Opts).
+
+-doc """
+List sessions from the backend's native session store (Claude-specific).
+
+Attempts to call the Claude backend's native session listing. Falls back
+to list_sessions/0 if the backend does not support native session listing.
+
+Returns {ok, SessionList} or {error, Reason}.
+""".
+-spec list_native_sessions() -> {ok, list()} | {error, term()}.
+list_native_sessions() ->
+    case beam_agent_raw_core:call_backend(claude, list_native_sessions, []) of
+        {error, {unsupported_native_call, _}} -> list_sessions();
+        Other -> Other
+    end.
+
+-doc """
+List sessions from the backend's native session store with filters.
+
+Like list_native_sessions/0 but passes filter options to the native call.
+Falls back to list_sessions/1 if native listing is not supported.
+
+Parameters:
+  - Opts: backend-specific filter options map.
+
+Returns {ok, SessionList} or {error, Reason}.
+""".
+-spec list_native_sessions(map()) -> {ok, list()} | {error, term()}.
+list_native_sessions(Opts) ->
+    case beam_agent_raw_core:call_backend(claude, list_native_sessions, [Opts]) of
+        {error, {unsupported_native_call, _}} -> list_sessions(Opts);
+        Other -> Other
+    end.
 
 -doc """
 Fork (deep copy) an existing session.
@@ -569,6 +606,45 @@ Opts is a map with optional keys:
     {ok, [beam_agent_core:message()]} | {error, not_found}.
 get_session_messages(SessionId, Opts) ->
     beam_agent_session_store_core:get_session_messages(SessionId, Opts).
+
+-doc """
+Get messages from the backend's native session store (Claude-specific).
+
+Attempts to call the Claude backend's native message retrieval. Falls back
+to get_session_messages/1 if the backend does not support native message
+retrieval.
+
+Parameters:
+  - SessionId: binary session identifier.
+
+Returns {ok, Messages} or {error, Reason}.
+""".
+-spec get_native_session_messages(binary()) -> {ok, list()} | {error, term()}.
+get_native_session_messages(SessionId) ->
+    case beam_agent_raw_core:call_backend(claude, get_native_session_messages, [SessionId]) of
+        {error, {unsupported_native_call, _}} -> get_session_messages(SessionId);
+        Other -> Other
+    end.
+
+-doc """
+Get messages from the backend's native session store with options.
+
+Like get_native_session_messages/1 but passes filter options to the native
+call. Falls back to get_session_messages/2 if native retrieval is not
+supported.
+
+Parameters:
+  - SessionId: binary session identifier.
+  - Opts: backend-specific message filter options.
+
+Returns {ok, Messages} or {error, Reason}.
+""".
+-spec get_native_session_messages(binary(), map()) -> {ok, list()} | {error, term()}.
+get_native_session_messages(SessionId, Opts) ->
+    case beam_agent_raw_core:call_backend(claude, get_native_session_messages, [SessionId, Opts]) of
+        {error, {unsupported_native_call, _}} -> get_session_messages(SessionId, Opts);
+        Other -> Other
+    end.
 
 %%--------------------------------------------------------------------
 %% Convenience

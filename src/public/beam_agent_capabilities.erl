@@ -90,6 +90,8 @@ for details.
 
 -export([
     all/0,
+    capabilities/0,
+    capabilities/1,
     backends/0,
     capability_ids/0,
     for_backend/1,
@@ -338,6 +340,53 @@ all() ->
                 #{notes => <<"Universal event bus streams canonical session and control events for Copilot sessions.">>})
         })
     ].
+
+-doc """
+Return the full capability matrix as a list of `capability_info()` maps.
+
+Alias for `all/0`. Provided so callers using the
+`beam_agent_capabilities:capabilities()` name get the same result as
+`beam_agent_capabilities:all()` without having to know which function
+name to use.
+
+```erlang
+AllCaps = beam_agent_capabilities:capabilities(),
+[#{id := session_lifecycle} | _] = AllCaps.
+```
+""".
+-spec capabilities() -> [capability_info()].
+capabilities() -> all().
+
+-doc """
+Return the projected capability list for a session pid or backend.
+
+When given a `pid()`, resolves the backend from the live session and
+delegates to `for_session/1`. When given a backend atom or binary,
+delegates to `for_backend/1`.
+
+This mirrors the `beam_agent:capabilities/1` surface so callers can
+reach the same data directly from this module without going through the
+public API facade.
+
+Returns `{error, backend_not_present}` or
+`{error, {session_backend_lookup_failed, Reason}}` when the session
+process is not reachable, and `{error, {unknown_backend, Backend}}` for
+unrecognised backend values.
+
+```erlang
+{ok, Caps} = beam_agent_capabilities:capabilities(claude),
+[#{id := session_lifecycle, support_level := full} | _] = Caps.
+
+{ok, SessionPid} = beam_agent:start_session(#{backend => gemini}),
+{ok, SCaps} = beam_agent_capabilities:capabilities(SessionPid).
+```
+""".
+-spec capabilities(pid() | beam_agent_backend:backend() | binary() | atom()) ->
+    {ok, [map()]} | {error, backend_lookup_error()}.
+capabilities(Session) when is_pid(Session) ->
+    for_session(Session);
+capabilities(BackendLike) ->
+    for_backend(BackendLike).
 
 -doc """
 Return the list of all supported backend atoms.

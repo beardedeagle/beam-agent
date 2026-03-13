@@ -1,4 +1,4 @@
--module(beam_agent_config).
+-module(beam_agent_config_core).
 -moduledoc false.
 
 -export([

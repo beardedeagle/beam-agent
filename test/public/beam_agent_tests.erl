@@ -10,25 +10,26 @@ list_backends_test() ->
         beam_agent:list_backends()).
 
 capabilities_projection_test() ->
-    {ok, Caps} = beam_agent:capabilities(codex),
+    {ok, Caps} = beam_agent_capabilities:capabilities(codex),
     [SessionHistory] = [Cap || #{id := session_history} = Cap <- Caps],
     ?assertMatch(#{id := session_history, support_level := full}, SessionHistory).
 
 supports_test() ->
-    ?assertEqual({ok, true}, beam_agent:supports(session_lifecycle, claude)),
-    ?assertEqual({ok, true}, beam_agent:supports(user_input_callbacks, gemini)),
-    ?assertEqual({ok, true}, beam_agent:supports(event_streaming, opencode)),
-    ?assertEqual({ok, true}, beam_agent:supports(event_streaming, codex)).
+    ?assertEqual({ok, true}, beam_agent_capabilities:supports(session_lifecycle, claude)),
+    ?assertEqual({ok, true}, beam_agent_capabilities:supports(user_input_callbacks, gemini)),
+    ?assertEqual({ok, true}, beam_agent_capabilities:supports(event_streaming, opencode)),
+    ?assertEqual({ok, true}, beam_agent_capabilities:supports(event_streaming, codex)).
 
 exports_fuzzy_file_search_session_lifecycle_test() ->
-    ?assert(erlang:function_exported(beam_agent,
-                                     fuzzy_file_search_session_start,
+    ensure_loaded(beam_agent_search),
+    ?assert(erlang:function_exported(beam_agent_search,
+                                     session_start,
                                      3)),
-    ?assert(erlang:function_exported(beam_agent,
-                                     fuzzy_file_search_session_update,
+    ?assert(erlang:function_exported(beam_agent_search,
+                                     session_update,
                                      3)),
-    ?assert(erlang:function_exported(beam_agent,
-                                     fuzzy_file_search_session_stop,
+    ?assert(erlang:function_exported(beam_agent_search,
+                                     session_stop,
                                      2)).
 
 exports_event_stream_subscription_api_test() ->
@@ -38,72 +39,90 @@ exports_event_stream_subscription_api_test() ->
     ?assert(erlang:function_exported(beam_agent, event_unsubscribe, 2)).
 
 exports_claude_native_controls_test() ->
-    ?assert(erlang:function_exported(beam_agent, rewind_files, 2)),
-    ?assert(erlang:function_exported(beam_agent, stop_task, 2)),
-    ?assert(erlang:function_exported(beam_agent, set_max_thinking_tokens, 2)),
-    ?assert(erlang:function_exported(beam_agent, mcp_server_status, 1)),
-    ?assert(erlang:function_exported(beam_agent, set_mcp_servers, 2)),
-    ?assert(erlang:function_exported(beam_agent, reconnect_mcp_server, 2)),
-    ?assert(erlang:function_exported(beam_agent, toggle_mcp_server, 3)),
-    ?assert(erlang:function_exported(beam_agent, list_native_sessions, 0)),
-    ?assert(erlang:function_exported(beam_agent, list_native_sessions, 1)),
-    ?assert(erlang:function_exported(beam_agent, get_native_session_messages, 1)),
-    ?assert(erlang:function_exported(beam_agent, get_native_session_messages, 2)).
+    lists:foreach(fun ensure_loaded/1, [beam_agent_checkpoint, beam_agent_runtime,
+                                         beam_agent_mcp, beam_agent_session_store]),
+    ?assert(erlang:function_exported(beam_agent_checkpoint, rewind_files, 2)),
+    ?assert(erlang:function_exported(beam_agent_runtime, stop_task, 2)),
+    ?assert(erlang:function_exported(beam_agent_runtime, set_max_thinking_tokens, 2)),
+    ?assert(erlang:function_exported(beam_agent_mcp, server_status, 1)),
+    ?assert(erlang:function_exported(beam_agent_mcp, set_servers, 2)),
+    ?assert(erlang:function_exported(beam_agent_mcp, reconnect_server, 2)),
+    ?assert(erlang:function_exported(beam_agent_mcp, toggle_server, 3)),
+    ?assert(erlang:function_exported(beam_agent_session_store, list_native_sessions, 0)),
+    ?assert(erlang:function_exported(beam_agent_session_store, list_native_sessions, 1)),
+    ?assert(erlang:function_exported(beam_agent_session_store, get_native_session_messages, 1)),
+    ?assert(erlang:function_exported(beam_agent_session_store, get_native_session_messages, 2)).
 
 exports_codex_native_admin_and_realtime_test() ->
-    ?assert(erlang:function_exported(beam_agent, thread_unsubscribe, 2)),
-    ?assert(erlang:function_exported(beam_agent, thread_name_set, 3)),
-    ?assert(erlang:function_exported(beam_agent, thread_metadata_update, 3)),
-    ?assert(erlang:function_exported(beam_agent, turn_steer, 4)),
-    ?assert(erlang:function_exported(beam_agent, turn_steer, 5)),
-    ?assert(erlang:function_exported(beam_agent, turn_interrupt, 3)),
-    ?assert(erlang:function_exported(beam_agent, thread_realtime_start, 2)),
-    ?assert(erlang:function_exported(beam_agent, thread_realtime_append_audio, 3)),
-    ?assert(erlang:function_exported(beam_agent, thread_realtime_append_text, 3)),
-    ?assert(erlang:function_exported(beam_agent, thread_realtime_stop, 2)),
-    ?assert(erlang:function_exported(beam_agent, review_start, 2)),
-    ?assert(erlang:function_exported(beam_agent, collaboration_mode_list, 1)),
-    ?assert(erlang:function_exported(beam_agent, experimental_feature_list, 1)),
-    ?assert(erlang:function_exported(beam_agent, skills_remote_list, 1)),
-    ?assert(erlang:function_exported(beam_agent, skills_remote_export, 2)),
-    ?assert(erlang:function_exported(beam_agent, apps_list, 1)),
-    ?assert(erlang:function_exported(beam_agent, config_requirements_read, 1)),
-    ?assert(erlang:function_exported(beam_agent, external_agent_config_detect, 1)),
-    ?assert(erlang:function_exported(beam_agent, external_agent_config_import, 2)),
-    ?assert(erlang:function_exported(beam_agent, mcp_server_oauth_login, 2)),
-    ?assert(erlang:function_exported(beam_agent, command_write_stdin, 3)),
-    ?assert(erlang:function_exported(beam_agent, command_write_stdin, 4)),
-    ?assert(erlang:function_exported(beam_agent, submit_feedback, 2)),
-    ?assert(erlang:function_exported(beam_agent, turn_respond, 3)).
+    lists:foreach(fun ensure_loaded/1, [beam_agent_threads, beam_agent_control,
+                                         beam_agent_skills, beam_agent_apps,
+                                         beam_agent_config, beam_agent_mcp,
+                                         beam_agent_command]),
+    ?assert(erlang:function_exported(beam_agent_threads, thread_unsubscribe, 2)),
+    ?assert(erlang:function_exported(beam_agent_threads, thread_name_set, 3)),
+    ?assert(erlang:function_exported(beam_agent_threads, thread_metadata_update, 3)),
+    ?assert(erlang:function_exported(beam_agent_control, turn_steer, 4)),
+    ?assert(erlang:function_exported(beam_agent_control, turn_steer, 5)),
+    ?assert(erlang:function_exported(beam_agent_control, turn_interrupt, 3)),
+    ?assert(erlang:function_exported(beam_agent_control, thread_realtime_start, 2)),
+    ?assert(erlang:function_exported(beam_agent_control, thread_realtime_append_audio, 3)),
+    ?assert(erlang:function_exported(beam_agent_control, thread_realtime_append_text, 3)),
+    ?assert(erlang:function_exported(beam_agent_control, thread_realtime_stop, 2)),
+    ?assert(erlang:function_exported(beam_agent_control, review_start, 2)),
+    ?assert(erlang:function_exported(beam_agent_control, collaboration_mode_list, 1)),
+    ?assert(erlang:function_exported(beam_agent_control, experimental_feature_list, 1)),
+    ?assert(erlang:function_exported(beam_agent_skills, remote_list, 1)),
+    ?assert(erlang:function_exported(beam_agent_skills, remote_export, 2)),
+    ?assert(erlang:function_exported(beam_agent_apps, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_config, requirements_read, 1)),
+    ?assert(erlang:function_exported(beam_agent_config, external_agent_detect, 1)),
+    ?assert(erlang:function_exported(beam_agent_config, external_agent_import, 2)),
+    ?assert(erlang:function_exported(beam_agent_mcp, server_oauth_login, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, command_write_stdin, 3)),
+    ?assert(erlang:function_exported(beam_agent_command, command_write_stdin, 4)),
+    ?assert(erlang:function_exported(beam_agent_command, submit_feedback, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, turn_respond, 3)).
 
 exports_opencode_native_routes_test() ->
-    ?assert(erlang:function_exported(beam_agent, app_info, 1)),
-    ?assert(erlang:function_exported(beam_agent, app_init, 1)),
-    ?assert(erlang:function_exported(beam_agent, app_log, 2)),
-    ?assert(erlang:function_exported(beam_agent, app_modes, 1)),
-    ?assert(erlang:function_exported(beam_agent, find_text, 2)),
-    ?assert(erlang:function_exported(beam_agent, find_files, 2)),
-    ?assert(erlang:function_exported(beam_agent, find_symbols, 2)),
-    ?assert(erlang:function_exported(beam_agent, file_list, 2)),
-    ?assert(erlang:function_exported(beam_agent, file_read, 2)),
-    ?assert(erlang:function_exported(beam_agent, file_status, 1)),
-    ?assert(erlang:function_exported(beam_agent, session_init, 2)),
-    ?assert(erlang:function_exported(beam_agent, session_messages, 1)),
-    ?assert(erlang:function_exported(beam_agent, session_messages, 2)),
-    ?assert(erlang:function_exported(beam_agent, prompt_async, 2)),
-    ?assert(erlang:function_exported(beam_agent, prompt_async, 3)),
-    ?assert(erlang:function_exported(beam_agent, shell_command, 2)),
-    ?assert(erlang:function_exported(beam_agent, shell_command, 3)),
-    ?assert(erlang:function_exported(beam_agent, tui_append_prompt, 2)),
-    ?assert(erlang:function_exported(beam_agent, tui_open_help, 1)).
+    lists:foreach(fun ensure_loaded/1, [beam_agent_apps, beam_agent_file,
+                                         beam_agent_command]),
+    ?assert(erlang:function_exported(beam_agent_apps, info, 1)),
+    ?assert(erlang:function_exported(beam_agent_apps, init, 1)),
+    ?assert(erlang:function_exported(beam_agent_apps, log, 2)),
+    ?assert(erlang:function_exported(beam_agent_apps, modes, 1)),
+    ?assert(erlang:function_exported(beam_agent_file, find_text, 2)),
+    ?assert(erlang:function_exported(beam_agent_file, find_files, 2)),
+    ?assert(erlang:function_exported(beam_agent_file, find_symbols, 2)),
+    ?assert(erlang:function_exported(beam_agent_file, list, 2)),
+    ?assert(erlang:function_exported(beam_agent_file, read, 2)),
+    ?assert(erlang:function_exported(beam_agent_file, status, 1)),
+    ?assert(erlang:function_exported(beam_agent_command, session_init, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, session_messages, 1)),
+    ?assert(erlang:function_exported(beam_agent_command, session_messages, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, prompt_async, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, prompt_async, 3)),
+    ?assert(erlang:function_exported(beam_agent_command, shell_command, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, shell_command, 3)),
+    ?assert(erlang:function_exported(beam_agent_command, tui_append_prompt, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, tui_open_help, 1)).
 
 exports_copilot_native_admin_surface_test() ->
-    ?assert(erlang:function_exported(beam_agent, get_status, 1)),
-    ?assert(erlang:function_exported(beam_agent, get_auth_status, 1)),
-    ?assert(erlang:function_exported(beam_agent, model_list, 1)),
-    ?assert(erlang:function_exported(beam_agent, get_last_session_id, 1)),
-    ?assert(erlang:function_exported(beam_agent, list_server_sessions, 1)),
-    ?assert(erlang:function_exported(beam_agent, get_server_session, 2)),
-    ?assert(erlang:function_exported(beam_agent, delete_server_session, 2)),
-    ?assert(erlang:function_exported(beam_agent, session_destroy, 1)),
-    ?assert(erlang:function_exported(beam_agent, session_destroy, 2)).
+    lists:foreach(fun ensure_loaded/1, [beam_agent_runtime, beam_agent_catalog,
+                                         beam_agent_control, beam_agent_command]),
+    ?assert(erlang:function_exported(beam_agent_runtime, get_status, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, get_auth_status, 1)),
+    ?assert(erlang:function_exported(beam_agent_catalog, model_list, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, get_last_session_id, 1)),
+    ?assert(erlang:function_exported(beam_agent_control, list_server_sessions, 1)),
+    ?assert(erlang:function_exported(beam_agent_control, get_server_session, 2)),
+    ?assert(erlang:function_exported(beam_agent_control, delete_server_session, 2)),
+    ?assert(erlang:function_exported(beam_agent_command, session_destroy, 1)),
+    ?assert(erlang:function_exported(beam_agent_command, session_destroy, 2)).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
+
+ensure_loaded(Mod) ->
+    {module, Mod} = code:ensure_loaded(Mod),
+    ok.

@@ -58,7 +58,7 @@ defmodule BeamAgent.SessionStore do
   ## Architecture deep dive
 
   This module is a thin Elixir facade that `defdelegate`s every call to the Erlang
-  `:beam_agent_session_store` and `:beam_agent` modules. The underlying ETS tables
+  `:beam_agent_session_store` module. The underlying ETS tables
   (`beam_agent_sessions`, `beam_agent_session_messages`, `beam_agent_session_counters`)
   are public and named so any process can read and write without bottlenecking on a
   single owner. Tables are created lazily on first access and persist for the
@@ -253,7 +253,7 @@ defmodule BeamAgent.SessionStore do
   ```
   """
   @spec fork_session(pid(), map()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate fork_session(session_or_id, opts), to: :beam_agent
+  defdelegate fork_session(session_or_id, opts), to: :beam_agent_session_store
 
   @doc """
   Revert the visible conversation to a prior message boundary.
@@ -270,7 +270,7 @@ defmodule BeamAgent.SessionStore do
   `{:error, :invalid_selector}`.
   """
   @spec revert_session(pid(), map()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate revert_session(session_or_id, selector), to: :beam_agent
+  defdelegate revert_session(session_or_id, selector), to: :beam_agent_session_store
 
   @doc """
   Clear revert state and restore the full visible history.
@@ -281,7 +281,7 @@ defmodule BeamAgent.SessionStore do
   Returns `{:ok, updated_meta}` or `{:error, :not_found}`.
   """
   @spec unrevert_session(pid()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate unrevert_session(session_or_id), to: :beam_agent
+  defdelegate unrevert_session(session_or_id), to: :beam_agent_session_store
 
   @doc """
   Generate a share token for a session.
@@ -299,7 +299,7 @@ defmodule BeamAgent.SessionStore do
   ```
   """
   @spec share_session(pid()) :: {:ok, session_share()} | {:error, term()}
-  defdelegate share_session(session_or_id), to: :beam_agent
+  defdelegate share_session(session_or_id), to: :beam_agent_session_store
 
   @doc """
   Generate a share token for a session with options.
@@ -310,7 +310,7 @@ defmodule BeamAgent.SessionStore do
   Returns `{:ok, share}` with the active share map, or `{:error, :not_found}`.
   """
   @spec share_session(pid(), map()) :: {:ok, session_share()} | {:error, term()}
-  defdelegate share_session(session_or_id, opts), to: :beam_agent
+  defdelegate share_session(session_or_id, opts), to: :beam_agent_session_store
 
   @doc """
   Revoke the current share for a session.
@@ -320,7 +320,7 @@ defmodule BeamAgent.SessionStore do
   Returns `:ok` on success or `{:error, :not_found}`.
   """
   @spec unshare_session(pid()) :: :ok | {:error, term()}
-  defdelegate unshare_session(session_or_id), to: :beam_agent
+  defdelegate unshare_session(session_or_id), to: :beam_agent_session_store
 
   @doc """
   Generate and store a summary for a session.
@@ -332,7 +332,7 @@ defmodule BeamAgent.SessionStore do
   Returns `{:ok, summary}` or `{:error, :not_found}`.
   """
   @spec summarize_session(pid()) :: {:ok, session_summary()} | {:error, term()}
-  defdelegate summarize_session(session_or_id), to: :beam_agent
+  defdelegate summarize_session(session_or_id), to: :beam_agent_session_store
 
   @doc """
   Generate and store a summary for a session with options.
@@ -344,7 +344,7 @@ defmodule BeamAgent.SessionStore do
   Returns `{:ok, summary}` or `{:error, :not_found}`.
   """
   @spec summarize_session(pid(), map()) :: {:ok, session_summary()} | {:error, term()}
-  defdelegate summarize_session(session_or_id, opts), to: :beam_agent
+  defdelegate summarize_session(session_or_id, opts), to: :beam_agent_session_store
 
   @doc """
   Get all messages for a session in recording order.

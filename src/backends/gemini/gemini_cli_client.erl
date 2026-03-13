@@ -592,26 +592,26 @@ provider_list(Session) ->
     beam_agent_runtime_core:list_providers(Session).
 -spec provider_auth_methods(pid()) -> {ok, [map()]}.
 provider_auth_methods(Session) ->
-    beam_agent_config:provider_auth_methods(Session).
+    beam_agent_config_core:provider_auth_methods(Session).
 -spec provider_oauth_authorize(pid(), binary(), map()) ->
                                   {ok, map()}.
 provider_oauth_authorize(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body).
+    beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body).
 -spec provider_oauth_callback(pid(), binary(), map()) ->
                                  {ok, map()} | {error, invalid_api_key | invalid_provider_config}.
 provider_oauth_callback(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config:provider_oauth_callback(Session, ProviderId, Body).
+    beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body).
 -spec config_read(pid()) -> {ok, map()} | {error, _}.
 config_read(Session) ->
     config_read(Session, #{}).
 -spec config_read(pid(), map()) -> {ok, map()} | {error, _}.
 config_read(Session, _Opts) ->
-    beam_agent_config:config_read(Session).
+    beam_agent_config_core:config_read(Session).
 -spec config_update(pid(), map()) -> {ok, map()} | {error, _}.
 config_update(Session, Body) when is_map(Body) ->
-    beam_agent_config:config_update(Session, Body).
+    beam_agent_config_core:config_update(Session, Body).
 -spec config_providers(pid()) -> {ok, [map()]}.
 config_providers(Session) ->
     provider_list(Session).
@@ -622,27 +622,27 @@ config_value_write(Session, KeyPath, Value) ->
                             {ok, map()} | {error, _}.
 config_value_write(Session, KeyPath, Value, Opts)
     when is_binary(KeyPath), is_map(Opts) ->
-    beam_agent_config:config_value_write(Session, KeyPath, Value, Opts).
+    beam_agent_config_core:config_value_write(Session, KeyPath, Value, Opts).
 -spec config_batch_write(pid(), [map()]) -> {ok, map()} | {error, _}.
 config_batch_write(Session, Edits) ->
     config_batch_write(Session, Edits, #{}).
 -spec config_batch_write(pid(), [map()], map()) ->
                             {ok, map()} | {error, _}.
 config_batch_write(Session, Edits, Opts) when is_list(Edits), is_map(Opts) ->
-    beam_agent_config:config_batch_write(Session, Edits, Opts).
+    beam_agent_config_core:config_batch_write(Session, Edits, Opts).
 -spec config_requirements_read(pid()) -> {ok, map()}.
 config_requirements_read(Session) ->
-    beam_agent_config:config_requirements_read(Session).
+    beam_agent_config_core:config_requirements_read(Session).
 -spec external_agent_config_detect(pid()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session) ->
     external_agent_config_detect(Session, #{}).
 -spec external_agent_config_detect(pid(), map()) ->
                                       {ok, map()} | {error, _}.
 external_agent_config_detect(Session, Opts) when is_map(Opts) ->
-    beam_agent_config:external_agent_config_detect(Session, Opts).
+    beam_agent_config_core:external_agent_config_detect(Session, Opts).
 -spec external_agent_config_import(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_import(Session, Opts) when is_map(Opts) ->
-    beam_agent_config:external_agent_config_import(Session, Opts).
+    beam_agent_config_core:external_agent_config_import(Session, Opts).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
     extract_init_field(Session, models, models, []).

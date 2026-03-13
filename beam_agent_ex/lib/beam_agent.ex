@@ -605,7 +605,7 @@ defmodule BeamAgent do
   - `{:ok, model}` on success.
   - `{:error, reason}` on failure.
   """
-  defdelegate set_model(session, model), to: :beam_agent
+  defdelegate set_model(session, model), to: :beam_agent_runtime
 
   @doc """
   Change the permission mode for a running session.
@@ -623,7 +623,7 @@ defmodule BeamAgent do
   - `{:ok, mode}` on success.
   - `{:error, reason}` on failure.
   """
-  defdelegate set_permission_mode(session, mode), to: :beam_agent
+  defdelegate set_permission_mode(session, mode), to: :beam_agent_runtime
 
   @doc """
   Interrupt the currently active query on a session.
@@ -642,7 +642,7 @@ defmodule BeamAgent do
   - `{:error, :not_supported}` if the backend does not support interrupts.
   - `{:error, reason}` on failure.
   """
-  defdelegate interrupt(session), to: :beam_agent
+  defdelegate interrupt(session), to: :beam_agent_runtime
 
   @doc """
   Abort the currently active query and reset the session to ready state.
@@ -658,7 +658,7 @@ defmodule BeamAgent do
 
   - `:ok` or `{:error, reason}`.
   """
-  defdelegate abort(session), to: :beam_agent
+  defdelegate abort(session), to: :beam_agent_runtime
 
   @doc """
   Send a backend-specific control message to a session.
@@ -685,7 +685,7 @@ defmodule BeamAgent do
         "mcp_message",
         %{server: "my-tools", method: "tools/list"})
   """
-  defdelegate send_control(session, method, params), to: :beam_agent
+  defdelegate send_control(session, method, params), to: :beam_agent_runtime
 
   @doc """
   Return the static list of CLI commands that the session's backend supports.
@@ -711,7 +711,7 @@ defmodule BeamAgent do
       {:ok, commands} = BeamAgent.supported_commands(session)
       for cmd <- commands, do: IO.puts("\#{cmd.name}: \#{cmd.description}")
   """
-  defdelegate supported_commands(session), to: :beam_agent
+  defdelegate supported_commands(session), to: :beam_agent_catalog
 
   @doc """
   Return the static list of LLM models available for the session's backend.
@@ -737,7 +737,7 @@ defmodule BeamAgent do
       {:ok, models} = BeamAgent.supported_models(session)
       for m <- models, do: IO.puts(m.name)
   """
-  defdelegate supported_models(session), to: :beam_agent
+  defdelegate supported_models(session), to: :beam_agent_catalog
 
   @doc """
   Return the static list of sub-agents that the session's backend exposes.
@@ -758,7 +758,7 @@ defmodule BeamAgent do
     specializes in), and `:capabilities` (list of capability atoms).
   - `{:error, reason}` on failure.
   """
-  defdelegate supported_agents(session), to: :beam_agent
+  defdelegate supported_agents(session), to: :beam_agent_catalog
 
   @doc """
   Retrieve account and authentication information for the session's backend.
@@ -785,7 +785,7 @@ defmodule BeamAgent do
       {:ok, info} = BeamAgent.account_info(session)
       IO.puts("Plan: \#{info.plan}, Email: \#{info.email}")
   """
-  defdelegate account_info(session), to: :beam_agent
+  defdelegate account_info(session), to: :beam_agent_account, as: :info
 
   @doc """
   List all tools registered with the session.
@@ -814,7 +814,7 @@ defmodule BeamAgent do
       tool_names = Enum.map(tools, & &1.name)
       IO.inspect(tool_names)
   """
-  defdelegate list_tools(session), to: :beam_agent
+  defdelegate list_tools(session), to: :beam_agent_catalog
 
   @doc """
   List skills registered with the session.
@@ -834,7 +834,7 @@ defmodule BeamAgent do
     skill does), and `:path` (file path to the skill definition).
   - `{:error, reason}` on failure.
   """
-  defdelegate list_skills(session), to: :beam_agent
+  defdelegate list_skills(session), to: :beam_agent_catalog
 
   @doc """
   List plugins extending the session's agent capabilities.
@@ -856,7 +856,7 @@ defmodule BeamAgent do
     contributed by this plugin).
   - `{:error, reason}` on failure.
   """
-  defdelegate list_plugins(session), to: :beam_agent
+  defdelegate list_plugins(session), to: :beam_agent_catalog
 
   @doc """
   List MCP (Model Context Protocol) servers registered with the session.
@@ -878,7 +878,7 @@ defmodule BeamAgent do
     definition maps provided by this server).
   - `{:error, reason}` on failure.
   """
-  defdelegate list_mcp_servers(session), to: :beam_agent
+  defdelegate list_mcp_servers(session), to: :beam_agent_catalog
 
   @doc """
   List sub-agents registered with the session.
@@ -901,7 +901,7 @@ defmodule BeamAgent do
     capability atoms the sub-agent supports).
   - `{:error, reason}` on failure.
   """
-  defdelegate list_agents(session), to: :beam_agent
+  defdelegate list_agents(session), to: :beam_agent_catalog
 
   @doc """
   Retrieve a specific tool definition by its identifier.
@@ -929,7 +929,7 @@ defmodule BeamAgent do
       {:ok, tool} = BeamAgent.get_tool(session, "Bash")
       IO.puts(tool.description)
   """
-  defdelegate get_tool(session, tool_id), to: :beam_agent
+  defdelegate get_tool(session, tool_id), to: :beam_agent_catalog
 
   @doc """
   Retrieve a specific skill definition by its identifier.
@@ -951,7 +951,7 @@ defmodule BeamAgent do
   - `{:error, :not_found}` if no skill with that identifier is registered.
   - `{:error, reason}` on other failures.
   """
-  defdelegate get_skill(session, skill_id), to: :beam_agent
+  defdelegate get_skill(session, skill_id), to: :beam_agent_catalog
 
   @doc """
   Retrieve a specific plugin definition by its identifier.
@@ -973,7 +973,7 @@ defmodule BeamAgent do
   - `{:error, :not_found}` if no plugin with that identifier is registered.
   - `{:error, reason}` on other failures.
   """
-  defdelegate get_plugin(session, plugin_id), to: :beam_agent
+  defdelegate get_plugin(session, plugin_id), to: :beam_agent_catalog
 
   @doc """
   Retrieve a specific sub-agent definition by its identifier.
@@ -995,7 +995,7 @@ defmodule BeamAgent do
   - `{:error, :not_found}` if no sub-agent with that identifier exists.
   - `{:error, reason}` on other failures.
   """
-  defdelegate get_agent(session, agent_id), to: :beam_agent
+  defdelegate get_agent(session, agent_id), to: :beam_agent_catalog
 
   @doc """
   Get the currently active LLM provider for a session.
@@ -1016,7 +1016,7 @@ defmodule BeamAgent do
     `"anthropic"`, `"openai"`).
   - `{:error, :not_set}` if no provider has been explicitly selected.
   """
-  defdelegate current_provider(session), to: :beam_agent
+  defdelegate current_provider(session), to: :beam_agent_provider, as: :current
 
   @doc """
   Set the active LLM provider for a session.
@@ -1039,7 +1039,7 @@ defmodule BeamAgent do
 
       :ok = BeamAgent.set_provider(session, "anthropic")
   """
-  defdelegate set_provider(session, provider_id), to: :beam_agent
+  defdelegate set_provider(session, provider_id), to: :beam_agent_provider, as: :set
 
   @doc """
   Clear the active provider selection and revert to the backend's default.
@@ -1055,7 +1055,7 @@ defmodule BeamAgent do
 
   `:ok`
   """
-  defdelegate clear_provider(session), to: :beam_agent
+  defdelegate clear_provider(session), to: :beam_agent_provider, as: :clear
 
   @doc """
   Get the currently active sub-agent for a session.
@@ -1074,7 +1074,7 @@ defmodule BeamAgent do
   - `{:ok, agent_id}` where `agent_id` is a binary sub-agent identifier.
   - `{:error, :not_set}` if no sub-agent is active (primary agent in use).
   """
-  defdelegate current_agent(session), to: :beam_agent
+  defdelegate current_agent(session), to: :beam_agent_provider
 
   @doc """
   Set the active sub-agent for a session.
@@ -1097,7 +1097,7 @@ defmodule BeamAgent do
 
       :ok = BeamAgent.set_agent(session, "code-reviewer")
   """
-  defdelegate set_agent(session, agent_id), to: :beam_agent
+  defdelegate set_agent(session, agent_id), to: :beam_agent_provider
 
   @doc """
   Clear the active sub-agent and revert to the primary agent.
@@ -1113,7 +1113,7 @@ defmodule BeamAgent do
 
   `:ok`
   """
-  defdelegate clear_agent(session), to: :beam_agent
+  defdelegate clear_agent(session), to: :beam_agent_provider
 
   @doc """
   List all known capabilities across all backends.
@@ -1127,7 +1127,7 @@ defmodule BeamAgent do
       caps = BeamAgent.capabilities()
       for cap <- caps, do: IO.puts(cap[:name])
   """
-  defdelegate capabilities(), to: :beam_agent
+  defdelegate capabilities(), to: :beam_agent_capabilities
 
   @doc """
   List capabilities for a specific session or backend.
@@ -1151,7 +1151,7 @@ defmodule BeamAgent do
       {:ok, caps} = BeamAgent.capabilities(:claude)
       {:ok, caps} = BeamAgent.capabilities(session)
   """
-  defdelegate capabilities(value), to: :beam_agent
+  defdelegate capabilities(value), to: :beam_agent_capabilities
 
   @doc """
   Check whether a backend supports a specific capability.
@@ -1174,7 +1174,7 @@ defmodule BeamAgent do
         {:error, _} -> IO.puts("Threads not supported")
       end
   """
-  defdelegate supports(capability, value), to: :beam_agent
+  defdelegate supports(capability, value), to: :beam_agent_capabilities
 
   @doc """
   Normalize a raw wire-format message into the SDK message format.
@@ -1482,7 +1482,7 @@ defmodule BeamAgent do
 
   - `{:ok, sessions}` or `{:error, reason}`.
   """
-  defdelegate list_native_sessions(), to: :beam_agent
+  defdelegate list_native_sessions(), to: :beam_agent_session_store
 
   @doc """
   List sessions from the backend's native session store with filters.
@@ -1498,7 +1498,7 @@ defmodule BeamAgent do
 
   - `{:ok, sessions}` or `{:error, reason}`.
   """
-  defdelegate list_native_sessions(opts), to: :beam_agent
+  defdelegate list_native_sessions(opts), to: :beam_agent_session_store
 
   @doc """
   Get all messages for a session from the universal store.
@@ -1558,7 +1558,7 @@ defmodule BeamAgent do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  defdelegate get_native_session_messages(session_id), to: :beam_agent
+  defdelegate get_native_session_messages(session_id), to: :beam_agent_session_store
 
   @doc """
   Get messages from the backend's native session store with options.
@@ -1574,7 +1574,7 @@ defmodule BeamAgent do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  defdelegate get_native_session_messages(session_id, opts), to: :beam_agent
+  defdelegate get_native_session_messages(session_id, opts), to: :beam_agent_session_store
 
   @doc """
   Get metadata for a specific session by identifier.
@@ -1834,7 +1834,7 @@ defmodule BeamAgent do
 
   - `{:ok, thread_meta}` or `{:error, :not_found}`.
   """
-  defdelegate thread_resume(session, thread_id, opts), to: :beam_agent
+  defdelegate thread_resume(session, thread_id, opts), to: :beam_agent_threads
 
   @doc """
   List all threads for a session, sorted by `updated_at` descending.
@@ -1866,7 +1866,7 @@ defmodule BeamAgent do
 
   - `{:ok, thread_list}` or `{:error, reason}`.
   """
-  defdelegate thread_list(session, opts), to: :beam_agent
+  defdelegate thread_list(session, opts), to: :beam_agent_threads
 
   @doc """
   Fork an existing thread, copying its visible message history.
@@ -1967,7 +1967,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with `:thread_id` and `:unsubscribed` fields.
   - `{:error, :not_found}`.
   """
-  defdelegate thread_unsubscribe(session, thread_id), to: :beam_agent
+  defdelegate thread_unsubscribe(session, thread_id), to: :beam_agent_threads
 
   @doc """
   Rename a thread.
@@ -1982,7 +1982,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, :not_found}`.
   """
-  defdelegate thread_name_set(session, thread_id, name), to: :beam_agent
+  defdelegate thread_name_set(session, thread_id, name), to: :beam_agent_threads
 
   @doc """
   Merge a metadata patch into a thread's metadata map.
@@ -1998,7 +1998,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, :not_found}`.
   """
-  defdelegate thread_metadata_update(session, thread_id, metadata_patch), to: :beam_agent
+  defdelegate thread_metadata_update(session, thread_id, metadata_patch), to: :beam_agent_threads
 
   @doc """
   Unarchive a previously archived thread, restoring it to active status.
@@ -2053,7 +2053,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with `:threads`, `:active_thread_id`, and `:count` fields.
   - `{:error, reason}`.
   """
-  defdelegate thread_loaded_list(session), to: :beam_agent
+  defdelegate thread_loaded_list(session), to: :beam_agent_threads
 
   @doc """
   List loaded threads for a session with filter options.
@@ -2071,7 +2071,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, reason}`.
   """
-  defdelegate thread_loaded_list(session, opts), to: :beam_agent
+  defdelegate thread_loaded_list(session, opts), to: :beam_agent_threads
 
   @doc """
   Compact a thread by reducing its visible message history.
@@ -2092,7 +2092,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, :not_found}`.
   """
-  defdelegate thread_compact(session, opts), to: :beam_agent
+  defdelegate thread_compact(session, opts), to: :beam_agent_threads
 
   @doc """
   Steer an active turn by injecting additional input mid-conversation.
@@ -2112,7 +2112,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, reason}`.
   """
-  defdelegate turn_steer(session, thread_id, turn_id, input), to: :beam_agent
+  defdelegate turn_steer(session, thread_id, turn_id, input), to: :beam_agent_control
 
   @doc """
   Steer an active turn with additional options.
@@ -2132,7 +2132,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, reason}`.
   """
-  defdelegate turn_steer(session, thread_id, turn_id, input, opts), to: :beam_agent
+  defdelegate turn_steer(session, thread_id, turn_id, input, opts), to: :beam_agent_control
 
   @doc """
   Interrupt a specific turn within a thread.
@@ -2151,7 +2151,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with `status: :interrupted`.
   - `{:error, reason}`.
   """
-  defdelegate turn_interrupt(session, thread_id, turn_id), to: :beam_agent
+  defdelegate turn_interrupt(session, thread_id, turn_id), to: :beam_agent_control
 
   @doc """
   Start a realtime collaboration thread for voice or audio streaming.
@@ -2181,7 +2181,7 @@ defmodule BeamAgent do
       {:ok, rt} = BeamAgent.thread_realtime_start(session, %{mode: :voice})
       thread_id = rt.thread_id
   """
-  defdelegate thread_realtime_start(session, opts), to: :beam_agent
+  defdelegate thread_realtime_start(session, opts), to: :beam_agent_control
 
   @doc """
   Append encoded audio data to an active realtime thread.
@@ -2206,7 +2206,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with acknowledgment status.
   - `{:error, reason}` on failure.
   """
-  defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent
+  defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
   Append text content to an active realtime stream.
@@ -2229,7 +2229,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with acknowledgment status.
   - `{:error, reason}` on failure.
   """
-  defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent
+  defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
   Stop and tear down an active realtime collaboration thread.
@@ -2251,7 +2251,7 @@ defmodule BeamAgent do
     `:status` (atom, typically `:stopped`).
   - `{:error, reason}` on failure.
   """
-  defdelegate thread_realtime_stop(session, thread_id), to: :beam_agent
+  defdelegate thread_realtime_stop(session, thread_id), to: :beam_agent_control
 
   @doc """
   Start a code review collaboration session.
@@ -2284,7 +2284,7 @@ defmodule BeamAgent do
       })
       IO.puts("Review started: \#{review.review_id}")
   """
-  defdelegate review_start(session, opts), to: :beam_agent
+  defdelegate review_start(session, opts), to: :beam_agent_control
 
   @doc """
   List collaboration modes available for the session.
@@ -2306,7 +2306,7 @@ defmodule BeamAgent do
     capability details describing what the mode supports.
   - `{:error, reason}` on failure.
   """
-  defdelegate collaboration_mode_list(session), to: :beam_agent
+  defdelegate collaboration_mode_list(session), to: :beam_agent_control
 
   @doc """
   List experimental features available for the session with no filters.
@@ -2326,7 +2326,7 @@ defmodule BeamAgent do
     and `:enabled` (boolean indicating whether the feature is active).
   - `{:error, reason}` on failure.
   """
-  defdelegate experimental_feature_list(session), to: :beam_agent
+  defdelegate experimental_feature_list(session), to: :beam_agent_control
 
   @doc """
   List experimental and beta features with filter options.
@@ -2349,7 +2349,7 @@ defmodule BeamAgent do
     and `:enabled` (boolean).
   - `{:error, reason}` on failure.
   """
-  defdelegate experimental_feature_list(session, opts), to: :beam_agent
+  defdelegate experimental_feature_list(session, opts), to: :beam_agent_control
 
   # ---------------------------------------------------------------------------
   # Skills
@@ -2372,7 +2372,7 @@ defmodule BeamAgent do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  defdelegate skills_list(session), to: :beam_agent
+  defdelegate skills_list(session), to: :beam_agent_skills, as: :list
 
   @doc """
   List skills for the session with filter options.
@@ -2395,7 +2395,7 @@ defmodule BeamAgent do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  defdelegate skills_list(session, opts), to: :beam_agent
+  defdelegate skills_list(session, opts), to: :beam_agent_skills, as: :list
 
   @doc """
   List skills available from the remote registry.
@@ -2415,7 +2415,7 @@ defmodule BeamAgent do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  defdelegate skills_remote_list(session), to: :beam_agent
+  defdelegate skills_remote_list(session), to: :beam_agent_skills, as: :remote_list
 
   @doc """
   List skills from the remote registry with filter options.
@@ -2438,7 +2438,7 @@ defmodule BeamAgent do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  defdelegate skills_remote_list(session, opts), to: :beam_agent
+  defdelegate skills_remote_list(session, opts), to: :beam_agent_skills, as: :remote_list
 
   @doc """
   Export a local skill to a remote registry.
@@ -2459,7 +2459,7 @@ defmodule BeamAgent do
     details such as the remote registry URL and export status.
   - `{:error, reason}` on failure.
   """
-  defdelegate skills_remote_export(session, opts), to: :beam_agent
+  defdelegate skills_remote_export(session, opts), to: :beam_agent_skills, as: :remote_export
 
   @doc """
   Enable or disable a skill by its file path.
@@ -2485,7 +2485,9 @@ defmodule BeamAgent do
 
       {:ok, _} = BeamAgent.skills_config_write(session, "/skills/review.md", false)
   """
-  defdelegate skills_config_write(session, path, enabled), to: :beam_agent
+  defdelegate skills_config_write(session, path, enabled),
+    to: :beam_agent_skills,
+    as: :config_write
 
   # ---------------------------------------------------------------------------
   # Apps
@@ -2509,7 +2511,7 @@ defmodule BeamAgent do
     and `:status` (atom such as `:active` or `:archived`).
   - `{:error, reason}` on failure.
   """
-  defdelegate apps_list(session), to: :beam_agent
+  defdelegate apps_list(session), to: :beam_agent_apps, as: :list
 
   @doc """
   List apps and projects for the session with filter options.
@@ -2532,7 +2534,7 @@ defmodule BeamAgent do
     and `:status` (atom).
   - `{:error, reason}` on failure.
   """
-  defdelegate apps_list(session, opts), to: :beam_agent
+  defdelegate apps_list(session, opts), to: :beam_agent_apps, as: :list
 
   @doc """
   Get information about the current app or project context for a session.
@@ -2553,7 +2555,7 @@ defmodule BeamAgent do
     and `:config` (map of project-level configuration).
   - `{:error, reason}` on failure.
   """
-  defdelegate app_info(session), to: :beam_agent
+  defdelegate app_info(session), to: :beam_agent_apps, as: :info
 
   @doc """
   Initialize the app/project context by scanning the working directory.
@@ -2573,7 +2575,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with the initialized project context.
   - `{:error, reason}` on failure.
   """
-  defdelegate app_init(session), to: :beam_agent
+  defdelegate app_init(session), to: :beam_agent_apps, as: :init
 
   @doc """
   Append a log entry to the session's app log.
@@ -2597,7 +2599,7 @@ defmodule BeamAgent do
   - `{:ok, %{status: :logged}}` on success.
   - `{:error, reason}` on failure.
   """
-  defdelegate app_log(session, body), to: :beam_agent
+  defdelegate app_log(session, body), to: :beam_agent_apps, as: :log
 
   @doc """
   List available app modes for the session.
@@ -2618,7 +2620,7 @@ defmodule BeamAgent do
     a named configuration preset with its settings.
   - `{:error, reason}` on failure.
   """
-  defdelegate app_modes(session), to: :beam_agent
+  defdelegate app_modes(session), to: :beam_agent_apps, as: :modes
 
   # ---------------------------------------------------------------------------
   # Models
@@ -2642,7 +2644,7 @@ defmodule BeamAgent do
     containing `:name` and `:capabilities`.
   - `{:error, reason}` on failure.
   """
-  defdelegate model_list(session), to: :beam_agent
+  defdelegate model_list(session), to: :beam_agent_catalog
 
   @doc """
   List models with backend-specific filter options.
@@ -2663,7 +2665,7 @@ defmodule BeamAgent do
     containing `:name` and `:capabilities`.
   - `{:error, reason}` on failure.
   """
-  defdelegate model_list(session, opts), to: :beam_agent
+  defdelegate model_list(session, opts), to: :beam_agent_catalog
 
   # ---------------------------------------------------------------------------
   # Status & Auth
@@ -2693,7 +2695,7 @@ defmodule BeamAgent do
       {:ok, status} = BeamAgent.get_status(session)
       IO.puts("Health: \#{status.health}, Model: \#{status.model}")
   """
-  defdelegate get_status(session), to: :beam_agent
+  defdelegate get_status(session), to: :beam_agent_runtime
 
   @doc """
   Get the authentication status for the session's active provider.
@@ -2715,7 +2717,7 @@ defmodule BeamAgent do
     `nil` if the credential does not expire).
   - `{:error, reason}` on failure.
   """
-  defdelegate get_auth_status(session), to: :beam_agent
+  defdelegate get_auth_status(session), to: :beam_agent_runtime
 
   @doc """
   Get the backend's own session identifier for a running session.
@@ -2735,7 +2737,7 @@ defmodule BeamAgent do
     identifier.
   - `{:error, reason}` on failure.
   """
-  defdelegate get_last_session_id(session), to: :beam_agent
+  defdelegate get_last_session_id(session), to: :beam_agent_runtime
 
   # ---------------------------------------------------------------------------
   # Server Sessions & Agents
@@ -2756,7 +2758,7 @@ defmodule BeamAgent do
 
   - `{:ok, sessions}` or `{:error, reason}`.
   """
-  defdelegate list_server_sessions(session), to: :beam_agent
+  defdelegate list_server_sessions(session), to: :beam_agent_control
 
   @doc """
   Retrieve a single persisted session by its identifier.
@@ -2773,7 +2775,7 @@ defmodule BeamAgent do
 
   - `{:ok, session_map}` or `{:error, :not_found}`.
   """
-  defdelegate get_server_session(session, session_id), to: :beam_agent
+  defdelegate get_server_session(session, session_id), to: :beam_agent_control
 
   @doc """
   Delete a persisted session from the backend server.
@@ -2790,7 +2792,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate delete_server_session(session, session_id), to: :beam_agent
+  defdelegate delete_server_session(session, session_id), to: :beam_agent_control
 
   @doc """
   List all sub-agents registered on the backend server.
@@ -2807,7 +2809,7 @@ defmodule BeamAgent do
 
   - `{:ok, agents}` or `{:error, reason}`.
   """
-  defdelegate list_server_agents(session), to: :beam_agent
+  defdelegate list_server_agents(session), to: :beam_agent_control
 
   @doc """
   List commands available for the session using native-first routing.
@@ -2828,7 +2830,7 @@ defmodule BeamAgent do
     (human-readable summary).
   - `{:error, reason}` on failure.
   """
-  defdelegate list_commands(session), to: :beam_agent
+  defdelegate list_commands(session), to: :beam_agent_catalog
 
   # ---------------------------------------------------------------------------
   # Configuration
@@ -2849,7 +2851,7 @@ defmodule BeamAgent do
 
   - `{:ok, config_map}` or `{:error, reason}`.
   """
-  defdelegate config_read(session), to: :beam_agent
+  defdelegate config_read(session), to: :beam_agent_config, as: :read
 
   @doc """
   Read the session configuration with additional options.
@@ -2866,7 +2868,7 @@ defmodule BeamAgent do
 
   - `{:ok, config_map}` or `{:error, reason}`.
   """
-  defdelegate config_read(session, opts), to: :beam_agent
+  defdelegate config_read(session, opts), to: :beam_agent_config, as: :read
 
   @doc """
   Update the session configuration with a partial patch.
@@ -2883,7 +2885,7 @@ defmodule BeamAgent do
 
   - `{:ok, updated_config}` or `{:error, reason}`.
   """
-  defdelegate config_update(session, body), to: :beam_agent
+  defdelegate config_update(session, body), to: :beam_agent_config, as: :update
 
   @doc """
   List the providers available in the session configuration.
@@ -2899,7 +2901,7 @@ defmodule BeamAgent do
 
   - `{:ok, providers}` or `{:error, reason}`.
   """
-  defdelegate config_providers(session), to: :beam_agent
+  defdelegate config_providers(session), to: :beam_agent_config, as: :providers
 
   # ---------------------------------------------------------------------------
   # File Operations
@@ -2929,7 +2931,7 @@ defmodule BeamAgent do
         IO.puts("\#{m.path}:\#{m.line}: \#{m.content}")
       end
   """
-  defdelegate find_text(session, pattern), to: :beam_agent
+  defdelegate find_text(session, pattern), to: :beam_agent_file
 
   @doc """
   Find files matching a pattern in the session's working directory.
@@ -2951,7 +2953,7 @@ defmodule BeamAgent do
       {:ok, files} = BeamAgent.find_files(session, %{pattern: "*.erl"})
       for f <- files, do: IO.puts(f.path)
   """
-  defdelegate find_files(session, opts), to: :beam_agent
+  defdelegate find_files(session, opts), to: :beam_agent_file
 
   @doc """
   Search for code symbols matching `query` in the session's project.
@@ -2969,7 +2971,7 @@ defmodule BeamAgent do
 
   - `{:ok, symbols}` or `{:error, reason}`.
   """
-  defdelegate find_symbols(session, query), to: :beam_agent
+  defdelegate find_symbols(session, query), to: :beam_agent_file
 
   @doc """
   List files and directories at the given path.
@@ -2988,7 +2990,7 @@ defmodule BeamAgent do
 
   - `{:ok, entries}` or `{:error, reason}`.
   """
-  defdelegate file_list(session, path), to: :beam_agent
+  defdelegate file_list(session, path), to: :beam_agent_file, as: :list
 
   @doc """
   Read the contents of a file at the given path.
@@ -3005,7 +3007,7 @@ defmodule BeamAgent do
 
   - `{:ok, content}` or `{:error, :enoent}` if the file does not exist.
   """
-  defdelegate file_read(session, path), to: :beam_agent
+  defdelegate file_read(session, path), to: :beam_agent_file, as: :read
 
   @doc """
   Get the version-control status of files in the session's project.
@@ -3021,7 +3023,7 @@ defmodule BeamAgent do
 
   - `{:ok, status}` or `{:error, reason}`.
   """
-  defdelegate file_status(session), to: :beam_agent
+  defdelegate file_status(session), to: :beam_agent_file, as: :status
 
   # ---------------------------------------------------------------------------
   # Configuration Value Write
@@ -3043,7 +3045,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate config_value_write(session, key_path, value), to: :beam_agent
+  defdelegate config_value_write(session, key_path, value),
+    to: :beam_agent_config,
+    as: :value_write
 
   @doc """
   Write a single configuration value at the given key path with options.
@@ -3064,7 +3068,9 @@ defmodule BeamAgent do
   - `{:ok, result}` on success.
   - `{:error, reason}` if the key is read-only or the value is invalid.
   """
-  defdelegate config_value_write(session, key_path, value, opts), to: :beam_agent
+  defdelegate config_value_write(session, key_path, value, opts),
+    to: :beam_agent_config,
+    as: :value_write
 
   @doc """
   Write multiple configuration values in a single batch.
@@ -3080,7 +3086,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate config_batch_write(session, edits), to: :beam_agent
+  defdelegate config_batch_write(session, edits), to: :beam_agent_config, as: :batch_write
 
   @doc """
   Write multiple configuration values in a single batch with options.
@@ -3097,7 +3103,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}` if any edit fails validation.
   """
-  defdelegate config_batch_write(session, edits, opts), to: :beam_agent
+  defdelegate config_batch_write(session, edits, opts), to: :beam_agent_config, as: :batch_write
 
   @doc """
   Read the configuration requirements for a session.
@@ -3114,7 +3120,7 @@ defmodule BeamAgent do
 
   - `{:ok, requirements}` or `{:error, reason}`.
   """
-  defdelegate config_requirements_read(session), to: :beam_agent
+  defdelegate config_requirements_read(session), to: :beam_agent_config, as: :requirements_read
 
   @doc """
   Detect external agent configuration files in the project.
@@ -3130,7 +3136,9 @@ defmodule BeamAgent do
 
   - `{:ok, configs}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_detect(session), to: :beam_agent
+  defdelegate external_agent_config_detect(session),
+    to: :beam_agent_config,
+    as: :external_agent_detect
 
   @doc """
   Detect external agent configuration files with options.
@@ -3147,7 +3155,9 @@ defmodule BeamAgent do
 
   - `{:ok, configs}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_detect(session, opts), to: :beam_agent
+  defdelegate external_agent_config_detect(session, opts),
+    to: :beam_agent_config,
+    as: :external_agent_detect
 
   @doc """
   Import an external agent configuration into the session.
@@ -3166,7 +3176,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate external_agent_config_import(session, opts), to: :beam_agent
+  defdelegate external_agent_config_import(session, opts),
+    to: :beam_agent_config,
+    as: :external_agent_import
 
   # ---------------------------------------------------------------------------
   # Providers & OAuth
@@ -3192,7 +3204,7 @@ defmodule BeamAgent do
     `:unconfigured`).
   - `{:error, reason}` on failure.
   """
-  defdelegate provider_list(session), to: :beam_agent
+  defdelegate provider_list(session), to: :beam_agent_provider, as: :list
 
   @doc """
   List authentication methods available for each provider.
@@ -3213,7 +3225,7 @@ defmodule BeamAgent do
     atoms such as `:api_key`, `:oauth`, or `:sso`).
   - `{:error, reason}` on failure.
   """
-  defdelegate provider_auth_methods(session), to: :beam_agent
+  defdelegate provider_auth_methods(session), to: :beam_agent_provider, as: :auth_methods
 
   @doc """
   Initiate an OAuth authorization flow for a specific provider.
@@ -3237,7 +3249,9 @@ defmodule BeamAgent do
     (binary URL the user should visit to authorize).
   - `{:error, reason}` on failure.
   """
-  defdelegate provider_oauth_authorize(session, provider_id, body), to: :beam_agent
+  defdelegate provider_oauth_authorize(session, provider_id, body),
+    to: :beam_agent_provider,
+    as: :oauth_authorize
 
   @doc """
   Handle an OAuth callback to complete the authorization flow.
@@ -3261,7 +3275,9 @@ defmodule BeamAgent do
     such as `:access_token`, `:token_type`, and `:expires_in`.
   - `{:error, reason}` on failure (e.g., invalid code or state mismatch).
   """
-  defdelegate provider_oauth_callback(session, provider_id, body), to: :beam_agent
+  defdelegate provider_oauth_callback(session, provider_id, body),
+    to: :beam_agent_provider,
+    as: :oauth_callback
 
   # ---------------------------------------------------------------------------
   # MCP (Model Context Protocol)
@@ -3288,7 +3304,7 @@ defmodule BeamAgent do
         IO.puts("\#{name}: \#{info[:status]}")
       end
   """
-  defdelegate mcp_status(session), to: :beam_agent
+  defdelegate mcp_status(session), to: :beam_agent_mcp, as: :status
 
   @doc """
   Register a new MCP tool server with the session.
@@ -3316,7 +3332,7 @@ defmodule BeamAgent do
       }
       {:ok, result} = BeamAgent.add_mcp_server(session, server)
   """
-  defdelegate add_mcp_server(session, body), to: :beam_agent
+  defdelegate add_mcp_server(session, body), to: :beam_agent_mcp, as: :add_server
 
   @doc """
   Get the status of all registered MCP servers for a session.
@@ -3332,7 +3348,7 @@ defmodule BeamAgent do
 
   - `{:ok, status_map}` or `{:error, reason}`.
   """
-  defdelegate mcp_server_status(session), to: :beam_agent
+  defdelegate mcp_server_status(session), to: :beam_agent_mcp, as: :server_status
 
   @doc """
   Replace all MCP servers with the given list.
@@ -3349,7 +3365,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate set_mcp_servers(session, servers), to: :beam_agent
+  defdelegate set_mcp_servers(session, servers), to: :beam_agent_mcp, as: :set_servers
 
   @doc """
   Reconnect a disconnected MCP server by name.
@@ -3365,7 +3381,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  defdelegate reconnect_mcp_server(session, server_name), to: :beam_agent
+  defdelegate reconnect_mcp_server(session, server_name),
+    to: :beam_agent_mcp,
+    as: :reconnect_server
 
   @doc """
   Enable or disable an MCP server by name.
@@ -3384,7 +3402,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  defdelegate toggle_mcp_server(session, server_name, enabled), to: :beam_agent
+  defdelegate toggle_mcp_server(session, server_name, enabled),
+    to: :beam_agent_mcp,
+    as: :toggle_server
 
   @doc """
   Initiate an OAuth login flow for an MCP server.
@@ -3401,7 +3421,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate mcp_server_oauth_login(session, opts), to: :beam_agent
+  defdelegate mcp_server_oauth_login(session, opts), to: :beam_agent_mcp, as: :server_oauth_login
 
   @doc """
   Reload all MCP server configurations.
@@ -3416,7 +3436,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate mcp_server_reload(session), to: :beam_agent
+  defdelegate mcp_server_reload(session), to: :beam_agent_mcp, as: :server_reload
 
   # ---------------------------------------------------------------------------
   # Account Management
@@ -3438,7 +3458,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate account_login(session, opts), to: :beam_agent
+  defdelegate account_login(session, opts), to: :beam_agent_account, as: :login
 
   @doc """
   Cancel an in-progress account login flow.
@@ -3455,7 +3475,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate account_login_cancel(session, opts), to: :beam_agent
+  defdelegate account_login_cancel(session, opts), to: :beam_agent_account, as: :cancel
 
   @doc """
   Log out of the current account.
@@ -3468,7 +3488,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate account_logout(session), to: :beam_agent
+  defdelegate account_logout(session), to: :beam_agent_account, as: :logout
 
   @doc """
   Get rate limit information for the current account.
@@ -3484,7 +3504,7 @@ defmodule BeamAgent do
 
   - `{:ok, rate_limit_info}` or `{:error, reason}`.
   """
-  defdelegate account_rate_limits(session), to: :beam_agent
+  defdelegate account_rate_limits(session), to: :beam_agent_account, as: :rate_limits
 
   # ---------------------------------------------------------------------------
   # Fuzzy File Search
@@ -3505,7 +3525,7 @@ defmodule BeamAgent do
 
   - `{:ok, matches}` sorted by score descending.
   """
-  defdelegate fuzzy_file_search(session, query), to: :beam_agent
+  defdelegate fuzzy_file_search(session, query), to: :beam_agent_search, as: :fuzzy
 
   @doc """
   Fuzzy-search for files by name with options.
@@ -3527,7 +3547,7 @@ defmodule BeamAgent do
 
   - `{:ok, matches}` or `{:error, reason}`.
   """
-  defdelegate fuzzy_file_search(session, query, opts), to: :beam_agent
+  defdelegate fuzzy_file_search(session, query, opts), to: :beam_agent_search, as: :fuzzy
 
   @doc """
   Start a stateful fuzzy file search session.
@@ -3548,7 +3568,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate fuzzy_file_search_session_start(session, search_session_id, roots), to: :beam_agent
+  defdelegate fuzzy_file_search_session_start(session, search_session_id, roots),
+    to: :beam_agent_search,
+    as: :session_start
 
   @doc """
   Update a search session with a new query string.
@@ -3566,7 +3588,9 @@ defmodule BeamAgent do
 
   - `{:ok, matches}` or `{:error, :not_found}`.
   """
-  defdelegate fuzzy_file_search_session_update(session, search_session_id, query), to: :beam_agent
+  defdelegate fuzzy_file_search_session_update(session, search_session_id, query),
+    to: :beam_agent_search,
+    as: :session_update
 
   @doc """
   Stop and clean up a fuzzy file search session.
@@ -3584,7 +3608,9 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate fuzzy_file_search_session_stop(session, search_session_id), to: :beam_agent
+  defdelegate fuzzy_file_search_session_stop(session, search_session_id),
+    to: :beam_agent_search,
+    as: :session_stop
 
   # ---------------------------------------------------------------------------
   # Miscellaneous
@@ -3606,7 +3632,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate windows_sandbox_setup_start(session, opts), to: :beam_agent
+  defdelegate windows_sandbox_setup_start(session, opts), to: :beam_agent_runtime
 
   @doc """
   Set the maximum number of thinking tokens for the session.
@@ -3624,7 +3650,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate set_max_thinking_tokens(session, max_tokens), to: :beam_agent
+  defdelegate set_max_thinking_tokens(session, max_tokens), to: :beam_agent_runtime
 
   @doc """
   Rewind files to a previous checkpoint.
@@ -3642,7 +3668,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, :not_found}`.
   """
-  defdelegate rewind_files(session, checkpoint_uuid), to: :beam_agent
+  defdelegate rewind_files(session, checkpoint_uuid), to: :beam_agent_checkpoint
 
   @doc """
   Stop a running task by its identifier.
@@ -3658,7 +3684,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate stop_task(session, task_id), to: :beam_agent
+  defdelegate stop_task(session, task_id), to: :beam_agent_runtime
 
   @doc """
   Perform backend-specific session initialization.
@@ -3675,7 +3701,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate session_init(session, opts), to: :beam_agent
+  defdelegate session_init(session, opts), to: :beam_agent_command
 
   @doc """
   Get all messages for the current session.
@@ -3690,7 +3716,7 @@ defmodule BeamAgent do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  defdelegate session_messages(session), to: :beam_agent
+  defdelegate session_messages(session), to: :beam_agent_command
 
   @doc """
   Get messages for the current session with filtering options.
@@ -3707,7 +3733,7 @@ defmodule BeamAgent do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  defdelegate session_messages(session, opts), to: :beam_agent
+  defdelegate session_messages(session, opts), to: :beam_agent_command
 
   @doc """
   Send a prompt asynchronously without blocking for the full response.
@@ -3724,7 +3750,7 @@ defmodule BeamAgent do
   - `{:ok, result_map}` with a `:request_id` key.
   - `{:error, reason}` on failure.
   """
-  defdelegate prompt_async(session, prompt), to: :beam_agent
+  defdelegate prompt_async(session, prompt), to: :beam_agent_command
 
   @doc """
   Send a prompt asynchronously with options.
@@ -3746,7 +3772,7 @@ defmodule BeamAgent do
 
   - `{:ok, result_map}` or `{:error, reason}`.
   """
-  defdelegate prompt_async(session, prompt, opts), to: :beam_agent
+  defdelegate prompt_async(session, prompt, opts), to: :beam_agent_command
 
   @doc """
   Execute a shell command in the session's working directory.
@@ -3762,7 +3788,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate shell_command(session, command), to: :beam_agent
+  defdelegate shell_command(session, command), to: :beam_agent_command
 
   @doc """
   Execute a shell command with options.
@@ -3782,7 +3808,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate shell_command(session, command, opts), to: :beam_agent
+  defdelegate shell_command(session, command, opts), to: :beam_agent_command
 
   @doc """
   Append text to the TUI prompt input buffer.
@@ -3799,7 +3825,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate tui_append_prompt(session, text), to: :beam_agent
+  defdelegate tui_append_prompt(session, text), to: :beam_agent_command
 
   @doc """
   Open the TUI help panel.
@@ -3815,7 +3841,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate tui_open_help(session), to: :beam_agent
+  defdelegate tui_open_help(session), to: :beam_agent_command
 
   @doc """
   Destroy the current session and clean up all associated state.
@@ -3833,7 +3859,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate session_destroy(session), to: :beam_agent
+  defdelegate session_destroy(session), to: :beam_agent_command
 
   @doc """
   Destroy a specific session by its identifier.
@@ -3851,7 +3877,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate session_destroy(session, session_id), to: :beam_agent
+  defdelegate session_destroy(session, session_id), to: :beam_agent_command
 
   @doc """
   Run a command through the backend's command execution facility.
@@ -3868,7 +3894,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate command_run(session, command), to: :beam_agent
+  defdelegate command_run(session, command), to: :beam_agent_command
 
   @doc """
   Run a command through the backend's command execution facility with options.
@@ -3891,7 +3917,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate command_run(session, command, opts), to: :beam_agent
+  defdelegate command_run(session, command, opts), to: :beam_agent_command
 
   @doc """
   Write data to the stdin of a running command.
@@ -3908,7 +3934,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate command_write_stdin(session, process_id, stdin), to: :beam_agent
+  defdelegate command_write_stdin(session, process_id, stdin), to: :beam_agent_command
 
   @doc """
   Write data to the stdin of a running command with options.
@@ -3927,7 +3953,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate command_write_stdin(session, process_id, stdin, opts), to: :beam_agent
+  defdelegate command_write_stdin(session, process_id, stdin, opts), to: :beam_agent_command
 
   @doc """
   Submit user feedback about the session or a specific response.
@@ -3945,7 +3971,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate submit_feedback(session, feedback), to: :beam_agent
+  defdelegate submit_feedback(session, feedback), to: :beam_agent_command
 
   @doc """
   Respond to a turn-based request from the backend.
@@ -3965,7 +3991,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate turn_respond(session, request_id, params), to: :beam_agent
+  defdelegate turn_respond(session, request_id, params), to: :beam_agent_command
 
   @doc """
   Send a named command to the backend.
@@ -3984,7 +4010,7 @@ defmodule BeamAgent do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  defdelegate send_command(session, command, params), to: :beam_agent
+  defdelegate send_command(session, command, params), to: :beam_agent_command
 
   @doc """
   Check the health of the backend server.
@@ -4000,7 +4026,7 @@ defmodule BeamAgent do
 
   - `{:ok, health_map}` or `{:error, reason}`.
   """
-  defdelegate server_health(session), to: :beam_agent
+  defdelegate server_health(session), to: :beam_agent_control
 
   # ---------------------------------------------------------------------------
   # Event Streaming (Elixir-only convenience functions)
