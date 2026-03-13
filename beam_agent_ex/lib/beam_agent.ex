@@ -298,6 +298,41 @@ defmodule BeamAgent do
   # ---------------------------------------------------------------------------
 
   @doc """
+  Initialize ETS tables with default settings (public access).
+
+  Equivalent to `init(%{})`. Must be called before any SDK functions that
+  touch ETS. This is idempotent -- calling it again after initialization is
+  a no-op.
+
+  ## Examples
+
+      :ok = BeamAgent.init()
+  """
+  defdelegate init(), to: :beam_agent
+
+  @doc """
+  Initialize ETS tables with the given options.
+
+  ## Options
+
+  - `:table_access` -- `:public` (default) or `:hardened`
+
+  In `:public` mode, all tables use public access. Any process can read and
+  write. In `:hardened` mode, a linked helper process is spawned to own
+  protected tables and proxy writes, while reads remain zero-cost from any
+  process.
+
+  This function is idempotent. Calling it again after initialization is a
+  no-op that returns `:ok`. Should be called early in the consumer's `init/1`
+  callback, before any SDK functions that touch ETS.
+
+  ## Examples
+
+      :ok = BeamAgent.init(%{table_access: :hardened})
+  """
+  defdelegate init(opts), to: :beam_agent
+
+  @doc """
   Start a new agent session connected to a backend.
 
   Launches a supervised `gen_statem` process that owns a transport connection

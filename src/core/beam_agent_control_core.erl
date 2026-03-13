@@ -112,24 +112,24 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
 -doc "Ensure all control ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    ensure_ets(?CONFIG_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?CONFIG_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    ensure_ets(?TASKS_TABLE, [set, public, named_table]),
-    ensure_ets(?FEEDBACK_TABLE, [ordered_set, public, named_table]),
-    ensure_ets(?CALLBACKS_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?TASKS_TABLE, [set, named_table]),
+    beam_agent_ets:ensure_table(?FEEDBACK_TABLE, [ordered_set, named_table]),
+    beam_agent_ets:ensure_table(?CALLBACKS_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    ensure_ets(?PENDING_TABLE, [set, public, named_table]),
+    beam_agent_ets:ensure_table(?PENDING_TABLE, [set, named_table]),
     ok.
 
 -doc "Clear all control state.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    ets:delete_all_objects(?CONFIG_TABLE),
-    ets:delete_all_objects(?TASKS_TABLE),
-    ets:delete_all_objects(?FEEDBACK_TABLE),
-    ets:delete_all_objects(?CALLBACKS_TABLE),
-    ets:delete_all_objects(?PENDING_TABLE),
+    beam_agent_ets:delete_all_objects(?CONFIG_TABLE),
+    beam_agent_ets:delete_all_objects(?TASKS_TABLE),
+    beam_agent_ets:delete_all_objects(?FEEDBACK_TABLE),
+    beam_agent_ets:delete_all_objects(?CALLBACKS_TABLE),
+    beam_agent_ets:delete_all_objects(?PENDING_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -220,7 +220,7 @@ get_config(SessionId, Key)
 set_config(SessionId, Key, Value)
   when is_binary(SessionId), is_atom(Key) ->
     ensure_tables(),
-    ets:insert(?CONFIG_TABLE, {{SessionId, Key}, Value}),
+    beam_agent_ets:insert(?CONFIG_TABLE, {{SessionId, Key}, Value}),
     ok.
 
 -doc "Get all config for a session as a map.".
@@ -242,7 +242,7 @@ clear_config(SessionId) when is_binary(SessionId) ->
     %% Delete all keys for this session
     ets:foldl(fun
         ({{SId, _} = Key, _}, ok) when SId =:= SessionId ->
-            ets:delete(?CONFIG_TABLE, Key),
+            beam_agent_ets:delete(?CONFIG_TABLE, Key),
             ok;
         (_, ok) ->
             ok
@@ -297,7 +297,7 @@ register_task(SessionId, TaskId, Pid)
         started_at => Now,
         status => running
     },
-    ets:insert(?TASKS_TABLE, {{SessionId, TaskId}, Task}),
+    beam_agent_ets:insert(?TASKS_TABLE, {{SessionId, TaskId}, Task}),
     ok.
 
 -doc "Unregister a task (mark as complete).".
@@ -305,7 +305,7 @@ register_task(SessionId, TaskId, Pid)
 unregister_task(SessionId, TaskId)
   when is_binary(SessionId), is_binary(TaskId) ->
     ensure_tables(),
-    ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
+    beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
     ok.
 
 -doc """
@@ -333,7 +333,7 @@ stop_task(SessionId, TaskId)
                     ok
             end,
             Updated = Task#{status => stopped},
-            ets:insert(?TASKS_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?TASKS_TABLE, {Key, Updated}),
             ok;
         [{_, #{status := stopped}}] ->
             ok;
@@ -363,14 +363,14 @@ submit_feedback(SessionId, Feedback)
   when is_binary(SessionId), is_map(Feedback) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    Seq = ets:update_counter(?FEEDBACK_TABLE, {SessionId, seq},
+    Seq = beam_agent_ets:update_counter(?FEEDBACK_TABLE, {SessionId, seq},
         {2, 1}, {{SessionId, seq}, 0}),
     Entry = Feedback#{
         submitted_at => Now,
         session_id => SessionId,
         seq => Seq
     },
-    ets:insert(?FEEDBACK_TABLE, {{SessionId, Seq}, Entry}),
+    beam_agent_ets:insert(?FEEDBACK_TABLE, {{SessionId, Seq}, Entry}),
     beam_agent_events:publish(SessionId, #{
         type => system,
         subtype => <<"feedback_submitted">>,
@@ -403,7 +403,7 @@ clear_feedback(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     ets:foldl(fun
         ({{SId, _} = Key, _}, ok) when SId =:= SessionId ->
-            ets:delete(?FEEDBACK_TABLE, Key),
+            beam_agent_ets:delete(?FEEDBACK_TABLE, Key),
             ok;
         (_, ok) ->
             ok
@@ -429,9 +429,9 @@ register_session_callbacks(SessionId, Opts)
     }),
     case map_size(CallbackState) of
         0 ->
-            ets:delete(?CALLBACKS_TABLE, SessionId);
+            beam_agent_ets:delete(?CALLBACKS_TABLE, SessionId);
         _ ->
-            ets:insert(?CALLBACKS_TABLE, {SessionId, CallbackState})
+            beam_agent_ets:insert(?CALLBACKS_TABLE, {SessionId, CallbackState})
     end,
     ok.
 
@@ -439,7 +439,7 @@ register_session_callbacks(SessionId, Opts)
 -spec clear_session_callbacks(binary()) -> ok.
 clear_session_callbacks(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    ets:delete(?CALLBACKS_TABLE, SessionId),
+    beam_agent_ets:delete(?CALLBACKS_TABLE, SessionId),
     ok.
 
 -doc "Request canonical permission handling for a session.".
@@ -548,7 +548,7 @@ store_pending_request(SessionId, RequestId, Request)
         status => pending,
         created_at => Now
     },
-    ets:insert(?PENDING_TABLE, {{SessionId, RequestId}, Entry}),
+    beam_agent_ets:insert(?PENDING_TABLE, {{SessionId, RequestId}, Entry}),
     beam_agent_events:publish(SessionId, #{
         type => system,
         subtype => <<"pending_request_stored">>,
@@ -576,7 +576,7 @@ resolve_pending_request(SessionId, RequestId, Response)
                 response => Response,
                 resolved_at => Now
             },
-            ets:insert(?PENDING_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?PENDING_TABLE, {Key, Updated}),
             beam_agent_events:publish(SessionId, #{
                 type => system,
                 subtype => <<"pending_request_resolved">>,
@@ -750,16 +750,3 @@ publish_control_event(SessionId, Subtype, Payload) ->
         event_class => control,
         timestamp => erlang:system_time(millisecond)
     }).
-
-ensure_ets(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.

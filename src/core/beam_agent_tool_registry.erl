@@ -365,18 +365,8 @@ unregister_server(Name, Registry)
 -doc "Ensure the session registry ETS table exists. Idempotent.".
 -spec ensure_registry_table() -> ok.
 ensure_registry_table() ->
-    case ets:whereis(?SESSION_REGISTRY_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?SESSION_REGISTRY_TABLE,
-                    [set, public, named_table, {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?SESSION_REGISTRY_TABLE,
+        [set, named_table, {read_concurrency, true}]).
 
 -doc """
 Register an MCP registry for a session (keyed by session pid).
@@ -389,7 +379,7 @@ register_session_registry(_Pid, undefined) -> ok;
 register_session_registry(Pid, Registry)
   when is_pid(Pid), is_map(Registry) ->
     ensure_registry_table(),
-    ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Registry}),
+    beam_agent_ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Registry}),
     ok.
 
 -doc "Get the MCP registry for a session by pid.".
@@ -415,7 +405,7 @@ update_session_registry(Pid, UpdateFun)
     case ets:lookup(?SESSION_REGISTRY_TABLE, Pid) of
         [{_, Registry}] ->
             Updated = UpdateFun(Registry),
-            ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Updated}),
+            beam_agent_ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Updated}),
             ok;
         [] ->
             {error, not_found}
@@ -425,7 +415,7 @@ update_session_registry(Pid, UpdateFun)
 -spec unregister_session_registry(pid()) -> ok.
 unregister_session_registry(Pid) when is_pid(Pid) ->
     ensure_registry_table(),
-    ets:delete(?SESSION_REGISTRY_TABLE, Pid),
+    beam_agent_ets:delete(?SESSION_REGISTRY_TABLE, Pid),
     ok.
 
 %%--------------------------------------------------------------------

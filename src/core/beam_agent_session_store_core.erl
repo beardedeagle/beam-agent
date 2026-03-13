@@ -14,8 +14,9 @@ Two ETS tables:
   - `beam_agent_sessions` — session metadata (id, model, cwd, etc.)
   - `beam_agent_session_messages` — messages keyed by {session_id, seq}
 
-Tables are created lazily on first access and are public/named so
-any process can read/write without bottlenecking on a single owner.
+Tables are created lazily on first access via `beam_agent_ets` which
+resolves access mode automatically. Named tables allow any process to
+read/write without bottlenecking on a single owner.
 
 Usage:
 ```erlang
@@ -129,41 +130,31 @@ beam_agent_session_store_core:record_message(SessionId, Message),
 %% Counter table for message sequence numbers per session.
 -define(COUNTERS_TABLE, beam_agent_session_counters).
 
--type session_store_table() ::
-    beam_agent_session_counters |
-    beam_agent_session_messages |
-    beam_agent_sessions.
--type session_store_table_option() ::
-    named_table |
-    ordered_set |
-    public |
-    set |
-    {read_concurrency, true}.
-
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
 
 -doc """
 Ensure ETS tables exist. Idempotent -- safe to call multiple times.
-Tables are public and named so any process can access them.
+Tables are named so any process can access them. Access mode is
+resolved automatically by `beam_agent_ets`.
 """.
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    ensure_table(?SESSIONS_TABLE, [set, public, named_table,
+    beam_agent_ets:ensure_table(?SESSIONS_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    ensure_table(?MESSAGES_TABLE, [ordered_set, public, named_table,
+    beam_agent_ets:ensure_table(?MESSAGES_TABLE, [ordered_set, named_table,
         {read_concurrency, true}]),
-    ensure_table(?COUNTERS_TABLE, [set, public, named_table]),
+    beam_agent_ets:ensure_table(?COUNTERS_TABLE, [set, named_table]),
     ok.
 
 -doc "Clear all session data. Deletes all entries from both tables.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    ets:delete_all_objects(?SESSIONS_TABLE),
-    ets:delete_all_objects(?MESSAGES_TABLE),
-    ets:delete_all_objects(?COUNTERS_TABLE),
+    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
+    beam_agent_ets:delete_all_objects(?MESSAGES_TABLE),
+    beam_agent_ets:delete_all_objects(?COUNTERS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -186,7 +177,7 @@ register_session(SessionId, Meta) when is_binary(SessionId), is_map(Meta) ->
         message_count => 0
     },
     %% insert_new: only insert if not already present
-    ets:insert_new(?SESSIONS_TABLE, {SessionId, Entry}),
+    beam_agent_ets:insert_new(?SESSIONS_TABLE, {SessionId, Entry}),
     ok.
 
 -doc """
@@ -201,7 +192,7 @@ update_session(SessionId, Updates) when is_binary(SessionId), is_map(Updates) ->
     case ets:lookup(?SESSIONS_TABLE, SessionId) of
         [{_, Existing}] ->
             Updated = maps:merge(Existing, Updates#{updated_at => Now}),
-            ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
+            beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
             ok;
         [] ->
             register_session(SessionId, Updates)
@@ -220,8 +211,8 @@ get_session(SessionId) when is_binary(SessionId) ->
 -spec delete_session(binary()) -> ok.
 delete_session(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    ets:delete(?SESSIONS_TABLE, SessionId),
-    ets:delete(?COUNTERS_TABLE, SessionId),
+    beam_agent_ets:delete(?SESSIONS_TABLE, SessionId),
+    beam_agent_ets:delete(?COUNTERS_TABLE, SessionId),
     %% Delete all messages for this session.
     %% Messages are keyed as {SessionId, Seq} in an ordered_set,
     %% so we can efficiently match on the prefix.
@@ -308,9 +299,9 @@ for ordering. Session metadata is auto-created if not present.
 -spec record_message(binary(), beam_agent_core:message()) -> ok.
 record_message(SessionId, Message) when is_binary(SessionId), is_map(Message) ->
     ensure_tables(),
-    Seq = ets:update_counter(?COUNTERS_TABLE, SessionId, {2, 1},
+    Seq = beam_agent_ets:update_counter(?COUNTERS_TABLE, SessionId, {2, 1},
         {SessionId, 0}),
-    ets:insert(?MESSAGES_TABLE, {{SessionId, Seq}, Message}),
+    beam_agent_ets:insert(?MESSAGES_TABLE, {{SessionId, Seq}, Message}),
     %% Update session metadata
     update_message_count(SessionId, Message),
     ok = publish_session_event(SessionId, Message),
@@ -525,26 +516,6 @@ message_count(SessionId) when is_binary(SessionId) ->
     end.
 
 %%--------------------------------------------------------------------
-%% Internal: ETS Table Management
-%%--------------------------------------------------------------------
-
--spec ensure_table(session_store_table(), [session_store_table_option(), ...]) -> ok.
-ensure_table(Name, Opts) ->
-    case ets:whereis(Name) of
-        undefined ->
-            try
-                _ = ets:new(Name, Opts),
-                ok
-            catch
-                error:badarg ->
-                    %% Race condition: another process created it first
-                    ok
-            end;
-        _Tid ->
-            ok
-    end.
-
-%%--------------------------------------------------------------------
 %% Internal: Filter Matching
 %%--------------------------------------------------------------------
 
@@ -672,7 +643,7 @@ update_message_count(SessionId, Message) ->
             %% Extract model from system init or result messages
             Updates2 = maybe_extract_model(Message, Updates),
             Updated = maps:merge(Existing, Updates2),
-            ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
+            beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
             ok;
         [] ->
             %% Auto-create session entry if not registered
@@ -846,7 +817,7 @@ delete_from(Key, SessionId) ->
         '$end_of_table' ->
             ok;
         {SessionId, _Seq} = NextKey ->
-            ets:delete(?MESSAGES_TABLE, NextKey),
+            beam_agent_ets:delete(?MESSAGES_TABLE, NextKey),
             delete_from(Key, SessionId);
         _OtherSession ->
             ok

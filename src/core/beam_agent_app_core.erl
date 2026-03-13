@@ -49,24 +49,14 @@
 -doc "Ensure the apps ETS table exists. Idempotent.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?TABLE, [set, public, named_table,
-                    {read_concurrency, true}]),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beam_agent_ets:ensure_table(?TABLE, [set, named_table,
+        {read_concurrency, true}]).
 
 -doc "Clear all app data.".
 -spec clear() -> ok.
 clear() ->
     ensure_table(),
-    ets:delete_all_objects(?TABLE),
+    beam_agent_ets:delete_all_objects(?TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -105,7 +95,7 @@ register_app(Session, AppId, Opts)
         metadata => Meta,
         status   => maps:get(status, Opts, maps:get(status, Existing, active))
     },
-    ets:insert(?TABLE, {Key, Entry}),
+    beam_agent_ets:insert(?TABLE, {Key, Entry}),
     {ok, Entry}.
 
 -doc "List all apps registered for `Session`. Equivalent to `apps_list(Session, #{})`.".
@@ -199,7 +189,7 @@ app_log(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
             },
             Log0  = maps:get(log, Entry, []),
             Entry2 = Entry#{log => [LogEntry | Log0]},
-            ets:insert(?TABLE, {Key, Entry2}),
+            beam_agent_ets:insert(?TABLE, {Key, Entry2}),
             ok
     end.
 
@@ -224,7 +214,7 @@ unregister_app(Session, AppId)
   when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
     ensure_table(),
     Key = {session_key(Session), AppId},
-    ets:delete(?TABLE, Key),
+    beam_agent_ets:delete(?TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------
