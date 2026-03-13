@@ -1146,6 +1146,14 @@ debug_args(Opts) ->
     end,
     D ++ DF.
 
+-doc """
+Build CLI flags from the `extra_args' session option.
+
+`extra_args' is a developer-controlled map supplied in session opts at
+startup — it does NOT originate from AI model output. Each key becomes
+a `--key' CLI flag; null values produce bare flags, binary values produce
+`--key value' pairs. Callers are responsible for passing only safe keys.
+""".
 -spec extra_args(map()) -> [string()].
 extra_args(Opts) ->
     case maps:get(extra_args, Opts, undefined) of

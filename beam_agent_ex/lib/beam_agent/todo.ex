@@ -2,7 +2,7 @@ defmodule BeamAgent.Todo do
   @moduledoc """
   Todo tracking helpers for BeamAgent message streams.
 
-  This module extracts, filters, and summarises todo items from the message
+  This module extracts, filters, and summarizes todo items from the message
   history produced by any agentic coder backend. Backends emit structured todo
   lists as part of their message streams; this module provides a uniform API for
   consuming them regardless of which backend produced the messages.
@@ -81,7 +81,7 @@ defmodule BeamAgent.Todo do
   defdelegate filter_by_status(todos, status), to: :beam_agent_todo
 
   @doc """
-  Summarise a todo list as a count map.
+  Summarize a todo list as a count map.
 
   Returns a map with `:total` and one key per distinct status (`:pending`,
   `:in_progress`, `:completed`), giving counts at a glance.
