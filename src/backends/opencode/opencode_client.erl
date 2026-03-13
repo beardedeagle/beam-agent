@@ -390,7 +390,7 @@ config_value_write(Session, KeyPath, Value) ->
                             {ok, map()} | {error, _}.
 config_value_write(Session, KeyPath, Value, Opts)
     when is_binary(KeyPath), is_map(Opts) ->
-    beam_agent_config:config_value_write(Session, KeyPath, Value, Opts).
+    beam_agent_config_core:config_value_write(Session, KeyPath, Value, Opts).
 -spec config_batch_write(pid(), [map()]) -> {ok, map()} | {error, _}.
 config_batch_write(Session, Edits) ->
     config_batch_write(Session, Edits, #{}).
@@ -398,19 +398,19 @@ config_batch_write(Session, Edits) ->
                             {ok, map()} | {error, _}.
 config_batch_write(Session, Edits, Opts)
     when is_list(Edits), is_map(Opts) ->
-    beam_agent_config:config_batch_write(Session, Edits, Opts).
+    beam_agent_config_core:config_batch_write(Session, Edits, Opts).
 -spec config_requirements_read(pid()) -> {ok, map()}.
 config_requirements_read(Session) ->
-    beam_agent_config:config_requirements_read(Session).
+    beam_agent_config_core:config_requirements_read(Session).
 -spec external_agent_config_detect(pid()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session) ->
     external_agent_config_detect(Session, #{}).
 -spec external_agent_config_detect(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session, Opts) when is_map(Opts) ->
-    beam_agent_config:external_agent_config_detect(Session, Opts).
+    beam_agent_config_core:external_agent_config_detect(Session, Opts).
 -spec external_agent_config_import(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_import(Session, Opts) when is_map(Opts) ->
-    beam_agent_config:external_agent_config_import(Session, Opts).
+    beam_agent_config_core:external_agent_config_import(Session, Opts).
 -spec list_commands(pid()) -> {ok, map()} | {error, term()}.
 list_commands(Session) ->
     gen_statem:call(Session, list_commands, 10000).

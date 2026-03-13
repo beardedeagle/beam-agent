@@ -35,7 +35,7 @@
         beam_agent_checkpoint_core,
         beam_agent_collaboration,
         beam_agent_command_core,
-        beam_agent_config,
+        beam_agent_config_core,
         beam_agent_content_core,
         beam_agent_control_core,
         beam_agent_ets,

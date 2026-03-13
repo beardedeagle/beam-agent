@@ -4,7 +4,7 @@
 
 config_requirements_include_provider_catalog_test() ->
     Session = fake_session(<<"config-req-session">>, gemini),
-    {ok, Requirements} = beam_agent_config:config_requirements_read(Session),
+    {ok, Requirements} = beam_agent_config_core:config_requirements_read(Session),
     Providers = maps:get(providers, Requirements),
     ?assert(lists:any(fun(#{id := <<"openai">>}) -> true; (_) -> false end, Providers)),
     ?assert(lists:any(fun(#{id := <<"google">>}) -> true; (_) -> false end, Providers)),
@@ -15,7 +15,7 @@ provider_auth_methods_follow_current_provider_test() ->
     ok = beam_agent_runtime_core:clear(),
     Session = fake_session(<<"config-auth-session">>, gemini),
     ok = beam_agent_runtime_core:set_provider(Session, <<"google">>),
-    {ok, Methods} = beam_agent_config:provider_auth_methods(Session),
+    {ok, Methods} = beam_agent_config_core:provider_auth_methods(Session),
     ?assert(lists:any(fun
         (#{kind := <<"api_key">>, provider_id := <<"google">>, current := true}) -> true;
         (_) -> false
@@ -30,7 +30,7 @@ provider_auth_methods_follow_current_provider_test() ->
 provider_oauth_authorize_includes_provider_metadata_test() ->
     ok = beam_agent_control_core:clear(),
     Session = fake_session(<<"config-oauth-session">>, gemini),
-    {ok, Pending} = beam_agent_config:provider_oauth_authorize(Session, <<"openai">>, #{
+    {ok, Pending} = beam_agent_config_core:provider_oauth_authorize(Session, <<"openai">>, #{
         authorize_url => <<"https://example.test/oauth">>
     }),
     ?assertEqual(<<"oauth_callback">>, maps:get(auth_method, Pending)),

@@ -2512,7 +2512,7 @@ to authenticate before calling provider_oauth_authorize/3 or
 setting credentials directly.
 
 Tries the backend-native implementation first; falls back to the
-universal layer (beam_agent_config:provider_auth_methods/1) if the
+universal layer (beam_agent_config_core:provider_auth_methods/1) if the
 backend does not provide one.
 
 Session is the pid of a running beam_agent session.
@@ -2523,7 +2523,7 @@ Returns {ok, List} of auth method maps on success, or
 -spec provider_auth_methods(pid()) -> {ok, term()} | {error, term()}.
 provider_auth_methods(Session) ->
     native_or(Session, provider_auth_methods, [], fun() ->
-        beam_agent_config:provider_auth_methods(Session)
+        beam_agent_config_core:provider_auth_methods(Session)
     end).
 
 -doc """
@@ -2535,7 +2535,7 @@ the provider redirects to the callback URI with an authorization
 code, which you then pass to provider_oauth_callback/3.
 
 Tries the backend-native implementation first; falls back to the
-universal layer (beam_agent_config:provider_oauth_authorize/3) if
+universal layer (beam_agent_config_core:provider_oauth_authorize/3) if
 the backend does not provide one.
 
 Session is the pid of a running beam_agent session. ProviderId is
@@ -2559,7 +2559,7 @@ Example:
 -spec provider_oauth_authorize(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
 provider_oauth_authorize(Session, ProviderId, Body) ->
     native_or(Session, provider_oauth_authorize, [ProviderId, Body], fun() ->
-        beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body)
+        beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body)
     end).
 
 -doc """
@@ -2571,7 +2571,7 @@ this after the user has authorized via the URL returned by
 provider_oauth_authorize/3.
 
 Tries the backend-native implementation first; falls back to the
-universal layer (beam_agent_config:provider_oauth_callback/3) if
+universal layer (beam_agent_config_core:provider_oauth_callback/3) if
 the backend does not provide one.
 
 Session is the pid of a running beam_agent session. ProviderId is
@@ -2588,7 +2588,7 @@ the exchange fails.
 -spec provider_oauth_callback(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
 provider_oauth_callback(Session, ProviderId, Body) ->
     native_or(Session, provider_oauth_callback, [ProviderId, Body], fun() ->
-        beam_agent_config:provider_oauth_callback(Session, ProviderId, Body)
+        beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body)
     end).
 
 -doc """
@@ -2703,7 +2703,7 @@ universal fallback delegates to beam_agent_config.
 """.
 -spec config_read(pid()) -> {ok, map()} | {error, term()}.
 config_read(Session) ->
-    native_or(Session, config_read, [], fun() -> beam_agent_config:config_read(Session) end).
+    native_or(Session, config_read, [], fun() -> beam_agent_config_core:config_read(Session) end).
 
 -doc """
 Read the session configuration with additional options.
@@ -2714,7 +2714,7 @@ Opts and returns the full configuration.
 """.
 -spec config_read(pid(), map()) -> {ok, map()} | {error, term()}.
 config_read(Session, Opts) ->
-    native_or(Session, config_read, [Opts], fun() -> beam_agent_config:config_read(Session) end).
+    native_or(Session, config_read, [Opts], fun() -> beam_agent_config_core:config_read(Session) end).
 
 -doc """
 Update the session configuration with a partial patch.
@@ -2727,7 +2727,7 @@ backend (e.g., read-only keys).
 -spec config_update(pid(), map()) -> {ok, term()} | {error, term()}.
 config_update(Session, Body) ->
     native_or(Session, config_update, [Body], fun() ->
-        beam_agent_config:config_update(Session, Body)
+        beam_agent_config_core:config_update(Session, Body)
     end).
 
 -doc """
@@ -2873,7 +2873,7 @@ value is invalid.
 -spec config_value_write(pid(), binary(), term(), map()) -> {ok, term()} | {error, term()}.
 config_value_write(Session, KeyPath, Value, Opts) ->
     native_or(Session, config_value_write, [KeyPath, Value, Opts], fun() ->
-        beam_agent_config:config_value_write(Session, KeyPath, Value, Opts)
+        beam_agent_config_core:config_value_write(Session, KeyPath, Value, Opts)
     end).
 
 -doc """
@@ -2897,7 +2897,7 @@ or {error, Reason} if any edit fails validation.
 -spec config_batch_write(pid(), [map()], map()) -> {ok, term()} | {error, term()}.
 config_batch_write(Session, Edits, Opts) ->
     native_or(Session, config_batch_write, [Edits, Opts], fun() ->
-        beam_agent_config:config_batch_write(Session, Edits, Opts)
+        beam_agent_config_core:config_batch_write(Session, Edits, Opts)
     end).
 
 -doc """
@@ -2910,7 +2910,7 @@ UIs or validating user input before calling config_update/2.
 -spec config_requirements_read(pid()) -> {ok, term()} | {error, term()}.
 config_requirements_read(Session) ->
     native_or(Session, config_requirements_read, [], fun() ->
-        beam_agent_config:config_requirements_read(Session)
+        beam_agent_config_core:config_requirements_read(Session)
     end).
 
 -doc """
@@ -2935,7 +2935,7 @@ files with their format, path, and a summary of their contents.
 -spec external_agent_config_detect(pid(), map()) -> {ok, term()} | {error, term()}.
 external_agent_config_detect(Session, Opts) ->
     native_or(Session, external_agent_config_detect, [Opts], fun() ->
-        beam_agent_config:external_agent_config_detect(Session, Opts)
+        beam_agent_config_core:external_agent_config_detect(Session, Opts)
     end).
 
 -doc """
@@ -2949,7 +2949,7 @@ of the config to import.
 -spec external_agent_config_import(pid(), map()) -> {ok, term()} | {error, term()}.
 external_agent_config_import(Session, Opts) ->
     native_or(Session, external_agent_config_import, [Opts], fun() ->
-        beam_agent_config:external_agent_config_import(Session, Opts)
+        beam_agent_config_core:external_agent_config_import(Session, Opts)
     end).
 
 -doc """
@@ -3299,7 +3299,7 @@ The universal fallback persists this as a configuration value.
 -spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, term()} | {error, term()}.
 set_max_thinking_tokens(Session, MaxTokens) ->
     native_or(Session, set_max_thinking_tokens, [MaxTokens], fun() ->
-        _ = beam_agent_config:config_value_write(
+        _ = beam_agent_config_core:config_value_write(
             Session, <<"max_thinking_tokens">>, MaxTokens, #{}),
         {ok, with_universal_source(Session, #{
             max_thinking_tokens => MaxTokens})}
@@ -3762,17 +3762,12 @@ collect_messages(Session, Ref, Deadline, ReceiveFun, TerminalPred) ->
 
 -spec native_call(pid(), atom(), [term()]) -> {ok, term()} | {error, term()}.
 native_call(Session, Function, Args) ->
-    beam_agent_raw_core:call(Session, Function, Args).
+    beam_agent_core:native_call(Session, Function, Args).
 
 -spec native_or(pid(), atom(), [term()], fun(() -> {ok, term()} | {error, term()})) ->
     {ok, term()} | {error, term()}.
 native_or(Session, Function, Args, Fallback) ->
-    case native_call(Session, Function, Args) of
-        {error, {unsupported_native_call, _}} ->
-            Fallback();
-        Other ->
-            Other
-    end.
+    beam_agent_core:native_or(Session, Function, Args, Fallback).
 
 -spec session_file_opts(pid()) -> beam_agent_file_core:search_opts().
 session_file_opts(Session) ->
@@ -3955,13 +3950,7 @@ universal_session_destroy(Session, SessionId) ->
 
 -spec with_universal_source(pid(), map()) -> map().
 with_universal_source(Session, Result) ->
-    Base = Result#{source => universal},
-    case backend(Session) of
-        {ok, Backend} ->
-            Base#{backend => Backend};
-        {error, _} ->
-            Base
-    end.
+    beam_agent_core:with_universal_source(Session, Result).
 
 -spec active_thread_id(binary()) -> binary() | undefined.
 active_thread_id(SessionId) ->
@@ -4057,42 +4046,20 @@ maybe_put_selector(Key, Value, Acc) ->
     Acc#{Key => Value}.
 
 -spec opt_value([term()], map(), term()) -> term().
-opt_value([], _Opts, Default) ->
-    Default;
-opt_value([Key | Rest], Opts, Default) ->
-    case maps:find(Key, Opts) of
-        {ok, Value} ->
-            Value;
-        error ->
-            opt_value(Rest, Opts, Default)
-    end.
+opt_value(Keys, Opts, Default) ->
+    beam_agent_core:opt_value(Keys, Opts, Default).
 
 -spec safe_session_health(pid()) -> atom().
 safe_session_health(Session) ->
-    try health(Session) of
-        Value -> Value
-    catch
-        _:_ -> unknown
-    end.
+    beam_agent_core:safe_session_health(Session).
 
 -spec session_identity(pid()) -> binary().
 session_identity(Session) ->
-    case session_info(Session) of
-        {ok, #{session_id := SessionId}} when is_binary(SessionId),
-                                              byte_size(SessionId) > 0 ->
-            SessionId;
-        _ ->
-            unicode:characters_to_binary(erlang:pid_to_list(Session))
-    end.
+    beam_agent_core:session_identity(Session).
 
 -spec with_session_backend(pid(), map()) -> map().
 with_session_backend(Session, Params) when is_map(Params) ->
-    case backend(Session) of
-        {ok, Backend} ->
-            maps:put(backend, Backend, Params);
-        _ ->
-            Params
-    end.
+    beam_agent_core:with_session_backend(Session, Params).
 
 -spec normalize_prompt_async_result(pid(), term()) -> map().
 normalize_prompt_async_result(Session, Result) when is_map(Result) ->
@@ -4200,7 +4167,4 @@ escape_single_quotes([Char | Rest]) ->
 
 -spec session_backend(pid()) -> backend() | undefined.
 session_backend(Session) ->
-    case backend(Session) of
-        {ok, Backend} -> Backend;
-        _ -> undefined
-    end.
+    beam_agent_core:session_backend(Session).

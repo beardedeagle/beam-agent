@@ -442,7 +442,7 @@ config_read(Session, Params) when is_map(Params) ->
            session := map()}} |
     {error, term()}.
 config_update(Session, Body) when is_map(Body) ->
-    beam_agent_config:config_update(Session, Body).
+    beam_agent_config_core:config_update(Session, Body).
 -spec config_providers(pid()) -> {ok, [map()]}.
 config_providers(Session) ->
     provider_list(Session).
@@ -489,17 +489,17 @@ provider_list(Session) ->
     beam_agent_runtime_core:list_providers(Session).
 -spec provider_auth_methods(pid()) -> {ok, [map()]}.
 provider_auth_methods(Session) ->
-    beam_agent_config:provider_auth_methods(Session).
+    beam_agent_config_core:provider_auth_methods(Session).
 -spec provider_oauth_authorize(pid(), binary(), map()) ->
                                   {ok, map()}.
 provider_oauth_authorize(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body).
+    beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body).
 -spec provider_oauth_callback(pid(), binary(), map()) ->
                                  {ok, map()} | {error, invalid_api_key | invalid_provider_config}.
 provider_oauth_callback(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config:provider_oauth_callback(Session, ProviderId, Body).
+    beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body).
 -spec mcp_server_oauth_login(pid(), map()) ->
                                 {ok, map()} | {error, term()}.
 mcp_server_oauth_login(Session, Params) when is_map(Params) ->

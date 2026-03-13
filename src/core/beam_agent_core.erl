@@ -90,7 +90,16 @@ v0.2.66 for protocol fidelity:
     parse_permission_mode/1,
     %% Generic message collection loop
     collect_messages/4,
-    collect_messages/5
+    collect_messages/5,
+    %% Shared routing helpers (used by all public domain modules)
+    native_call/3,
+    native_or/4,
+    with_universal_source/2,
+    session_backend/1,
+    with_session_backend/2,
+    safe_session_health/1,
+    opt_value/3,
+    session_identity/1
 ]).
 
 -export_type([
@@ -814,6 +823,92 @@ parse_permission_mode(<<"bypassPermissions">>) -> bypass_permissions;
 parse_permission_mode(<<"plan">>)              -> plan;
 parse_permission_mode(<<"dontAsk">>)           -> dont_ask;
 parse_permission_mode(_)                       -> default.
+
+%%--------------------------------------------------------------------
+%% Shared Routing Helpers
+%%--------------------------------------------------------------------
+%% These helpers are used by all public domain modules for native-first
+%% routing with universal fallbacks.
+
+-doc "Invoke a native backend function via the raw core transport.".
+-spec native_call(pid(), atom(), [term()]) -> {ok, term()} | {error, term()}.
+native_call(Session, Function, Args) ->
+    beam_agent_raw_core:call(Session, Function, Args).
+
+-doc """
+Try a native backend call; on `{error, {unsupported_native_call, _}}`
+fall back to the universal implementation supplied by `Fallback`.
+""".
+-spec native_or(pid(), atom(), [term()], fun(() -> {ok, term()} | {error, term()})) ->
+    {ok, term()} | {error, term()}.
+native_or(Session, Function, Args, Fallback) ->
+    case native_call(Session, Function, Args) of
+        {error, {unsupported_native_call, _}} ->
+            Fallback();
+        Other ->
+            Other
+    end.
+
+-doc "Annotate a result map with `source => universal` and the session backend.".
+-spec with_universal_source(pid(), map()) -> map().
+with_universal_source(Session, Result) ->
+    Base = Result#{source => universal},
+    case backend(Session) of
+        {ok, Backend} ->
+            Base#{backend => Backend};
+        {error, _} ->
+            Base
+    end.
+
+-doc "Extract the backend atom from a session, or `undefined` if unavailable.".
+-spec session_backend(pid()) -> backend() | undefined.
+session_backend(Session) ->
+    case backend(Session) of
+        {ok, Backend} -> Backend;
+        _ -> undefined
+    end.
+
+-doc "Annotate a params map with the session's backend atom.".
+-spec with_session_backend(pid(), map()) -> map().
+with_session_backend(Session, Params) when is_map(Params) ->
+    case backend(Session) of
+        {ok, Backend} ->
+            maps:put(backend, Backend, Params);
+        _ ->
+            Params
+    end.
+
+-doc "Wrap `health/1` in a try/catch, returning `unknown` on any failure.".
+-spec safe_session_health(pid()) -> atom().
+safe_session_health(Session) ->
+    try health(Session) of
+        Value -> Value
+    catch
+        _:_ -> unknown
+    end.
+
+-doc "Multi-key option lookup with default. Tries each key in order.".
+-spec opt_value([term()], map(), term()) -> term().
+opt_value([], _Opts, Default) ->
+    Default;
+opt_value([Key | Rest], Opts, Default) ->
+    case maps:find(Key, Opts) of
+        {ok, Value} ->
+            Value;
+        error ->
+            opt_value(Rest, Opts, Default)
+    end.
+
+-doc "Extract the session ID binary from a live session pid.".
+-spec session_identity(pid()) -> binary().
+session_identity(Session) ->
+    case session_info(Session) of
+        {ok, #{session_id := SessionId}} when is_binary(SessionId),
+                                              byte_size(SessionId) > 0 ->
+            SessionId;
+        _ ->
+            unicode:characters_to_binary(erlang:pid_to_list(Session))
+    end.
 
 %%--------------------------------------------------------------------
 %% Internal: Common field extraction
