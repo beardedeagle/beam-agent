@@ -15,7 +15,7 @@ small, contention is low, and lookups are on the hot path for query routing.
 """.
 
 -export([
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     available_backends/0,
     normalize/1,
@@ -46,15 +46,15 @@ small, contention is low, and lookups are on the hot path for query routing.
 -define(SESSIONS_TABLE, beam_agent_backend_sessions).
 
 -doc "Ensure the pid-to-backend ETS table exists.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?SESSIONS_TABLE,
         [set, named_table, {read_concurrency, true}]).
 
 -doc "Clear the backend registry.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
     ok.
 
@@ -110,7 +110,7 @@ adapter_module(copilot) -> copilot_client.
 -spec register_session(pid(), backend() | binary() | atom()) ->
     {ok, backend()} | {error, term()}.
 register_session(Session, BackendLike) when is_pid(Session) ->
-    ensure_table(),
+    ensure_tables(),
     case normalize(BackendLike) of
         {ok, Backend} ->
             beam_agent_ets:insert(?SESSIONS_TABLE, {Session, Backend}),
@@ -122,7 +122,7 @@ register_session(Session, BackendLike) when is_pid(Session) ->
 -doc "Remove a session pid from the backend cache.".
 -spec unregister_session(pid()) -> ok.
 unregister_session(Session) when is_pid(Session) ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete(?SESSIONS_TABLE, Session),
     ok.
 
@@ -136,7 +136,7 @@ Resolution order:
 """.
 -spec session_backend(pid()) -> {ok, backend()} | {error, backend_lookup_error()}.
 session_backend(Session) when is_pid(Session) ->
-    ensure_table(),
+    ensure_tables(),
     case ets:lookup(?SESSIONS_TABLE, Session) of
         [{_, Backend}] ->
             {ok, Backend};

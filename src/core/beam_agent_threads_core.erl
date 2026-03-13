@@ -26,7 +26,7 @@ Usage:
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% Thread operations
     start_thread/2,
@@ -98,8 +98,8 @@ Usage:
 %%--------------------------------------------------------------------
 
 -doc "Ensure the threads ETS table exists. Idempotent.".
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?THREADS_TABLE,
         [set, named_table, {read_concurrency, true}]),
     beam_agent_ets:ensure_table(?ACTIVE_TABLE,
@@ -109,7 +109,7 @@ ensure_table() ->
 -doc "Clear all thread data.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?THREADS_TABLE),
     beam_agent_ets:delete_all_objects(?ACTIVE_TABLE),
     ok.
@@ -125,7 +125,7 @@ Returns the thread metadata.
 """.
 -spec start_thread(binary(), thread_opts()) -> {ok, thread_meta()}.
 start_thread(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
-    ensure_table(),
+    ensure_tables(),
     ThreadId = maps:get(thread_id, Opts,
         generate_thread_id()),
     Now = erlang:system_time(millisecond),
@@ -199,7 +199,7 @@ Returns `{error, not_found}` if the thread doesn't exist.
     {ok, thread_meta()} | {error, not_found}.
 resume_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, ThreadId},
     case ets:lookup(?THREADS_TABLE, Key) of
         [{_, Thread}] ->
@@ -218,7 +218,7 @@ resume_thread(SessionId, ThreadId)
 -doc "List all threads for a session, sorted by `updated_at` descending.".
 -spec list_threads(binary()) -> {ok, [thread_meta()]}.
 list_threads(SessionId) when is_binary(SessionId) ->
-    ensure_table(),
+    ensure_tables(),
     Threads = ets:foldl(fun
         ({{SId, _}, Thread}, Acc) when SId =:= SessionId ->
             [Thread | Acc];
@@ -235,7 +235,7 @@ list_threads(SessionId) when is_binary(SessionId) ->
     {ok, thread_meta()} | {error, not_found}.
 get_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, ThreadId},
     case ets:lookup(?THREADS_TABLE, Key) of
         [{_, Thread}] -> {ok, Thread};
@@ -274,7 +274,7 @@ read_thread(SessionId, ThreadId, Opts)
 -spec delete_thread(binary(), binary()) -> ok.
 delete_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, ThreadId},
     beam_agent_ets:delete(?THREADS_TABLE, Key),
     %% Clear active thread if this was it
@@ -376,7 +376,7 @@ Also records the message in the session store for unified history.
 -spec record_thread_message(binary(), binary(), beam_agent_core:message()) -> ok.
 record_thread_message(SessionId, ThreadId, Message)
   when is_binary(SessionId), is_binary(ThreadId), is_map(Message) ->
-    ensure_table(),
+    ensure_tables(),
     Key = {SessionId, ThreadId},
     case ets:lookup(?THREADS_TABLE, Key) of
         [{_, Thread}] ->
@@ -404,7 +404,7 @@ Filters session messages by `thread_id` tag.
     {ok, [beam_agent_core:message()]} | {error, not_found}.
 get_thread_messages(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
-    ensure_table(),
+    ensure_tables(),
     case get_thread(SessionId, ThreadId) of
         {ok, Thread} ->
             case beam_agent_session_store_core:get_session_messages(SessionId) of
@@ -436,7 +436,7 @@ thread_count(SessionId) when is_binary(SessionId) ->
 -doc "Get the currently active thread for a session.".
 -spec active_thread(binary()) -> {ok, binary()} | {error, none}.
 active_thread(SessionId) when is_binary(SessionId) ->
-    ensure_table(),
+    ensure_tables(),
     case ets:lookup(?ACTIVE_TABLE, SessionId) of
         [{_, ThreadId}] -> {ok, ThreadId};
         [] -> {error, none}
@@ -446,14 +446,14 @@ active_thread(SessionId) when is_binary(SessionId) ->
 -spec set_active_thread(binary(), binary()) -> ok.
 set_active_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:insert(?ACTIVE_TABLE, {SessionId, ThreadId}),
     ok.
 
 -doc "Clear the active thread for a session.".
 -spec clear_active_thread(binary()) -> ok.
 clear_active_thread(SessionId) when is_binary(SessionId) ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete(?ACTIVE_TABLE, SessionId),
     ok.
 

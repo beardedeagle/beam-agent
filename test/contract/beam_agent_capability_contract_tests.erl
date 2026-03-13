@@ -172,7 +172,6 @@ capability_specs() ->
         #{
             id => mcp_management,
             apis => [{beam_agent, mcp_server_status, 1},
-                     {beam_agent, mcp_server_status_list, 1},
                      {beam_agent, mcp_server_oauth_login, 2},
                      {beam_agent, set_mcp_servers, 2},
                      {beam_agent, reconnect_mcp_server, 2},

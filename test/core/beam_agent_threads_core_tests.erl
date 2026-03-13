@@ -2,7 +2,7 @@
 %%% @doc EUnit tests for beam_agent_threads_core (universal thread management).
 %%%
 %%% Tests cover:
-%%%   - Table lifecycle (ensure_table, clear)
+%%%   - Table lifecycle (ensure_tables, clear)
 %%%   - Thread creation (start_thread) with auto-generated and explicit IDs
 %%%   - Thread resumption (resume_thread) including not_found
 %%%   - Thread listing (list_threads) sorted by updated_at descending
@@ -24,13 +24,13 @@
 %%====================================================================
 
 ensure_table_idempotent_test() ->
-    ok = beam_agent_threads_core:ensure_table(),
-    ok = beam_agent_threads_core:ensure_table(),
-    ok = beam_agent_threads_core:ensure_table(),
+    ok = beam_agent_threads_core:ensure_tables(),
+    ok = beam_agent_threads_core:ensure_tables(),
+    ok = beam_agent_threads_core:ensure_tables(),
     beam_agent_threads_core:clear().
 
 clear_removes_all_data_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-clear">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId, #{}),
     {ok, [_]} = beam_agent_threads_core:list_threads(SessionId),
@@ -43,7 +43,7 @@ clear_removes_all_data_test() ->
 %%====================================================================
 
 start_thread_returns_thread_meta_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-start-1">>,
     {ok, Thread} = beam_agent_threads_core:start_thread(SessionId, #{}),
     ?assertEqual(SessionId, maps:get(session_id, Thread)),
@@ -55,7 +55,7 @@ start_thread_returns_thread_meta_test() ->
     beam_agent_threads_core:clear().
 
 start_thread_with_name_option_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-start-2">>,
     {ok, Thread} = beam_agent_threads_core:start_thread(SessionId,
         #{name => <<"my-thread">>}),
@@ -63,7 +63,7 @@ start_thread_with_name_option_test() ->
     beam_agent_threads_core:clear().
 
 start_thread_with_explicit_thread_id_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-start-3">>,
     ExplicitId = <<"explicit-thread-id">>,
     {ok, Thread} = beam_agent_threads_core:start_thread(SessionId,
@@ -72,7 +72,7 @@ start_thread_with_explicit_thread_id_test() ->
     beam_agent_threads_core:clear().
 
 start_thread_auto_generated_id_has_prefix_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-start-4">>,
     {ok, Thread} = beam_agent_threads_core:start_thread(SessionId, #{}),
     ThreadId = maps:get(thread_id, Thread),
@@ -80,7 +80,7 @@ start_thread_auto_generated_id_has_prefix_test() ->
     beam_agent_threads_core:clear().
 
 start_thread_sets_active_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-start-5">>,
     {ok, Thread} = beam_agent_threads_core:start_thread(SessionId, #{}),
     ThreadId = maps:get(thread_id, Thread),
@@ -92,7 +92,7 @@ start_thread_sets_active_test() ->
 %%====================================================================
 
 resume_thread_sets_active_and_status_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-resume-1">>,
     {ok, T1} = beam_agent_threads_core:start_thread(SessionId,
         #{thread_id => <<"t-resume-a">>}),
@@ -107,14 +107,14 @@ resume_thread_sets_active_and_status_test() ->
     beam_agent_threads_core:clear().
 
 resume_thread_not_found_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     Result = beam_agent_threads_core:resume_thread(<<"sess-resume-2">>,
         <<"no-such-thread">>),
     ?assertEqual({error, not_found}, Result),
     beam_agent_threads_core:clear().
 
 resume_thread_updates_updated_at_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-resume-3">>,
     ThreadId = <<"t-resume-time">>,
     {ok, Original} = beam_agent_threads_core:start_thread(SessionId,
@@ -129,13 +129,13 @@ resume_thread_updates_updated_at_test() ->
 %%====================================================================
 
 list_threads_empty_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     {ok, List} = beam_agent_threads_core:list_threads(<<"sess-list-empty">>),
     ?assertEqual([], List),
     beam_agent_threads_core:clear().
 
 list_threads_returns_only_own_session_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     {ok, _} = beam_agent_threads_core:start_thread(<<"sess-list-A">>,
         #{thread_id => <<"t-A1">>}),
     {ok, _} = beam_agent_threads_core:start_thread(<<"sess-list-B">>,
@@ -149,7 +149,7 @@ list_threads_returns_only_own_session_test() ->
     beam_agent_threads_core:clear().
 
 list_threads_sorted_newest_first_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-list-order">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId,
         #{thread_id => <<"t-order-1">>}),
@@ -171,7 +171,7 @@ list_threads_sorted_newest_first_test() ->
 %%====================================================================
 
 get_thread_found_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-get-1">>,
     ThreadId = <<"t-get-1">>,
     {ok, Created} = beam_agent_threads_core:start_thread(SessionId,
@@ -181,7 +181,7 @@ get_thread_found_test() ->
     beam_agent_threads_core:clear().
 
 get_thread_not_found_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     Result = beam_agent_threads_core:get_thread(<<"sess-get-2">>,
         <<"no-such-thread">>),
     ?assertEqual({error, not_found}, Result),
@@ -192,7 +192,7 @@ get_thread_not_found_test() ->
 %%====================================================================
 
 delete_thread_removes_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-del-1">>,
     ThreadId = <<"t-del-1">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId,
@@ -204,7 +204,7 @@ delete_thread_removes_thread_test() ->
     beam_agent_threads_core:clear().
 
 delete_thread_clears_active_if_it_was_active_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-del-2">>,
     ThreadId = <<"t-del-active">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId,
@@ -217,7 +217,7 @@ delete_thread_clears_active_if_it_was_active_test() ->
     beam_agent_threads_core:clear().
 
 delete_thread_does_not_clear_active_for_other_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-del-3">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId,
         #{thread_id => <<"t-del-other-1">>}),
@@ -234,7 +234,7 @@ delete_thread_does_not_clear_active_for_other_thread_test() ->
 %%====================================================================
 
 record_thread_message_increments_count_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-msg-1">>,
     ThreadId = <<"t-msg-1">>,
@@ -251,7 +251,7 @@ record_thread_message_increments_count_test() ->
     beam_agent_session_store_core:clear().
 
 record_thread_message_updates_updated_at_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-msg-2">>,
     ThreadId = <<"t-msg-2">>,
@@ -266,7 +266,7 @@ record_thread_message_updates_updated_at_test() ->
     beam_agent_session_store_core:clear().
 
 record_thread_message_nonexistent_thread_is_noop_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-msg-3">>,
     Msg = #{type => result, content => <<"noop">>},
@@ -281,7 +281,7 @@ record_thread_message_nonexistent_thread_is_noop_test() ->
 %%====================================================================
 
 get_thread_messages_found_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-getmsg-1">>,
     ThreadId = <<"t-getmsg-1">>,
@@ -297,7 +297,7 @@ get_thread_messages_found_test() ->
     beam_agent_session_store_core:clear().
 
 get_thread_messages_not_found_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     Result = beam_agent_threads_core:get_thread_messages(<<"sess-getmsg-2">>,
         <<"no-such-thread">>),
@@ -306,7 +306,7 @@ get_thread_messages_not_found_test() ->
     beam_agent_session_store_core:clear().
 
 get_thread_messages_filters_by_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-getmsg-3">>,
     ThreadIdA = <<"t-getmsg-A">>,
@@ -335,7 +335,7 @@ get_thread_messages_filters_by_thread_test() ->
 %%====================================================================
 
 fork_thread_copies_visible_messages_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-fork-thread">>,
     SourceThreadId = <<"t-fork-source">>,
@@ -355,7 +355,7 @@ fork_thread_copies_visible_messages_test() ->
     beam_agent_session_store_core:clear().
 
 read_thread_with_messages_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-read-thread">>,
     ThreadId = <<"t-read-thread">>,
@@ -371,7 +371,7 @@ read_thread_with_messages_test() ->
     beam_agent_session_store_core:clear().
 
 archive_and_unarchive_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-archive-thread">>,
     ThreadId = <<"t-archive-thread">>,
     {ok, _} = beam_agent_threads_core:start_thread(SessionId, #{thread_id => ThreadId}),
@@ -384,7 +384,7 @@ archive_and_unarchive_thread_test() ->
     beam_agent_threads_core:clear().
 
 rollback_thread_hides_visible_messages_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     beam_agent_session_store_core:ensure_tables(),
     SessionId = <<"sess-rollback-thread">>,
     ThreadId = <<"t-rollback-thread">>,
@@ -407,12 +407,12 @@ rollback_thread_hides_visible_messages_test() ->
 %%====================================================================
 
 thread_count_empty_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     ?assertEqual(0, beam_agent_threads_core:thread_count(<<"sess-count-empty">>)),
     beam_agent_threads_core:clear().
 
 thread_count_increments_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-count-1">>,
     ?assertEqual(0, beam_agent_threads_core:thread_count(SessionId)),
     {ok, _} = beam_agent_threads_core:start_thread(SessionId,
@@ -424,7 +424,7 @@ thread_count_increments_test() ->
     beam_agent_threads_core:clear().
 
 thread_count_isolated_per_session_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     {ok, _} = beam_agent_threads_core:start_thread(<<"sess-count-A">>,
         #{thread_id => <<"t-iso-1">>}),
     {ok, _} = beam_agent_threads_core:start_thread(<<"sess-count-A">>,
@@ -440,13 +440,13 @@ thread_count_isolated_per_session_test() ->
 %%====================================================================
 
 active_thread_none_initially_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     ?assertEqual({error, none},
         beam_agent_threads_core:active_thread(<<"sess-active-none">>)),
     beam_agent_threads_core:clear().
 
 set_active_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-active-1">>,
     ThreadId = <<"t-active-1">>,
     ok = beam_agent_threads_core:set_active_thread(SessionId, ThreadId),
@@ -455,7 +455,7 @@ set_active_thread_test() ->
     beam_agent_threads_core:clear().
 
 set_active_thread_overrides_previous_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-active-2">>,
     ok = beam_agent_threads_core:set_active_thread(SessionId, <<"t-first">>),
     ok = beam_agent_threads_core:set_active_thread(SessionId, <<"t-second">>),
@@ -464,7 +464,7 @@ set_active_thread_overrides_previous_test() ->
     beam_agent_threads_core:clear().
 
 clear_active_thread_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     SessionId = <<"sess-active-3">>,
     ok = beam_agent_threads_core:set_active_thread(SessionId, <<"t-active-3">>),
     ?assertMatch({ok, _}, beam_agent_threads_core:active_thread(SessionId)),
@@ -474,14 +474,14 @@ clear_active_thread_test() ->
     beam_agent_threads_core:clear().
 
 clear_active_thread_noop_when_none_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     ok = beam_agent_threads_core:clear_active_thread(<<"sess-active-noop">>),
     ?assertEqual({error, none},
         beam_agent_threads_core:active_thread(<<"sess-active-noop">>)),
     beam_agent_threads_core:clear().
 
 active_thread_isolated_per_session_test() ->
-    beam_agent_threads_core:ensure_table(),
+    beam_agent_threads_core:ensure_tables(),
     ok = beam_agent_threads_core:set_active_thread(<<"sess-iso-A">>, <<"t-iso-A">>),
     ok = beam_agent_threads_core:set_active_thread(<<"sess-iso-B">>, <<"t-iso-B">>),
     ?assertEqual({ok, <<"t-iso-A">>},

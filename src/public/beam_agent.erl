@@ -310,7 +310,6 @@ in docs/guides/backend_integration_guide.md.
     toggle_mcp_server/3,
     mcp_server_oauth_login/2,
     mcp_server_reload/1,
-    mcp_server_status_list/1,
     account_login/2,
     account_login_cancel/2,
     account_logout/1,
@@ -3122,17 +3121,6 @@ mcp_server_reload(Session) ->
     end).
 
 -doc """
-List the status of all MCP servers as a single response.
-
-This is an alias for mcp_server_status/1, provided for backends that
-distinguish between a single-server status query and a bulk list
-operation. Returns the same map-of-maps structure.
-""".
--spec mcp_server_status_list(pid()) -> {ok, term()} | {error, term()}.
-mcp_server_status_list(Session) ->
-    native_or(Session, mcp_server_status_list, [], fun() -> mcp_server_status(Session) end).
-
--doc """
 Initiate an account login flow.
 
 Params contains credentials or OAuth tokens required by the backend's
@@ -4077,13 +4065,7 @@ safe_session_health(Session) ->
 
 -spec session_identity(pid()) -> binary().
 session_identity(Session) ->
-    case session_info(Session) of
-        {ok, #{session_id := SessionId}} when is_binary(SessionId),
-                                              byte_size(SessionId) > 0 ->
-            SessionId;
-        _ ->
-            unicode:characters_to_binary(erlang:pid_to_list(Session))
-    end.
+    beam_agent_core:session_identity(Session).
 
 -spec with_session_backend(pid(), map()) -> map().
 with_session_backend(Session, Params) when is_map(Params) ->

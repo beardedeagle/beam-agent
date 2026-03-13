@@ -3,7 +3,7 @@
 
 -export([
     %% Table lifecycle
-    ensure_table/0,
+    ensure_tables/0,
     clear/0,
     %% Account operations
     account_login/2,
@@ -43,15 +43,15 @@ Ensure the accounts ETS table exists. Idempotent -- safe to call multiple times.
 The table is named and its access mode is resolved by `beam_agent_ets` based on
 the global configuration.
 """.
--spec ensure_table() -> ok.
-ensure_table() ->
+-spec ensure_tables() -> ok.
+ensure_tables() ->
     beam_agent_ets:ensure_table(?TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Delete all account data from the ETS table.".
 -spec clear() -> ok.
 clear() ->
-    ensure_table(),
+    ensure_tables(),
     beam_agent_ets:delete_all_objects(?TABLE),
     ok.
 
@@ -72,7 +72,7 @@ Returns `{ok, #{status => logged_in, provider_id => ProviderId}}`.
 -spec account_login(pid() | binary(), map()) ->
     {ok, #{status := logged_in, provider_id => binary()}}.
 account_login(Session, Params) when is_map(Params) ->
-    ensure_table(),
+    ensure_tables(),
     Now = erlang:system_time(millisecond),
     ProviderId = maps:get(provider_id, Params, undefined),
     State0 = #{
@@ -105,7 +105,7 @@ provider_id and login_params.
 -spec account_login_cancel(pid() | binary(), map()) ->
     {ok, #{status := login_cancelled}}.
 account_login_cancel(Session, Params) when is_map(Params) ->
-    ensure_table(),
+    ensure_tables(),
     Existing = get_auth_state(Session),
     Updated = Existing#{
         session => Session,
@@ -123,7 +123,7 @@ Clears `logged_in_at` from the stored state.
 -spec account_logout(pid() | binary()) ->
     {ok, #{status := logged_out}}.
 account_logout(Session) ->
-    ensure_table(),
+    ensure_tables(),
     Now = erlang:system_time(millisecond),
     Existing = get_auth_state(Session),
     Updated = (maps:without([logged_in_at], Existing))#{
@@ -148,7 +148,7 @@ itself serves as the credential.
 """.
 -spec auth_status(pid() | binary()) -> {ok, auth_state()}.
 auth_status(Session) ->
-    ensure_table(),
+    ensure_tables(),
     {ok, get_auth_state(Session)}.
 
 -doc """

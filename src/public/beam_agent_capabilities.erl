@@ -104,7 +104,10 @@ for details.
     support_info/0,
     support_level/0,
     implementation/0,
-    fidelity/0
+    fidelity/0,
+    capability_error/0,
+    backend_lookup_error/0,
+    status_error/0
 ]).
 
 -type capability() ::
