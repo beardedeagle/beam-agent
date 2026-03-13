@@ -91,19 +91,28 @@ child_spec(Opts) when is_map(Opts) ->
 -doc "Stop a live unified session.".
 -spec stop(pid()) -> ok.
 stop(Session) when is_pid(Session) ->
-    Result = case adapter_module(Session) of
-        {ok, Module} ->
-            case erlang:function_exported(Module, stop, 1) of
-                true -> Module:stop(Session);
-                false -> gen_statem:stop(Session, normal, 10000)
-            end;
-        _ ->
-            gen_statem:stop(Session, normal, 10000)
+    %% Resolve session_id while process is still alive so cleanup
+    %% can clear the real session_id entry, not just the pid-based one.
+    SessionId = session_id(Session),
+    try
+        case adapter_module(Session) of
+            {ok, Module} ->
+                case erlang:function_exported(Module, stop, 1) of
+                    true -> Module:stop(Session);
+                    false -> gen_statem:stop(Session, normal, 10000)
+                end;
+            _ ->
+                gen_statem:stop(Session, normal, 10000)
+        end
+    catch
+        Class:Reason ->
+            logger:warning("session stop failed: ~p:~p", [Class, Reason])
+    after
+        _ = beam_agent_backend:unregister_session(Session),
+        _ = beam_agent_runtime_core:clear_session(Session),
+        _ = clear_callback_broker(Session, SessionId)
     end,
-    ok = beam_agent_backend:unregister_session(Session),
-    ok = beam_agent_runtime_core:clear_session(Session),
-    ok = clear_callback_broker(Session),
-    Result.
+    ok.
 
 -doc "Send a blocking query with default params.".
 -spec query(pid(), binary()) -> {ok, [beam_agent_core:message()]} | {error, term()}.
@@ -469,9 +478,8 @@ register_callback_broker(Session, SessionOpts) ->
             beam_agent_control_core:register_session_callbacks(PidSessionId, SessionOpts)
     end.
 
--spec clear_callback_broker(pid()) -> ok.
-clear_callback_broker(Session) ->
-    SessionId = session_id(Session),
+-spec clear_callback_broker(pid(), binary()) -> ok.
+clear_callback_broker(Session, SessionId) ->
     ok = beam_agent_control_core:clear_session_callbacks(SessionId),
     PidSessionId = unicode:characters_to_binary(erlang:pid_to_list(Session)),
     case PidSessionId =:= SessionId of

@@ -601,7 +601,8 @@ handle_send_query(From, Prompt, Params,
                     Ref = make_ref(),
                     Backend = H:backend_name(),
                     StartTime = beam_agent_telemetry_core:span_start(
-                                    Backend, query, #{prompt => Prompt}),
+                                    Backend, query,
+                                    #{prompt_length => byte_size(Prompt)}),
                     Data1 = Data#engine{
                         handler_state    = HState1,
                         query_ref        = Ref,

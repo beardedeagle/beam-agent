@@ -48,12 +48,16 @@ small, contention is low, and lookups are on the hot path for query routing.
 -doc "Ensure the pid-to-backend ETS table exists.".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:info(?SESSIONS_TABLE) of
+    case ets:whereis(?SESSIONS_TABLE) of
         undefined ->
-            _ = ets:new(?SESSIONS_TABLE, [set, public, named_table,
-                {read_concurrency, true}]),
-            ok;
-        _ ->
+            try
+                _ = ets:new(?SESSIONS_TABLE, [set, public, named_table,
+                    {read_concurrency, true}]),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _Tid ->
             ok
     end.
 
