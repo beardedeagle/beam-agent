@@ -158,9 +158,15 @@ Elixir adds `stream!/3` and `stream/3` (lazy `Stream.resource/3`-based
 enumerables) on top of the same canonical surface.
 
 Beyond the lifecycle/query surface, the canonical SDK exposes the following
-capability families. Their status and route shape for each backend/capability
-pair are tracked via `support_level`, `implementation`, and `fidelity` in the
-capability registry. All families have universal fallback coverage:
+capability families through domain modules (`beam_agent_session_store`,
+`beam_agent_threads`, `beam_agent_runtime`, `beam_agent_config`,
+`beam_agent_provider`, `beam_agent_catalog`, `beam_agent_capabilities`,
+`beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
+`beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
+`beam_agent_account`, `beam_agent_apps`, `beam_agent_checkpoint`). Their
+status and route shape for each backend/capability pair are tracked via
+`support_level`, `implementation`, and `fidelity` in the capability registry.
+All families have universal fallback coverage:
 
 - shared session history/state
 - shared/native thread management
@@ -176,27 +182,27 @@ capability registry. All families have universal fallback coverage:
 Shared session history/state and thread management:
 
 ```erlang
-%% Universal session history/state
-list_sessions(Opts)                    -> {ok, [SessionMeta]}
-get_session(SessionId)                 -> {ok, SessionMeta} | {error, not_found}
-get_session_messages(SessionId, Opts)  -> {ok, [Message]} | {error, not_found}
-delete_session(SessionId)              -> ok
-fork_session(SessionPid, Opts)         -> {ok, SessionMeta} | {error, not_found}
-revert_session(SessionPid, Selector)   -> {ok, map()} | {error, Reason}
-unrevert_session(SessionPid)           -> {ok, map()} | {error, not_found}
-share_session(SessionPid, Opts)        -> {ok, map()} | {error, not_found}
-unshare_session(SessionPid)            -> ok | {error, not_found}
-summarize_session(SessionPid, Opts)    -> {ok, map()} | {error, not_found}
+%% Universal session history/state — beam_agent_session_store
+beam_agent_session_store:list_sessions(Opts)                    -> {ok, [SessionMeta]}
+beam_agent_session_store:get_session(SessionId)                 -> {ok, SessionMeta} | {error, not_found}
+beam_agent_session_store:get_session_messages(SessionId, Opts)  -> {ok, [Message]} | {error, not_found}
+beam_agent_session_store:delete_session(SessionId)              -> ok
+beam_agent_session_store:fork_session(SessionPid, Opts)         -> {ok, SessionMeta} | {error, not_found}
+beam_agent_session_store:revert_session(SessionPid, Selector)   -> {ok, map()} | {error, Reason}
+beam_agent_session_store:unrevert_session(SessionPid)           -> {ok, map()} | {error, not_found}
+beam_agent_session_store:share_session(SessionPid, Opts)        -> {ok, map()} | {error, not_found}
+beam_agent_session_store:unshare_session(SessionPid)            -> ok | {error, not_found}
+beam_agent_session_store:summarize_session(SessionPid, Opts)    -> {ok, map()} | {error, not_found}
 
-%% Universal/native thread state
-thread_start(SessionPid, Opts)         -> {ok, ThreadMeta} | {error, Reason}
-thread_resume(SessionPid, ThreadId)    -> {ok, ThreadMeta} | {error, not_found}
-thread_list(SessionPid)                -> {ok, [ThreadMeta]} | {error, Reason}
-thread_fork(SessionPid, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found}
-thread_read(SessionPid, ThreadId, Opts)-> {ok, map()} | {error, not_found}
-thread_archive(SessionPid, ThreadId)   -> {ok, map()} | {error, not_found}
-thread_unarchive(SessionPid, ThreadId) -> {ok, map()} | {error, not_found}
-thread_rollback(SessionPid, ThreadId, Selector) ->
+%% Universal/native thread state — beam_agent_threads
+beam_agent_threads:thread_start(SessionPid, Opts)         -> {ok, ThreadMeta} | {error, Reason}
+beam_agent_threads:thread_resume(SessionPid, ThreadId)    -> {ok, ThreadMeta} | {error, not_found}
+beam_agent_threads:thread_list(SessionPid)                -> {ok, [ThreadMeta]} | {error, Reason}
+beam_agent_threads:thread_fork(SessionPid, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found}
+beam_agent_threads:thread_read(SessionPid, ThreadId, Opts)-> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_archive(SessionPid, ThreadId)   -> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_unarchive(SessionPid, ThreadId) -> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_rollback(SessionPid, ThreadId, Selector) ->
     {ok, map()} | {error, Reason}
 ```
 
@@ -260,8 +266,8 @@ Codex can also run a direct realtime session instead of the app-server path:
     voice => <<"alloy">>
 }),
 {ok, #{thread_id := ThreadId}} =
-    beam_agent:thread_realtime_start(Session, #{mode => <<"voice">>}),
-ok = beam_agent:thread_realtime_append_text(Session, ThreadId, #{text => <<"Hello">>}),
+    beam_agent_control:thread_realtime_start(Session, #{mode => <<"voice">>}),
+ok = beam_agent_control:thread_realtime_append_text(Session, ThreadId, #{text => <<"Hello">>}),
 ok = beam_agent:stop(Session).
 ```
 
