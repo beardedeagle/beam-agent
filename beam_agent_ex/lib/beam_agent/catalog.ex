@@ -187,4 +187,120 @@ defmodule BeamAgent.Catalog do
   """
   @spec clear_default_agent(pid()) :: :ok
   defdelegate clear_default_agent(session), to: :beam_agent_catalog
+
+  @doc """
+  Return the static list of CLI commands that the session's backend supports.
+
+  Each backend advertises a fixed set of commands it can handle (e.g.,
+  `"query"`, `"interrupt"`, `"config"`). Use this to discover what operations
+  are available before attempting them, or to build dynamic command palettes.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, commands}` where `commands` is a list of command maps, each
+    containing `:name` and `:description`.
+  - `{:error, reason}` on failure.
+  """
+  @spec supported_commands(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate supported_commands(session), to: :beam_agent_catalog
+
+  @doc """
+  Return the static list of LLM models available for the session's backend.
+
+  Use this to present model selection options or validate a model identifier
+  before passing it to `BeamAgent.Runtime.set_model/2`.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, models}` where `models` is a list of model maps, each containing
+    `:name` and `:capabilities`.
+  - `{:error, reason}` on failure.
+  """
+  @spec supported_models(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate supported_models(session), to: :beam_agent_catalog
+
+  @doc """
+  Return the static list of sub-agents that the session's backend exposes.
+
+  Sub-agents are specialized assistants that handle focused tasks such as
+  code review, test generation, or documentation writing.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, agents}` where `agents` is a list of agent maps, each containing
+    `:name`, `:description`, and `:capabilities`.
+  - `{:error, reason}` on failure.
+  """
+  @spec supported_agents(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate supported_agents(session), to: :beam_agent_catalog
+
+  @doc """
+  List models available for the session using native-first routing.
+
+  Convenience wrapper that calls `model_list/2` with empty options.
+  Attempts the backend's native model listing first; falls back to
+  `supported_models/1` if the backend does not support dynamic listing.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, models}` where `models` is a list of model maps.
+  - `{:error, reason}` on failure.
+  """
+  @spec model_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate model_list(session), to: :beam_agent_catalog
+
+  @doc """
+  List models with backend-specific filter options.
+
+  Filters are backend-specific and may include capabilities, context window
+  size, or model family. Uses native-first routing with a fallback to
+  `supported_models/1`.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- backend-specific filter options map.
+
+  ## Returns
+
+  - `{:ok, models}` or `{:error, reason}`.
+  """
+  @spec model_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate model_list(session, opts), to: :beam_agent_catalog
+
+  @doc """
+  List commands available for the session using native-first routing.
+
+  Attempts the backend's native command listing first. Falls back to
+  `supported_commands/1` if the backend does not support dynamic listing.
+  The result may include commands added at runtime (e.g., via plugins or
+  MCP servers).
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, commands}` where `commands` is a list of command maps.
+  - `{:error, reason}` on failure.
+  """
+  @spec list_commands(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate list_commands(session), to: :beam_agent_catalog
 end

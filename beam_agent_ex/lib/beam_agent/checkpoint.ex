@@ -183,4 +183,23 @@ defmodule BeamAgent.Checkpoint do
   """
   @spec extract_file_paths(binary(), map()) :: [binary()]
   defdelegate extract_file_paths(tool_name, tool_input), to: :beam_agent_checkpoint
+
+  @doc """
+  Rewind files to a previous checkpoint via a live session.
+
+  Session-scoped variant of `rewind/2`. Takes a running session pid and
+  delegates to the backend's native checkpoint rewind if available, falling
+  back to the universal checkpoint store.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `checkpoint_uuid` -- binary checkpoint identifier.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, :not_found}`.
+  """
+  @spec rewind_files(pid(), binary()) :: {:ok, term()} | {:error, :not_found | term()}
+  defdelegate rewind_files(session, checkpoint_uuid), to: :beam_agent_checkpoint
 end

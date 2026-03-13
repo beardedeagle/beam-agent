@@ -306,4 +306,272 @@ defmodule BeamAgent.Control do
              }
            ]}
   defdelegate list_pending_requests(session_id), to: :beam_agent_control
+
+  # ---------------------------------------------------------------------------
+  # Session-scoped control operations (realtime, review, server management)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Steer an active turn by injecting additional input mid-conversation.
+
+  Allows you to redirect or refine the agent's current turn within a thread.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `turn_id` -- binary identifier of the active turn.
+  - `input` -- steering input (binary prompt or list of content block maps).
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec turn_steer(pid(), binary(), binary(), binary() | [map()]) ::
+          {:ok, term()} | {:error, term()}
+  defdelegate turn_steer(session, thread_id, turn_id, input), to: :beam_agent_control
+
+  @doc """
+  Steer an active turn with additional options.
+
+  Same as `turn_steer/4` but accepts backend-specific options such as
+  `:model` or `:system_prompt` overrides for the steered response.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `turn_id` -- binary turn identifier.
+  - `input` -- steering input.
+  - `opts` -- backend-specific options map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec turn_steer(pid(), binary(), binary(), binary() | [map()], map()) ::
+          {:ok, term()} | {:error, term()}
+  defdelegate turn_steer(session, thread_id, turn_id, input, opts), to: :beam_agent_control
+
+  @doc """
+  Interrupt an active turn in a thread.
+
+  Cancels the agent's in-progress response for the specified turn.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `turn_id` -- binary turn identifier.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec turn_interrupt(pid(), binary(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate turn_interrupt(session, thread_id, turn_id), to: :beam_agent_control
+
+  @doc """
+  Start a realtime thread for audio/text streaming.
+
+  Initiates a WebSocket or streaming connection for real-time interactions.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- realtime session options map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec thread_realtime_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate thread_realtime_start(session, opts), to: :beam_agent_control
+
+  @doc """
+  Append audio data to an active realtime thread.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `opts` -- audio data options (contains encoded audio bytes).
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec thread_realtime_append_audio(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent_control
+
+  @doc """
+  Append text data to an active realtime thread.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+  - `opts` -- text data options (contains the text to append).
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec thread_realtime_append_text(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent_control
+
+  @doc """
+  Stop an active realtime thread.
+
+  Closes the streaming connection and finalizes the realtime session.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `thread_id` -- binary thread identifier.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec thread_realtime_stop(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate thread_realtime_stop(session, thread_id), to: :beam_agent_control
+
+  @doc """
+  Start a code review session.
+
+  Initialises a review workflow where the agent reviews code changes.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- review options map (e.g., `:diff`, `:branch`, `:files`).
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec review_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate review_start(session, opts), to: :beam_agent_control
+
+  @doc """
+  List available collaboration modes.
+
+  Returns the modes supported by the backend (e.g., pair programming,
+  review, teaching).
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, modes}` or `{:error, reason}`.
+  """
+  @spec collaboration_mode_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate collaboration_mode_list(session), to: :beam_agent_control
+
+  @doc """
+  List available experimental features.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, features}` or `{:error, reason}`.
+  """
+  @spec experimental_feature_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate experimental_feature_list(session), to: :beam_agent_control
+
+  @doc """
+  List experimental features with filter options.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- filter options map.
+
+  ## Returns
+
+  - `{:ok, features}` or `{:error, reason}`.
+  """
+  @spec experimental_feature_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate experimental_feature_list(session, opts), to: :beam_agent_control
+
+  @doc """
+  List all persisted sessions known to the backend server.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, sessions}` or `{:error, reason}`.
+  """
+  @spec list_server_sessions(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate list_server_sessions(session), to: :beam_agent_control
+
+  @doc """
+  Retrieve a single persisted session by its identifier.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `session_id` -- binary session identifier.
+
+  ## Returns
+
+  - `{:ok, session_map}` or `{:error, :not_found}`.
+  """
+  @spec get_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate get_server_session(session, session_id), to: :beam_agent_control
+
+  @doc """
+  Delete a persisted session from the backend server.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `session_id` -- binary session identifier to delete.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec delete_server_session(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate delete_server_session(session, session_id), to: :beam_agent_control
+
+  @doc """
+  List all sub-agents registered on the backend server.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, agents}` or `{:error, reason}`.
+  """
+  @spec list_server_agents(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate list_server_agents(session), to: :beam_agent_control
+
+  @doc """
+  Check the health of the backend server.
+
+  Returns a status map with health indicators including the backend name,
+  session identifier, and uptime in milliseconds.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, health_map}` or `{:error, reason}`.
+  """
+  @spec server_health(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate server_health(session), to: :beam_agent_control
 end

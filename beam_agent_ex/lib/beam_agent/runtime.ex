@@ -213,4 +213,213 @@ defmodule BeamAgent.Runtime do
   @spec validate_provider_config(binary() | nil, map()) ::
           :ok | {:error, :invalid_api_key | :invalid_provider_config}
   defdelegate validate_provider_config(provider_id, config), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Session-scoped runtime operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Change the LLM model for a running session.
+
+  Sends a model-switch command to the backend. If the backend supports
+  native model switching, it is used directly; otherwise the runtime core
+  stores it in its own state.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `model` -- binary model identifier (e.g., `"claude-sonnet-4-20250514"`).
+
+  ## Returns
+
+  - `{:ok, model}` on success.
+  - `{:error, reason}` on failure.
+  """
+  @spec set_model(pid(), binary()) :: {:ok, binary()} | {:error, term()}
+  defdelegate set_model(session, model), to: :beam_agent_runtime
+
+  @doc """
+  Change the permission mode for a running session.
+
+  Controls how the backend handles tool execution and file edit approval.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `mode` -- binary permission mode (e.g., `"default"`, `"accept_edits"`).
+
+  ## Returns
+
+  - `{:ok, mode}` on success.
+  - `{:error, reason}` on failure.
+  """
+  @spec set_permission_mode(pid(), binary()) :: {:ok, binary()} | {:error, term()}
+  defdelegate set_permission_mode(session, mode), to: :beam_agent_runtime
+
+  @doc """
+  Interrupt the currently active query on a session.
+
+  Sends an interrupt signal to the backend. If the backend supports
+  native interrupts, it uses that; otherwise falls back to an OS-level
+  signal for port-based transports.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `:ok` if the interrupt was sent.
+  - `{:error, :not_supported}` if the backend does not support interrupts.
+  - `{:error, reason}` on failure.
+  """
+  @spec interrupt(pid()) :: :ok | {:error, term()}
+  defdelegate interrupt(session), to: :beam_agent_runtime
+
+  @doc """
+  Abort the currently active query and reset the session to ready state.
+
+  Stronger than `interrupt/1`: forcibly cancels the query and transitions
+  the session engine back to the ready state.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `:ok` or `{:error, reason}`.
+  """
+  @spec abort(pid()) :: :ok | {:error, term()}
+  defdelegate abort(session), to: :beam_agent_runtime
+
+  @doc """
+  Send a backend-specific control message to a session.
+
+  Control messages provide a generic extension point for features not
+  covered by the typed API.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `method` -- binary method name (e.g., `"mcp_message"`, `"set_config"`).
+  - `params` -- map of method-specific parameters.
+
+  ## Returns
+
+  - `{:ok, result}` on success.
+  - `{:error, :not_supported}` if the backend does not handle this method.
+  - `{:error, reason}` on failure.
+  """
+  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate send_control(session, method, params), to: :beam_agent_runtime
+
+  @doc """
+  Get the overall status of a session including health and metadata.
+
+  Assembles a comprehensive status snapshot combining the session's health
+  state, connection status, backend identifier, model, and session metadata.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, status_map}` containing keys such as `:health`, `:backend`,
+    `:session_id`, `:model`, and `:connected`.
+  - `{:error, reason}` on failure.
+  """
+  @spec get_status(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate get_status(session), to: :beam_agent_runtime
+
+  @doc """
+  Get the authentication status for the session's active provider.
+
+  Returns whether the session is currently authenticated, which
+  authentication method is in use, and token expiration details.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, auth_status}` containing `:authenticated`, `:auth_method`,
+    and `:expires_at`.
+  - `{:error, reason}` on failure.
+  """
+  @spec get_auth_status(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate get_auth_status(session), to: :beam_agent_runtime
+
+  @doc """
+  Get the backend's own session identifier for a running session.
+
+  Returns the session ID as assigned by the backend (not the BEAM pid).
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, session_id}` where `session_id` is a binary.
+  - `{:error, reason}` on failure.
+  """
+  @spec get_last_session_id(pid()) :: {:ok, binary()} | {:error, term()}
+  defdelegate get_last_session_id(session), to: :beam_agent_runtime
+
+  @doc """
+  Start the Windows sandbox setup process.
+
+  Initiates sandbox configuration for backends that run in a Windows
+  environment. On non-Windows platforms the universal fallback returns
+  `status: :not_applicable`.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- setup options map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec windows_sandbox_setup_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate windows_sandbox_setup_start(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Set the maximum number of thinking tokens for the session.
+
+  Controls how many tokens the backend's reasoning model may use for
+  internal chain-of-thought before producing a visible response.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `max_tokens` -- positive integer token limit.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, term()} | {:error, term()}
+  defdelegate set_max_thinking_tokens(session, max_tokens), to: :beam_agent_runtime
+
+  @doc """
+  Stop a running task by its identifier.
+
+  Sends an interrupt to the session and marks the task as stopped.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `task_id` -- binary task identifier.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec stop_task(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate stop_task(session, task_id), to: :beam_agent_runtime
 end

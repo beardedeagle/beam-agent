@@ -369,4 +369,68 @@ defmodule BeamAgent.SessionStore do
   @spec get_session_messages(binary(), message_opts()) ::
           {:ok, [message()]} | {:error, :not_found}
   defdelegate get_session_messages(session_id, opts), to: :beam_agent_session_store
+
+  @doc """
+  List sessions from the backend's native session store.
+
+  Attempts to call the backend's native session listing. Falls back to
+  `list_sessions/0` if the backend does not support native session listing.
+
+  ## Returns
+
+  - `{:ok, sessions}` or `{:error, reason}`.
+  """
+  @spec list_native_sessions() :: {:ok, [session_meta()]} | {:error, term()}
+  defdelegate list_native_sessions(), to: :beam_agent_session_store
+
+  @doc """
+  List sessions from the backend's native session store with filters.
+
+  Like `list_native_sessions/0` but passes filter options to the native call.
+  Falls back to `list_sessions/1` if native listing is not supported.
+
+  ## Parameters
+
+  - `opts` -- backend-specific filter options map.
+
+  ## Returns
+
+  - `{:ok, sessions}` or `{:error, reason}`.
+  """
+  @spec list_native_sessions(map()) :: {:ok, [session_meta()]} | {:error, term()}
+  defdelegate list_native_sessions(opts), to: :beam_agent_session_store
+
+  @doc """
+  Get messages from the backend's native session store.
+
+  Falls back to `get_session_messages/1` if native message retrieval is
+  not supported by the backend.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier.
+
+  ## Returns
+
+  - `{:ok, messages}` or `{:error, reason}`.
+  """
+  @spec get_native_session_messages(binary()) :: {:ok, [message()]} | {:error, term()}
+  defdelegate get_native_session_messages(session_id), to: :beam_agent_session_store
+
+  @doc """
+  Get messages from the backend's native session store with options.
+
+  Falls back to `get_session_messages/2` if native retrieval is not supported.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier.
+  - `opts` -- backend-specific message filter options.
+
+  ## Returns
+
+  - `{:ok, messages}` or `{:error, reason}`.
+  """
+  @spec get_native_session_messages(binary(), map()) :: {:ok, [message()]} | {:error, term()}
+  defdelegate get_native_session_messages(session_id, opts), to: :beam_agent_session_store
 end
