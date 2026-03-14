@@ -387,3 +387,128 @@ buffer_overflow_metadata_contains_max_test() ->
         ?assert(false)
     end,
     telemetry:detach(HandlerId).
+
+%%====================================================================
+%% span_stop/4 tests (with metadata)
+%%====================================================================
+
+span_stop_4_emits_stop_with_metadata_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_span_stop_4_metadata">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_event, Measurements, Metadata}
+        end,
+        []),
+    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
+    ok = beam_agent_telemetry_core:span_stop(command, run, StartTime,
+        #{exit_code => 0, cwd => <<"/tmp">>}),
+    receive
+        {telemetry_event, Measurements, Metadata} ->
+            ?assert(is_integer(maps:get(duration, Measurements))),
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assertEqual(0, maps:get(exit_code, Metadata)),
+            ?assertEqual(<<"/tmp">>, maps:get(cwd, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+span_stop_4_duration_non_negative_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_span_stop_4_duration">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, Measurements, _Metadata, _Config) ->
+            Self ! {telemetry_event, Measurements}
+        end,
+        []),
+    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
+    timer:sleep(5),
+    ok = beam_agent_telemetry_core:span_stop(command, run, StartTime,
+        #{exit_code => 0}),
+    receive
+        {telemetry_event, Measurements} ->
+            ?assert(maps:get(duration, Measurements) > 0)
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+span_stop_4_returns_ok_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    HandlerId = <<"test_span_stop_4_returns_ok">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
+        []),
+    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
+    Result = beam_agent_telemetry_core:span_stop(command, run, StartTime, #{}),
+    ?assertEqual(ok, Result),
+    telemetry:detach(HandlerId).
+
+%%====================================================================
+%% span_exception/4 tests (with metadata)
+%%====================================================================
+
+span_exception_4_emits_with_metadata_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_span_exception_4_metadata">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, exception],
+        fun(_EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_event, Measurements, Metadata}
+        end,
+        []),
+    ok = beam_agent_telemetry_core:span_exception(command, run,
+        {timeout, 5000}, #{command => <<"sleep 10">>, cwd => undefined}),
+    receive
+        {telemetry_event, Measurements, Metadata} ->
+            ?assert(is_integer(maps:get(system_time, Measurements))),
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assertEqual({timeout, 5000}, maps:get(reason, Metadata)),
+            ?assertEqual(<<"sleep 10">>, maps:get(command, Metadata)),
+            ?assertEqual(undefined, maps:get(cwd, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+span_exception_4_returns_ok_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    HandlerId = <<"test_span_exception_4_returns_ok">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, exception],
+        fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
+        []),
+    Result = beam_agent_telemetry_core:span_exception(command, run,
+        some_error, #{key => val}),
+    ?assertEqual(ok, Result),
+    telemetry:detach(HandlerId).
+
+span_exception_4_merges_agent_and_reason_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_span_exception_4_merge">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, exception],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_event, Metadata}
+        end,
+        []),
+    ok = beam_agent_telemetry_core:span_exception(command, run,
+        badarg, #{custom => data}),
+    receive
+        {telemetry_event, Metadata} ->
+            %% Agent and reason are injected alongside caller metadata.
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assertEqual(badarg, maps:get(reason, Metadata)),
+            ?assertEqual(data, maps:get(custom, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
