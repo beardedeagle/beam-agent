@@ -595,7 +595,8 @@ stop_task(Session, TaskId) ->
 %% Private Helpers
 %%--------------------------------------------------------------------
 
--spec universal_get_status(pid()) -> {ok, map()} | {error, term()}.
+-spec universal_get_status(pid()) ->
+    {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 universal_get_status(Session) ->
     case beam_agent_core:session_info(Session) of
         {ok, Info} ->
@@ -606,7 +607,8 @@ universal_get_status(Session) ->
             Error
     end.
 
--spec universal_get_auth_status(pid()) -> {ok, map()}.
+-spec universal_get_auth_status(pid()) ->
+    {ok, #{'source' := 'universal', _ => _}}.
 universal_get_auth_status(Session) ->
     {ok, Status} = beam_agent_runtime_core:provider_status(Session),
     {ok, beam_agent_core:with_universal_source(Session, Status)}.
