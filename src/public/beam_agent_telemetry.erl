@@ -26,6 +26,9 @@ the event name list:
 [:beam_agent, claude, query, start]
 [:beam_agent, claude, query, stop]
 [:beam_agent, claude, query, exception]
+[:beam_agent, command, run, start]       %% shell command execution
+[:beam_agent, command, run, stop]        %% includes exit_code in metadata
+[:beam_agent, command, run, exception]   %% timeout or port failure
 [:beam_agent, session, state_change]     %% always at this fixed path
 [:beam_agent, buffer, overflow]          %% always at this fixed path
 ```
@@ -95,7 +98,8 @@ library is not present, all emission is a silent no-op. This module
 delegates to beam_agent_telemetry_core for all emission logic.
 """.
 
--export([span_start/3, span_stop/3, span_exception/3, state_change/3, buffer_overflow/2]).
+-export([span_start/3, span_stop/3, span_stop/4, span_exception/3, span_exception/4,
+         state_change/3, buffer_overflow/2]).
 
 -doc """
 Emit a span start event and return a monotonic start time.
@@ -149,6 +153,40 @@ Parameters:
 -spec span_exception(atom(), atom(), term()) -> ok.
 span_exception(Agent, EventSuffix, Reason) ->
     beam_agent_telemetry_core:span_exception(Agent, EventSuffix, Reason).
+
+-doc """
+Emit a span exception event with additional metadata.
+
+Same as `span_exception/3` but merges caller-supplied metadata into the event.
+Useful when you need to attach context (e.g., command string, working directory)
+to the exception event.
+
+Parameters:
+- `Agent` — backend atom
+- `EventSuffix` — operation atom, must match the `span_start/3` call
+- `Reason` — the error reason or exception term
+- `Metadata` — arbitrary map merged into the telemetry metadata
+""".
+-spec span_exception(atom(), atom(), term(), map()) -> ok.
+span_exception(Agent, EventSuffix, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(Agent, EventSuffix, Reason, Metadata).
+
+-doc """
+Emit a span stop event with duration and additional metadata.
+
+Same as `span_stop/3` but merges caller-supplied metadata into the event.
+Useful when you need to attach result-specific information (e.g., exit codes,
+response sizes) to the stop event.
+
+Parameters:
+- `Agent` — same atom passed to `span_start/3`
+- `EventSuffix` — same atom passed to `span_start/3`
+- `StartTime` — the integer returned by `span_start/3`
+- `Metadata` — arbitrary map merged into the telemetry metadata
+""".
+-spec span_stop(atom(), atom(), integer(), map()) -> ok.
+span_stop(Agent, EventSuffix, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(Agent, EventSuffix, StartTime, Metadata).
 
 -doc """
 Emit a state change event for a gen_statem transition.

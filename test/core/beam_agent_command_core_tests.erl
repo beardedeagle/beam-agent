@@ -6,6 +6,9 @@
 %%%   - run/2: timeout option, cwd option, max_output truncation
 %%%   - Non-zero exit codes
 %%%   - Output capture correctness
+%%%   - Telemetry: start/stop/exception events with correct metadata
+%%%
+%%% All tests use real shell commands — zero mocks.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_core_tests).
@@ -155,3 +158,186 @@ result_output_is_binary_test() ->
 result_exit_code_is_integer_test() ->
     {ok, Result} = beam_agent_command_core:run(<<"echo int">>),
     ?assert(is_integer(maps:get(exit_code, Result))).
+
+%%====================================================================
+%% Telemetry: start event tests
+%%====================================================================
+
+telemetry_start_event_emitted_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_start_event">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, start],
+        fun(_EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_start, Measurements, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"echo telemetry">>),
+    receive
+        {telemetry_start, Measurements, Metadata} ->
+            ?assert(is_integer(maps:get(system_time, Measurements))),
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assert(is_binary(maps:get(command, Metadata))),
+            Cmd = maps:get(command, Metadata),
+            ?assert(binary:match(Cmd, <<"echo telemetry">>) =/= nomatch)
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+telemetry_start_includes_cwd_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_start_cwd">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, start],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_start, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"pwd">>, #{cwd => <<"/tmp">>}),
+    receive
+        {telemetry_start, Metadata} ->
+            ?assertEqual(<<"/tmp">>, maps:get(cwd, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+telemetry_start_cwd_undefined_when_omitted_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_start_cwd_undef">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, start],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_start, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"true">>),
+    receive
+        {telemetry_start, Metadata} ->
+            ?assertEqual(undefined, maps:get(cwd, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+%%====================================================================
+%% Telemetry: stop event tests
+%%====================================================================
+
+telemetry_stop_event_on_success_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_stop_event">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_stop, Measurements, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"echo done">>),
+    receive
+        {telemetry_stop, Measurements, Metadata} ->
+            ?assert(is_integer(maps:get(duration, Measurements))),
+            ?assert(maps:get(duration, Measurements) >= 0),
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assertEqual(0, maps:get(exit_code, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+telemetry_stop_nonzero_exit_code_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_stop_nonzero">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_stop, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"exit 42">>),
+    receive
+        {telemetry_stop, Metadata} ->
+            ?assertEqual(42, maps:get(exit_code, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+telemetry_stop_includes_command_and_cwd_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_stop_meta">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, stop],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_stop, Metadata}
+        end,
+        []),
+    {ok, _} = beam_agent_command_core:run(<<"pwd">>, #{cwd => <<"/tmp">>}),
+    receive
+        {telemetry_stop, Metadata} ->
+            ?assert(is_binary(maps:get(command, Metadata))),
+            ?assertEqual(<<"/tmp">>, maps:get(cwd, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+%%====================================================================
+%% Telemetry: exception event tests
+%%====================================================================
+
+telemetry_exception_on_timeout_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_exception_timeout">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, exception],
+        fun(_EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_exception, Measurements, Metadata}
+        end,
+        []),
+    {error, {timeout, 100}} = beam_agent_command_core:run(
+        <<"sleep 10">>, #{timeout => 100}),
+    receive
+        {telemetry_exception, Measurements, Metadata} ->
+            ?assert(is_integer(maps:get(system_time, Measurements))),
+            ?assertEqual(command, maps:get(agent, Metadata)),
+            ?assertEqual({timeout, 100}, maps:get(reason, Metadata)),
+            ?assert(is_binary(maps:get(command, Metadata)))
+    after 2000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+%%====================================================================
+%% Telemetry: command string truncation tests
+%%====================================================================
+
+telemetry_long_command_truncated_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_cmd_truncation">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, command, run, start],
+        fun(_EventName, _Measurements, Metadata, _Config) ->
+            Self ! {telemetry_start, Metadata}
+        end,
+        []),
+    %% Generate a command string longer than 512 bytes.
+    LongCmd = iolist_to_binary([<<"echo ">>, binary:copy(<<"x">>, 600)]),
+    {ok, _} = beam_agent_command_core:run(LongCmd),
+    receive
+        {telemetry_start, Metadata} ->
+            CmdBin = maps:get(command, Metadata),
+            ?assert(byte_size(CmdBin) =< 512)
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).

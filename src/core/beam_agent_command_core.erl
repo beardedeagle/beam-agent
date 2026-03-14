@@ -9,6 +9,18 @@ underlying CLI supports it natively.
 Uses `erlang:open_port/2` with `spawn_executable` for safe,
 timeout-aware, output-captured command execution.
 
+## Telemetry
+
+When the `telemetry` library is present, every command execution emits
+span events under the `[:beam_agent, command, run, ...]` prefix:
+
+  - `[:beam_agent, command, run, start]` — emitted before port open.
+    Metadata: `command` (binary, truncated to 512 bytes), `cwd`.
+  - `[:beam_agent, command, run, stop]` — emitted on completion.
+    Measurements: `duration`. Metadata: `command`, `cwd`, `exit_code`.
+  - `[:beam_agent, command, run, exception]` — emitted on timeout or
+    port failure. Metadata: `command`, `cwd`, `reason`.
+
 Usage:
 ```erlang
 {ok, Result} = beam_agent_command_core:run(<<"ls -la">>),
@@ -52,6 +64,9 @@ Usage:
 -define(DEFAULT_TIMEOUT, 30000).
 -define(DEFAULT_MAX_OUTPUT, 1048576). %% 1MB
 
+%% Max command string bytes included in telemetry metadata.
+-define(TELEMETRY_CMD_MAX_BYTES, 512).
+
 %%--------------------------------------------------------------------
 %% Public API
 %%--------------------------------------------------------------------
@@ -77,13 +92,20 @@ run(Command, Opts) when is_map(Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
     MaxOutput = maps:get(max_output, Opts, ?DEFAULT_MAX_OUTPUT),
     CmdStr = command_string(Command),
+    Cwd = maps:get(cwd, Opts, undefined),
+    TeleMeta = #{command => telemetry_command(CmdStr), cwd => Cwd},
+    StartTime = beam_agent_telemetry_core:span_start(command, run, TeleMeta),
     Shell = find_shell(),
     {PortName, PortOpts} = build_port_spec(Shell, CmdStr, Opts),
     try
         Port = erlang:open_port(PortName, PortOpts),
-        collect_output(Port, Timeout, MaxOutput, <<>>)
+        Result = collect_output(Port, Timeout, MaxOutput, <<>>),
+        emit_command_telemetry(StartTime, TeleMeta, Result),
+        Result
     catch
         error:Reason ->
+            beam_agent_telemetry_core:span_exception(command, run,
+                {port_failed, Reason}, TeleMeta),
             {error, {port_failed, Reason}}
     end.
 
@@ -180,3 +202,33 @@ shell_escape_char($') ->
     "'\\''";
 shell_escape_char(Char) ->
     [Char].
+
+%%--------------------------------------------------------------------
+%% Internal: Telemetry
+%%--------------------------------------------------------------------
+
+%% Emit stop or exception telemetry based on the command result.
+%% Only receives results from collect_output/4 — {port_failed, _} is
+%% caught in run/2 and never reaches this function.
+-spec emit_command_telemetry(integer(),
+    #{'command' := binary(), 'cwd' := term()},
+    {ok, #{'exit_code' := integer(), 'output' := binary()}} |
+    {error, {port_exit, term()} | {timeout, infinity | non_neg_integer()}}) -> ok.
+emit_command_telemetry(StartTime, TeleMeta, {ok, #{exit_code := ExitCode}}) ->
+    beam_agent_telemetry_core:span_stop(command, run, StartTime,
+        TeleMeta#{exit_code => ExitCode});
+emit_command_telemetry(_StartTime, TeleMeta, {error, Reason}) ->
+    beam_agent_telemetry_core:span_exception(command, run, Reason, TeleMeta).
+
+%% Convert a command string to a binary for telemetry metadata.
+%% Truncated to ?TELEMETRY_CMD_MAX_BYTES to prevent telemetry bloat.
+-spec telemetry_command(string()) -> binary().
+telemetry_command(CmdStr) ->
+    case unicode:characters_to_binary(CmdStr) of
+        Bin when is_binary(Bin), byte_size(Bin) > ?TELEMETRY_CMD_MAX_BYTES ->
+            binary:part(Bin, 0, ?TELEMETRY_CMD_MAX_BYTES);
+        Bin when is_binary(Bin) ->
+            Bin;
+        _ ->
+            <<"<encoding-error>">>
+    end.

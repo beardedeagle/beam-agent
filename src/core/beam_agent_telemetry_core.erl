@@ -4,7 +4,9 @@
 -export([
     span_start/3,
     span_stop/3,
+    span_stop/4,
     span_exception/3,
+    span_exception/4,
     state_change/3,
     buffer_overflow/2
 ]).
@@ -34,6 +36,16 @@ span_stop(Agent, EventSuffix, StartTime) ->
         #{agent => Agent}
     ).
 
+-doc "Emit a span stop event with duration measurement and additional metadata.".
+-spec span_stop(atom(), atom(), integer(), map()) -> ok.
+span_stop(Agent, EventSuffix, StartTime, Metadata) when is_map(Metadata) ->
+    Duration = erlang:monotonic_time() - StartTime,
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, stop],
+        #{duration => Duration},
+        Metadata#{agent => Agent}
+    ).
+
 -doc "Emit a span exception event.".
 -spec span_exception(atom(), atom(), term()) -> ok.
 span_exception(Agent, EventSuffix, Reason) ->
@@ -41,6 +53,15 @@ span_exception(Agent, EventSuffix, Reason) ->
         [beam_agent, Agent, EventSuffix, exception],
         #{system_time => erlang:system_time()},
         #{agent => Agent, reason => Reason}
+    ).
+
+-doc "Emit a span exception event with additional metadata.".
+-spec span_exception(atom(), atom(), term(), map()) -> ok.
+span_exception(Agent, EventSuffix, Reason, Metadata) when is_map(Metadata) ->
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, exception],
+        #{system_time => erlang:system_time()},
+        Metadata#{agent => Agent, reason => Reason}
     ).
 
 -doc "Emit a state change event for gen_statem transitions.".
