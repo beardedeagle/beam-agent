@@ -1,5 +1,44 @@
 -module(beam_agent_events).
--moduledoc false.
+-moduledoc """
+Universal event subscription and delivery for the BEAM Agent SDK.
+
+Subscribers call `subscribe/1` with a session ID and receive events as
+Erlang messages. Events are delivered via `publish/2` and end-of-stream
+is signalled via `complete/1`.
+
+## Subscriber Lifecycle
+
+Subscribing inserts records into two ETS tables (subscriptions and
+session refs). Unsubscribing removes them and flushes pending messages
+from the caller's mailbox.
+
+## Dead Subscriber Cleanup
+
+Events are delivered by sending directly to the subscriber pid. If the
+subscriber has died, the message is silently discarded by the BEAM —
+no crash, no error.
+
+In **hardened mode**, the table owner process monitors each subscriber
+automatically. When a subscriber dies, the owner receives a `'DOWN'`
+message and removes its ETS records immediately. No consumer action
+is needed.
+
+In **public mode**, cleanup is the consumer's responsibility. The
+recommended pattern is to monitor the subscriber from a supervisor
+or manager process and call `unsubscribe/2` when it exits:
+
+```erlang
+%% In the consumer's gen_server that manages subscribers:
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
+    %% Look up the subscription ref for Pid and call:
+    beam_agent_events:unsubscribe(SessionId, SubscriptionRef),
+    {noreply, remove_subscriber(Pid, State)};
+```
+
+Stale ETS entries from dead subscribers in public mode are harmless —
+each is a small map — and are removed when `unsubscribe/2` or `clear/0`
+is called.
+""".
 
 -export([
     ensure_tables/0,
@@ -8,7 +47,8 @@
     unsubscribe/2,
     publish/2,
     complete/1,
-    receive_event/2
+    receive_event/2,
+    cleanup_dead_subscriber/2
 ]).
 
 -define(SUBSCRIPTIONS_TABLE, beam_agent_event_subscriptions).
@@ -40,6 +80,8 @@ subscribe(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     Metadata = #{session_id => SessionId, owner => Owner},
     beam_agent_ets:insert(?SUBSCRIPTIONS_TABLE, {Ref, Metadata}),
     beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Ref}),
+    _ = beam_agent_table_owner:monitor_for_cleanup(Owner,
+        {?MODULE, cleanup_dead_subscriber, [SessionId, Ref]}),
     {ok, Ref}.
 
 -doc "Remove a universal event subscription.".
@@ -99,18 +141,32 @@ receive_event(Ref, Timeout) when is_reference(Ref), is_integer(Timeout), Timeout
 %% Internal helpers
 %%--------------------------------------------------------------------
 
+-doc """
+Remove a dead subscriber's ETS records.
+
+Exported for use as an MFA callback by `beam_agent_table_owner:monitor_for_cleanup/2`.
+In hardened mode, the table owner calls this when a monitored subscriber
+process exits. Both deletes are idempotent — calling this for an already-
+cleaned-up subscription is a no-op.
+""".
+-spec cleanup_dead_subscriber(binary(), reference()) -> ok.
+cleanup_dead_subscriber(SessionId, Ref)
+  when is_binary(SessionId), is_reference(Ref) ->
+    beam_agent_ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
+    beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref}),
+    ok.
+
 -spec publish_to_refs(binary(), fun((pid(), reference()) -> term())) -> ok.
 publish_to_refs(SessionId, SendFun) ->
     lists:foreach(fun({SessionId0, Ref}) when SessionId0 =:= SessionId ->
         case ets:lookup(?SUBSCRIPTIONS_TABLE, Ref) of
             [{Ref, #{owner := Owner}}] ->
-                case is_process_alive(Owner) of
-                    true ->
-                        SendFun(Owner, Ref);
-                    false ->
-                        beam_agent_ets:delete(?SUBSCRIPTIONS_TABLE, Ref),
-                        beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
-                end;
+                %% Send directly. If Owner is dead, the message is
+                %% silently discarded by the BEAM — no crash, no error.
+                %% Stale ETS entries are cleaned up by the table owner
+                %% monitor (hardened mode) or by the consumer calling
+                %% unsubscribe/2 (public mode).
+                SendFun(Owner, Ref);
             [] ->
                 beam_agent_ets:delete_object(?SESSIONS_TABLE, {SessionId, Ref})
         end

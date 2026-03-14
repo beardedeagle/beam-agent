@@ -298,3 +298,64 @@ uninitialized_defaults_test() ->
     ?assertEqual(public, beam_agent_table_owner:access_mode()),
     ?assertEqual(undefined, beam_agent_table_owner:owner_pid()),
     ?assertEqual(false, beam_agent_table_owner:initialized()).
+
+%%====================================================================
+%% Monitor-for-cleanup tests
+%%====================================================================
+
+monitor_for_cleanup_public_mode_test() ->
+    %% In public mode, monitor_for_cleanup returns ignored.
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => public}),
+    ?assertEqual(ignored, beam_agent_table_owner:monitor_for_cleanup(
+        self(), {erlang, is_integer, [42]})),
+    cleanup().
+
+monitor_for_cleanup_hardened_fires_callback_test() ->
+    %% In hardened mode, the owner monitors the pid and executes
+    %% the MFA callback when it dies.
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => hardened}),
+    %% Create a public table as a signal: the callback inserts a marker.
+    SignalTable = beam_agent_monitor_test_signal,
+    delete_table(SignalTable),
+    _ = ets:new(SignalTable, [set, public, named_table]),
+    %% Spawn a process and register a callback that writes to the table.
+    Doomed = spawn(fun() -> receive stop -> ok end end),
+    ok = beam_agent_table_owner:monitor_for_cleanup(Doomed,
+        {ets, insert, [SignalTable, {cleaned_up, true}]}),
+    %% Kill the doomed process.
+    exit(Doomed, kill),
+    wait_for_death(Doomed),
+    %% Give the owner loop time to process DOWN.
+    timer:sleep(50),
+    %% The callback should have fired, inserting the marker.
+    ?assertEqual([{cleaned_up, true}], ets:lookup(SignalTable, cleaned_up)),
+    ets:delete(SignalTable),
+    cleanup().
+
+monitor_already_dead_process_test() ->
+    %% Monitoring a process that is already dead is safe.
+    %% erlang:monitor/2 immediately delivers a DOWN message.
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => hardened}),
+    SignalTable = beam_agent_monitor_dead_signal,
+    delete_table(SignalTable),
+    _ = ets:new(SignalTable, [set, public, named_table]),
+    %% Spawn and kill a process BEFORE registering the monitor.
+    Doomed = spawn(fun() -> ok end),
+    wait_for_death(Doomed),
+    %% Register monitor for already-dead process.
+    ok = beam_agent_table_owner:monitor_for_cleanup(Doomed,
+        {ets, insert, [SignalTable, {cleaned_up, true}]}),
+    %% DOWN is delivered immediately — callback fires.
+    timer:sleep(50),
+    ?assertEqual([{cleaned_up, true}], ets:lookup(SignalTable, cleaned_up)),
+    ets:delete(SignalTable),
+    cleanup().
+
+monitor_for_cleanup_uninitialized_test() ->
+    %% When not initialized, no owner exists — returns ignored.
+    cleanup(),
+    ?assertEqual(ignored, beam_agent_table_owner:monitor_for_cleanup(
+        self(), {erlang, is_integer, [42]})).

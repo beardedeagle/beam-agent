@@ -58,6 +58,18 @@ Future mitigation paths if this proves to be an issue:
 
 For now, the single owner is the simplest correct implementation.
 
+## Process Monitoring
+
+In hardened mode, the owner process can monitor arbitrary pids on behalf
+of SDK modules via `monitor_for_cleanup/2`. When a monitored process
+dies, the owner executes the registered `{Module, Function, Args}` callback
+to perform ETS cleanup. This piggybacks on the existing owner loop with
+zero new processes.
+
+In public mode (no owner process), `monitor_for_cleanup/2` returns
+`ignored` — the consumer is responsible for monitoring subscriber
+processes and calling cleanup functions directly.
+
 ## Audit Classification
 
 Five tables are classified as single-writer (primarily written by
@@ -83,6 +95,7 @@ and writes are proxied through the owner process.
     is_always_protected/1,
     resolve_access/1,
     write_proxy_sync/3,
+    monitor_for_cleanup/2,
     initialized/0
 ]).
 
@@ -226,6 +239,33 @@ write_proxy_sync(Op, Table, Arg) ->
             end
     end.
 
+-doc """
+Ask the owner process to monitor `Pid` and execute `MFA` when it dies.
+
+In hardened mode, sends an asynchronous message to the owner process.
+The owner calls `erlang:monitor(process, Pid)` and stores the MFA
+callback. When the monitored process exits, the owner executes the
+callback directly — since the owner owns the ETS tables, cleanup
+writes have zero proxy overhead.
+
+In public mode (no owner process), returns `ignored`. The consumer
+is responsible for monitoring processes and calling cleanup functions.
+
+Monitoring a pid that is already dead is safe — the BEAM immediately
+delivers a `'DOWN'` message, so the cleanup callback fires on the
+next owner loop iteration.
+""".
+-spec monitor_for_cleanup(pid(), {module(), atom(), [term()]}) -> ok | ignored.
+monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
+  when is_pid(Pid), is_atom(Mod), is_atom(Fun), is_list(Args) ->
+    case owner_pid() of
+        undefined ->
+            ignored;
+        OwnerPid ->
+            OwnerPid ! {monitor_for_cleanup, Pid, MFA},
+            ok
+    end.
+
 %%--------------------------------------------------------------------
 %% Internal: Initialization
 %%--------------------------------------------------------------------
@@ -243,7 +283,7 @@ do_init(hardened) ->
         persistent_term:put(?PT_OWNER, self()),
         persistent_term:put(?PT_INIT, true),
         Consumer ! {self(), tables_ready},
-        owner_loop(Consumer)
+        owner_loop(Consumer, #{})
     end),
     receive
         {Pid, tables_ready} ->
@@ -256,8 +296,9 @@ do_init(hardened) ->
 %% Internal: Owner Process Loop
 %%--------------------------------------------------------------------
 
--spec owner_loop(pid()) -> no_return().
-owner_loop(Consumer) ->
+-spec owner_loop(pid(), #{reference() => {module(), atom(), [term()]}}) ->
+    no_return().
+owner_loop(Consumer, Monitors) ->
     receive
         %% Table creation request — we must create it so we own it.
         %% Set the consumer as heir so tables survive owner crashes.
@@ -271,13 +312,39 @@ owner_loop(Consumer) ->
                     %% Already exists — that's fine.
                     From ! {table_created, Ref, ok}
             end,
-            owner_loop(Consumer);
+            owner_loop(Consumer, Monitors);
 
         %% Synchronous write — caller needs the result.
         {write_sync, Op, Table, Arg, From, Ref} ->
             Result = safe_write(Op, Table, Arg),
             From ! {write_ack, Ref, Result},
-            owner_loop(Consumer);
+            owner_loop(Consumer, Monitors);
+
+        %% Monitor a process for cleanup — called by SDK modules
+        %% (e.g., beam_agent_events) to get automatic ETS cleanup
+        %% when a subscriber dies.
+        {monitor_for_cleanup, Pid, MFA} ->
+            MonRef = erlang:monitor(process, Pid),
+            owner_loop(Consumer, Monitors#{MonRef => MFA});
+
+        %% Monitored process died — execute the cleanup callback.
+        %% The callback runs inside the owner, so ETS writes are
+        %% direct (no proxy overhead). Errors are caught to protect
+        %% the owner from faulty callbacks.
+        {'DOWN', MonRef, process, _Pid, _Reason} ->
+            case maps:take(MonRef, Monitors) of
+                {{Mod, Fun, Args}, Monitors1} ->
+                    try apply(Mod, Fun, Args)
+                    catch Class:Err:Stack ->
+                        logger:warning(
+                            "beam_agent_table_owner: monitor cleanup "
+                            "callback ~p:~p/~p failed: ~p:~p~n~p",
+                            [Mod, Fun, length(Args), Class, Err, Stack])
+                    end,
+                    owner_loop(Consumer, Monitors1);
+                error ->
+                    owner_loop(Consumer, Monitors)
+            end;
 
         %% Consumer died — we follow.
         {'EXIT', Consumer, Reason} ->
@@ -286,9 +353,9 @@ owner_loop(Consumer) ->
 
         %% Any other linked process exit — continue.
         {'EXIT', _Other, normal} ->
-            owner_loop(Consumer);
+            owner_loop(Consumer, Monitors);
         {'EXIT', _Other, _Reason} ->
-            owner_loop(Consumer)
+            owner_loop(Consumer, Monitors)
     end.
 
 %%--------------------------------------------------------------------
