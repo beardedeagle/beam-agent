@@ -880,7 +880,7 @@ native_or(Session, Function, Args, Fallback) ->
     end.
 
 -doc "Annotate a result map with `source => universal` and the session backend.".
--spec with_universal_source(pid(), map()) -> map().
+-spec with_universal_source(pid(), map()) -> #{'source' := 'universal', _ => _}.
 with_universal_source(Session, Result) ->
     Base = Result#{source => universal},
     case backend(Session) of

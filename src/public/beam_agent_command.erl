@@ -346,7 +346,10 @@ Convenience wrapper that calls command_run/3 with empty options.
 Command may be a single binary or a list of binaries (command + args).
 See command_run/3 for details.
 """.
--spec command_run(pid(), binary() | [binary()]) -> {ok, term()} | {error, term()}.
+-spec command_run(pid(), binary() | [binary()]) ->
+    {ok, #{'source' := 'universal', _ => _}} |
+    {error, {port_exit, term()} | {port_failed, term()} |
+            {timeout, infinity | non_neg_integer()}}.
 command_run(Session, Command) ->
     command_run(Session, Command, #{}).
 
@@ -359,7 +362,10 @@ to a universal shell executor when the backend does not support
 native command execution. Opts may include timeout, env, and cwd
 overrides.
 """.
--spec command_run(pid(), binary() | [binary()], map()) -> {ok, term()} | {error, term()}.
+-spec command_run(pid(), binary() | [binary()], map()) ->
+    {ok, #{'source' := 'universal', _ => _}} |
+    {error, {port_exit, term()} | {port_failed, term()} |
+            {timeout, infinity | non_neg_integer()}}.
 command_run(Session, Command, Opts) ->
     case beam_agent_core:native_call(Session, command_run, [Command, Opts]) of
         {ok, Result} when is_map(Result) ->
@@ -446,7 +452,8 @@ send_command(Session, Command, Params) ->
 %% Private helpers
 %%--------------------------------------------------------------------
 
--spec universal_session_destroy(pid(), binary()) -> {ok, map()}.
+-spec universal_session_destroy(pid(), binary()) ->
+    {ok, #{'source' := 'universal', _ => _}}.
 universal_session_destroy(Session, SessionId) ->
     ok = beam_agent_core:delete_session(SessionId),
     ok = beam_agent_runtime_core:clear_session(SessionId),
@@ -478,8 +485,13 @@ normalize_prompt_async_result(Session, Result) ->
         result => Result
     }).
 
--spec universal_command_run(pid(), binary() | [binary()], map()) ->
-    {ok, map()} | {error, term()}.
+-spec universal_command_run(pid(), binary() | [binary()],
+    #{'cwd' => binary() | string(), 'env' => [{[any()], [any()]}],
+      'max_output' => pos_integer(), 'timeout' => pos_integer()}) ->
+    {ok, #{'backend' := 'claude' | 'codex' | 'copilot' | 'gemini' | 'opencode' | 'undefined',
+           'exit_code' := integer(), 'output' := binary(), 'source' := 'universal'}} |
+    {error, {port_exit, term()} | {port_failed, term()} |
+            {timeout, infinity | non_neg_integer()}}.
 universal_command_run(Session, Command, Opts) ->
     case beam_agent_command_core:run(command_to_shell(Command), Opts) of
         {ok, Result} ->
@@ -491,8 +503,25 @@ universal_command_run(Session, Command, Opts) ->
             Error
     end.
 
--spec universal_prompt_async(pid(), binary(), map()) ->
-    {ok, #{source := universal, _ => _}} | {error, _}.
+-spec universal_prompt_async(pid(), binary(), #{
+    'agent' => binary(), 'allowed_tools' => [binary()],
+    'approval_policy' => binary(), 'attachments' => [map()],
+    'cwd' => binary(), 'disallowed_tools' => [binary()],
+    'effort' => binary(), 'max_budget_usd' => number(),
+    'max_tokens' => pos_integer(), 'max_turns' => pos_integer(),
+    'mode' => binary(), 'model' => binary(), 'model_id' => binary(),
+    'output_format' => 'json_schema' | 'text' | binary() | map(),
+    'permission_mode' => 'accept_edits' | 'bypass_permissions' | 'default'
+                       | 'dont_ask' | 'plan' | binary(),
+    'provider' => map(), 'provider_id' => binary(),
+    'sandbox_mode' => binary(), 'summary' => binary(),
+    'system' => binary() | map(),
+    'system_prompt' => binary() | #{'preset' := binary(), 'type' := 'preset',
+                                     'append' => binary()},
+    'thinking' => map(), 'timeout' => 'infinity' | non_neg_integer(),
+    'tools' => [any()] | map()
+}) ->
+    {ok, #{'source' := 'universal', _ => _}} | {error, _}.
 universal_prompt_async(Session, Prompt, Opts) when is_binary(Prompt), is_map(Opts) ->
     Timeout = maps:get(timeout, Opts, 120000),
     case beam_agent_router:send_query(Session, Prompt, Opts, Timeout) of
@@ -516,7 +545,10 @@ universal_shell_command(Session, Command, Opts) when is_binary(Command), is_map(
             Error
     end.
 
--spec universal_submit_feedback(pid(), map()) -> {ok, map()}.
+-spec universal_submit_feedback(pid(), map()) ->
+    {ok, #{'backend' := 'claude' | 'codex' | 'copilot' | 'gemini' | 'opencode' | 'undefined',
+           'feedback' := map(), 'session_id' := binary(),
+           'source' := 'universal', 'stored' := 'true'}}.
 universal_submit_feedback(Session, Feedback) when is_map(Feedback) ->
     SessionId = beam_agent_core:session_identity(Session),
     ok = beam_agent_control:submit_feedback(SessionId, Feedback),
@@ -528,7 +560,12 @@ universal_submit_feedback(Session, Feedback) when is_map(Feedback) ->
         feedback => Feedback
     }}.
 
--spec universal_turn_respond(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec universal_turn_respond(pid(), binary(), map()) ->
+    {ok, #{'backend' := 'claude' | 'codex' | 'copilot' | 'gemini' | 'opencode' | 'undefined',
+           'request_id' := binary(), 'resolved' := 'true',
+           'response' := #{'source' := 'universal', _ => _},
+           'source' := 'universal'}} |
+    {error, 'already_resolved' | 'not_found'}.
 universal_turn_respond(Session, RequestId, Params) when is_binary(RequestId), is_map(Params) ->
     SessionId = beam_agent_core:session_identity(Session),
     Response0 = case maps:is_key(response, Params) of
