@@ -46,6 +46,12 @@ jobs:
 
       - name: Publish to hex.pm
         run: |
+          VERSION=$(sed -n 's/.*{vsn, *"\([^"]*\)".*/\1/p' src/beam_agent.app.src)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hex.pm/api/packages/beam_agent/releases/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "beam_agent $VERSION already exists on hex.pm — skipping."
+            exit 0
+          fi
           rebar3 hex publish --yes
 
   publish-elixir:
@@ -78,6 +84,12 @@ jobs:
             VERSION="$INPUT_VERSION"
           else
             VERSION="${TAG_NAME#v}"
+          fi
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hex.pm/api/packages/beam_agent_ex/releases/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "beam_agent_ex $VERSION already exists on hex.pm — skipping."
+            exit 0
           fi
 
           # Swap the local path dep to a published hex dep for release.
