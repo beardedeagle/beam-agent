@@ -1,0 +1,770 @@
+-module(beam_agent_command_guard).
+-moduledoc false.
+
+%% Layer 3 of the BeamAgent command security architecture.
+%%
+%% Functional state machine that coordinates command security:
+%% - Evaluates commands through policy (Layer 1) and validator (Layer 2)
+%% - Enforces rate limits per-program, per-category, and globally
+%% - Detects temporal patterns in command history
+%% - Manages security state: active -> throttle -> lockdown
+%%
+%% Not a process.  State lives in ETS (shared mutable) and
+%% persistent_term (read-heavy config).  Follows the same pattern
+%% as beam_agent_mcp_dispatch: the caller owns the control flow,
+%% ETS provides cross-session state sharing.
+%%
+%% Tables (created via beam_agent_ets:ensure_table):
+%%   beam_agent_guard_state     (set)         - security state machine
+%%   beam_agent_command_history  (ordered_set) - recent command records
+%%   beam_agent_rate_limits      (set)         - rate limit counters
+
+%% API
+-export([
+    init/0,
+    init/1,
+    teardown/0,
+    evaluate/2,
+    record_execution/3,
+    lockdown/1,
+    reset/0,
+    reload_policy/1,
+    status/0,
+    running/0
+]).
+
+-export_type([
+    guard_result/0,
+    evaluate_opts/0,
+    rate_limit_config/0,
+    temporal_rule/0,
+    command_matcher/0
+]).
+
+%%--------------------------------------------------------------------
+%% Types
+%%--------------------------------------------------------------------
+
+-type guard_result() :: allow | {deny, binary()} | {throttle, pos_integer()}.
+
+-type evaluate_opts() :: #{
+    agent => atom(),
+    session_state => atom(),
+    cwd => binary() | undefined,
+    env => [{string(), string()}] | undefined,
+    opts => map(),
+    metadata => map()
+}.
+
+-type rate_limit_config() :: #{
+    global => {pos_integer(), pos_integer()},
+    per_program => {pos_integer(), pos_integer()},
+    per_category => #{atom() => {pos_integer(), pos_integer()}}
+}.
+
+-type temporal_rule() :: #{
+    name := binary(),
+    description := binary(),
+    pattern := [command_matcher()],
+    window_ms := pos_integer(),
+    action := throttle | lockdown | alert
+}.
+
+-type command_matcher() :: #{
+    program => binary(),
+    args_contain => binary(),
+    exit_code => integer(),
+    category => atom()
+}.
+
+-type security_state() :: active | throttle | lockdown.
+
+%% Suppress benign supertype warnings: specs are intentionally wider than
+%% current call-site usage to permit future extension without spec churn.
+-dialyzer({nowarn_function, [check_temporal_patterns/3,
+                             safe_delete_all/1,
+                             status/0,
+                             check_field/3,
+                             check_field_contains/3,
+                             get_recent_history/1,
+                             build_status/0,
+                             app_config/2,
+                             default_rate_limits/0]}).
+
+%%--------------------------------------------------------------------
+%% Defines
+%%--------------------------------------------------------------------
+
+-define(STATE_TABLE, beam_agent_guard_state).
+-define(HISTORY_TABLE, beam_agent_command_history).
+-define(RATE_TABLE, beam_agent_rate_limits).
+-define(DEFAULT_HISTORY_MAX, 100).
+-define(LOCKDOWN_THRESHOLD, 10).
+
+%% persistent_term keys
+-define(PT_INIT, beam_agent_guard_initialized).
+-define(PT_POLICY, beam_agent_guard_policy).
+-define(PT_RATE_CONFIG, beam_agent_guard_rate_config).
+-define(PT_TEMPORAL_RULES, beam_agent_guard_temporal_rules).
+-define(PT_VALIDATOR_MOD, beam_agent_guard_validator_mod).
+-define(PT_HISTORY_MAX, beam_agent_guard_history_max).
+
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
+
+-doc "Initialize the security guard with default configuration.".
+-spec init() -> ok.
+init() -> init(#{}).
+
+-doc """
+Initialize the security guard with custom configuration.
+
+Creates ETS tables for state, history, and rate limits.  Stores
+configuration in persistent_term for fast concurrent reads.
+
+Options:
+  - `policy` - policy config (default: `beam_agent_command_policy:default_policy()`)
+  - `rate_limits` - rate limit config (default: sensible defaults)
+  - `temporal_rules` - temporal pattern rules (default: built-in rules)
+  - `validator` - validator module (default: `beam_agent_command_validator_default`)
+  - `history_max` - max history entries (default: 100)
+""".
+-spec init(map()) -> ok.
+init(Opts) ->
+    %% Create tables -- idempotent via beam_agent_ets
+    beam_agent_ets:ensure_table(?STATE_TABLE,
+        [set, named_table,
+         {read_concurrency, true}, {write_concurrency, true}]),
+    beam_agent_ets:ensure_table(?HISTORY_TABLE,
+        [ordered_set, named_table, {read_concurrency, true}]),
+    beam_agent_ets:ensure_table(?RATE_TABLE,
+        [set, named_table,
+         {read_concurrency, true}, {write_concurrency, true}]),
+
+    %% Store config in persistent_term (fast concurrent reads)
+    Policy = maps:get(policy, Opts,
+        app_config(command_policy,
+            beam_agent_command_policy:default_policy())),
+    RateConfig = maps:get(rate_limits, Opts,
+        app_config(command_rate_limits, default_rate_limits())),
+    TemporalRules = maps:get(temporal_rules, Opts,
+        app_config(command_temporal_rules, default_temporal_rules())),
+    ValidatorMod = maps:get(validator, Opts,
+        app_config(command_validator,
+            beam_agent_command_validator_default)),
+    %% Ensure the validator module is loaded so that
+    %% erlang:function_exported/3 works for optional callbacks
+    %% (function_exported does not trigger auto-loading).
+    _ = code:ensure_loaded(ValidatorMod),
+    HistoryMax = maps:get(history_max, Opts, ?DEFAULT_HISTORY_MAX),
+
+    persistent_term:put(?PT_POLICY, Policy),
+    persistent_term:put(?PT_RATE_CONFIG, RateConfig),
+    persistent_term:put(?PT_TEMPORAL_RULES, TemporalRules),
+    persistent_term:put(?PT_VALIDATOR_MOD, ValidatorMod),
+    persistent_term:put(?PT_HISTORY_MAX, HistoryMax),
+
+    %% Initialize security state -- start active
+    beam_agent_ets:insert(?STATE_TABLE, {security_state, active}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_until, 0}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
+    beam_agent_ets:insert(?STATE_TABLE, {lockdown_reason, <<>>}),
+
+    %% Clear any stale data from previous init
+    beam_agent_ets:delete_all_objects(?HISTORY_TABLE),
+    beam_agent_ets:delete_all_objects(?RATE_TABLE),
+
+    persistent_term:put(?PT_INIT, true),
+    ok.
+
+-doc "Tear down the security guard, clearing all state.".
+-spec teardown() -> ok.
+teardown() ->
+    _ = persistent_term:erase(?PT_INIT),
+    _ = persistent_term:erase(?PT_POLICY),
+    _ = persistent_term:erase(?PT_RATE_CONFIG),
+    _ = persistent_term:erase(?PT_TEMPORAL_RULES),
+    _ = persistent_term:erase(?PT_VALIDATOR_MOD),
+    _ = persistent_term:erase(?PT_HISTORY_MAX),
+    safe_delete_all(?STATE_TABLE),
+    safe_delete_all(?HISTORY_TABLE),
+    safe_delete_all(?RATE_TABLE),
+    ok.
+
+-doc "Check whether the security guard is initialized.".
+-spec running() -> boolean().
+running() ->
+    persistent_term:get(?PT_INIT, false).
+
+-doc "Submit a command for security evaluation.".
+-spec evaluate(beam_agent_command_parser:command_struct(), evaluate_opts()) ->
+    guard_result().
+evaluate(CmdStruct, EvalOpts) ->
+    case get_security_state() of
+        lockdown ->
+            Reason = get_lockdown_reason(),
+            {deny, <<"Lockdown: ", Reason/binary>>};
+        throttle ->
+            handle_throttle_evaluate(CmdStruct, EvalOpts);
+        active ->
+            handle_active_evaluate(CmdStruct, EvalOpts)
+    end.
+
+-doc "Record a command execution result for history and temporal detection.".
+-spec record_execution(beam_agent_command_parser:command_struct(),
+                       evaluate_opts(),
+                       {ok, map()} | {error, term()}) -> ok.
+record_execution(CmdStruct, EvalOpts, ExecResult) ->
+    do_record_execution(CmdStruct, EvalOpts, ExecResult).
+
+-doc "Force the guard into lockdown state.".
+-spec lockdown(binary()) -> ok.
+lockdown(Reason) ->
+    enter_lockdown(Reason).
+
+-doc "Reset the guard from lockdown or throttle to active state.".
+-spec reset() -> ok.
+reset() ->
+    emit_event(reset, #{}),
+    beam_agent_ets:delete_all_objects(?RATE_TABLE),
+    beam_agent_ets:insert(?STATE_TABLE, {security_state, active}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_until, 0}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
+    beam_agent_ets:insert(?STATE_TABLE, {lockdown_reason, <<>>}),
+    ok.
+
+-doc "Hot-reload the policy configuration.".
+-spec reload_policy(beam_agent_command_policy:policy_config()) -> ok.
+reload_policy(PolicyConfig) ->
+    persistent_term:put(?PT_POLICY, PolicyConfig),
+    emit_event(policy_reload, #{}),
+    ok.
+
+-doc "Get the current guard status.".
+-spec status() -> map().
+status() ->
+    build_status().
+
+%%--------------------------------------------------------------------
+%% Internal: Active state evaluation
+%%--------------------------------------------------------------------
+
+-spec handle_active_evaluate(beam_agent_command_parser:command_struct(),
+                             evaluate_opts()) -> guard_result().
+handle_active_evaluate(CmdStruct, EvalOpts) ->
+    RateConfig = persistent_term:get(?PT_RATE_CONFIG),
+    case check_rate_limits(CmdStruct, RateConfig) of
+        ok ->
+            case do_evaluate(CmdStruct, EvalOpts) of
+                allow ->
+                    update_rate_limits(CmdStruct, RateConfig),
+                    check_temporal_patterns(CmdStruct, EvalOpts, allow);
+                {deny, _} = Denial ->
+                    Denial
+            end;
+        {exceeded, RetryMs} ->
+            emit_event(throttled, #{retry_after_ms => RetryMs}),
+            enter_throttle(RateConfig),
+            {throttle, RetryMs}
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Throttle state evaluation (lazy recovery)
+%%--------------------------------------------------------------------
+
+-spec handle_throttle_evaluate(beam_agent_command_parser:command_struct(),
+                               evaluate_opts()) -> guard_result().
+handle_throttle_evaluate(CmdStruct, EvalOpts) ->
+    ThrottleUntil = get_throttle_until(),
+    Now = erlang:monotonic_time(millisecond),
+    case Now >= ThrottleUntil of
+        true ->
+            %% Lazy recovery: throttle window expired, return to active.
+            %% Two callers racing here both set active -- same outcome.
+            beam_agent_ets:insert(?STATE_TABLE, {security_state, active}),
+            beam_agent_ets:insert(?STATE_TABLE, {throttle_until, 0}),
+            beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
+            handle_active_evaluate(CmdStruct, EvalOpts);
+        false ->
+            %% Still throttled -- atomic increment, check lockdown
+            NewCount = beam_agent_ets:update_counter(
+                ?STATE_TABLE, throttle_denied, {2, 1},
+                {throttle_denied, 0}),
+            case NewCount >= ?LOCKDOWN_THRESHOLD of
+                true ->
+                    Reason = <<"Excessive commands during throttle">>,
+                    emit_event(lockdown, #{reason => Reason,
+                        denied_during_throttle => NewCount}),
+                    enter_lockdown(Reason),
+                    {deny, <<"Lockdown: ", Reason/binary>>};
+                false ->
+                    RetryMs = max(1, ThrottleUntil - Now),
+                    {throttle, RetryMs}
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Command evaluation (policy + validator)
+%%--------------------------------------------------------------------
+
+-spec do_evaluate(beam_agent_command_parser:command_struct(),
+                  evaluate_opts()) -> allow | {deny, binary()}.
+do_evaluate(CmdStruct, EvalOpts) ->
+    Policy = persistent_term:get(?PT_POLICY),
+    PolicyResult = beam_agent_command_policy:evaluate(CmdStruct, Policy),
+    case PolicyResult of
+        {deny, Reason} ->
+            emit_event(denied, #{layer => policy, reason => Reason}),
+            {deny, Reason};
+        _ ->
+            Ctx = build_context(CmdStruct, EvalOpts, PolicyResult),
+            ValidatorMod = persistent_term:get(?PT_VALIDATOR_MOD),
+            try ValidatorMod:validate(CmdStruct, Ctx) of
+                allow ->
+                    emit_event(allowed, #{
+                        agent => maps:get(agent, EvalOpts, undefined)}),
+                    allow;
+                {deny, Reason2} ->
+                    emit_event(denied, #{
+                        layer => validator, reason => Reason2}),
+                    {deny, Reason2};
+                {deny, Reason2, _Details} ->
+                    emit_event(denied, #{
+                        layer => validator, reason => Reason2}),
+                    {deny, Reason2}
+            catch
+                Class:Err:Stack ->
+                    logger:warning(
+                        "beam_agent_command_guard: validator ~p crashed: "
+                        "~p:~p~n~p", [ValidatorMod, Class, Err, Stack]),
+                    {deny, <<"Validator error (fail-safe deny)">>}
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Rate limiting
+%%--------------------------------------------------------------------
+
+-spec check_rate_limits(beam_agent_command_parser:command_struct(),
+                        rate_limit_config()) -> ok | {exceeded, pos_integer()}.
+check_rate_limits(CmdStruct, RC) ->
+    Now = erlang:monotonic_time(millisecond),
+    case check_one_rate({global, global}, Now, maps:get(global, RC, undefined)) of
+        {exceeded, Ms} -> {exceeded, Ms};
+        ok ->
+            Program = maps:get(program, CmdStruct, undefined),
+            case check_program_rate(Program, Now, RC) of
+                {exceeded, Ms} -> {exceeded, Ms};
+                ok ->
+                    Program2 = maps:get(program, CmdStruct, <<>>),
+                    Category = beam_agent_command_parser:categorize(Program2),
+                    check_category_rate(Category, Now, RC)
+            end
+    end.
+
+-spec check_program_rate(binary() | undefined, integer(), rate_limit_config()) ->
+    ok | {exceeded, pos_integer()}.
+check_program_rate(undefined, _Now, _RC) -> ok;
+check_program_rate(Program, Now, RC) ->
+    check_one_rate({per_program, Program}, Now,
+                   maps:get(per_program, RC, undefined)).
+
+-spec check_category_rate(atom(), integer(), rate_limit_config()) ->
+    ok | {exceeded, pos_integer()}.
+check_category_rate(unknown, _Now, _RC) -> ok;
+check_category_rate(Category, Now, RC) ->
+    CategoryLimits = maps:get(per_category, RC, #{}),
+    check_one_rate({per_category, Category}, Now,
+                   maps:get(Category, CategoryLimits, undefined)).
+
+-spec check_one_rate(term(), integer(), {pos_integer(), pos_integer()} | undefined) ->
+    ok | {exceeded, pos_integer()}.
+check_one_rate(_Key, _Now, undefined) -> ok;
+check_one_rate(Key, Now, {MaxCount, WindowMs}) ->
+    case beam_agent_ets:lookup(?RATE_TABLE, Key) of
+        [{_, Count, WindowStart}] ->
+            WindowEnd = WindowStart + WindowMs,
+            if
+                Now >= WindowEnd  -> ok;
+                Count >= MaxCount -> {exceeded, WindowEnd - Now};
+                true              -> ok
+            end;
+        [] -> ok
+    end.
+
+-spec update_rate_limits(beam_agent_command_parser:command_struct(),
+                         rate_limit_config()) -> ok.
+update_rate_limits(CmdStruct, RC) ->
+    Now = erlang:monotonic_time(millisecond),
+    bump({global, global}, Now, maps:get(global, RC, undefined)),
+    case maps:get(program, CmdStruct, undefined) of
+        undefined -> ok;
+        Prog -> bump({per_program, Prog}, Now,
+                     maps:get(per_program, RC, undefined))
+    end,
+    Category = beam_agent_command_parser:categorize(
+        maps:get(program, CmdStruct, <<>>)),
+    case Category of
+        unknown -> ok;
+        _ ->
+            CatLimits = maps:get(per_category, RC, #{}),
+            case maps:get(Category, CatLimits, undefined) of
+                undefined -> ok;
+                {_, WindowMs} ->
+                    bump_counter({per_category, Category}, Now, WindowMs)
+            end
+    end,
+    ok.
+
+-spec bump(term(), integer(), {pos_integer(), pos_integer()} | undefined) -> ok.
+bump(_Key, _Now, undefined) -> ok;
+bump(Key, Now, {_, WindowMs}) -> bump_counter(Key, Now, WindowMs).
+
+-spec bump_counter(term(), integer(), pos_integer()) -> ok.
+bump_counter(Key, Now, WindowMs) ->
+    case beam_agent_ets:lookup(?RATE_TABLE, Key) of
+        [{_, _Count, WS}] when Now < WS + WindowMs ->
+            _ = beam_agent_ets:update_counter(?RATE_TABLE, Key, {2, 1}),
+            ok;
+        _ ->
+            beam_agent_ets:insert(?RATE_TABLE, {Key, 1, Now}),
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Temporal pattern detection
+%%--------------------------------------------------------------------
+
+-spec check_temporal_patterns(beam_agent_command_parser:command_struct(),
+                              evaluate_opts(), guard_result()) ->
+    guard_result().
+check_temporal_patterns(CmdStruct, EvalOpts, Result) ->
+    TemporalRules = persistent_term:get(?PT_TEMPORAL_RULES),
+    CurrentEntry = cmd_to_entry(CmdStruct, EvalOpts),
+    case check_temporal(CurrentEntry, TemporalRules) of
+        ok ->
+            Result;
+        {action, throttle, RuleName} ->
+            emit_event(pattern_detected,
+                       #{rule => RuleName, action => throttle}),
+            RateConfig = persistent_term:get(?PT_RATE_CONFIG),
+            enter_throttle(RateConfig),
+            Result;
+        {action, lockdown, RuleName} ->
+            Reason = <<"Temporal pattern: ", RuleName/binary>>,
+            emit_event(pattern_detected,
+                       #{rule => RuleName, action => lockdown}),
+            enter_lockdown(Reason),
+            Result;
+        {action, alert, RuleName} ->
+            emit_event(pattern_detected,
+                       #{rule => RuleName, action => alert}),
+            Result
+    end.
+
+-spec check_temporal(map(), [temporal_rule()]) ->
+    ok | {action, atom(), binary()}.
+check_temporal(_Entry, []) -> ok;
+check_temporal(Entry, [#{pattern := Pattern, window_ms := WindowMs,
+                         name := Name, action := Action} | Rest]) ->
+    Now = erlang:monotonic_time(millisecond),
+    History = get_history_since(Now - WindowMs),
+    AllEntries = History ++ [Entry],
+    case match_pattern_seq(Pattern, AllEntries) of
+        true  -> {action, Action, Name};
+        false -> check_temporal(Entry, Rest)
+    end.
+
+-spec match_pattern_seq([command_matcher()], [map()]) -> boolean().
+match_pattern_seq([], _History) -> true;
+match_pattern_seq(_Matchers, []) -> false;
+match_pattern_seq([M | Ms], [E | Es]) ->
+    case match_entry(M, E) of
+        true  -> match_pattern_seq(Ms, Es);
+        false -> match_pattern_seq([M | Ms], Es)
+    end.
+
+-spec match_entry(command_matcher(), map()) -> boolean().
+match_entry(Matcher, Entry) ->
+    check_field(program, Matcher, Entry) andalso
+    check_field_contains(args_contain, Matcher, Entry) andalso
+    check_field(exit_code, Matcher, Entry) andalso
+    check_field(category, Matcher, Entry).
+
+-spec check_field(atom(), map(), map()) -> boolean().
+check_field(Key, Matcher, Entry) ->
+    case maps:get(Key, Matcher, undefined) of
+        undefined -> true;
+        Val       -> maps:get(Key, Entry, undefined) =:= Val
+    end.
+
+-spec check_field_contains(atom(), map(), map()) -> boolean().
+check_field_contains(Key, Matcher, Entry) ->
+    case maps:get(Key, Matcher, undefined) of
+        undefined -> true;
+        Pattern   ->
+            Raw = maps:get(raw, Entry, <<>>),
+            binary:match(Raw, Pattern) =/= nomatch
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: History management
+%%--------------------------------------------------------------------
+
+-spec do_record_execution(beam_agent_command_parser:command_struct(),
+                          evaluate_opts(),
+                          {ok, map()} | {error, term()}) -> ok.
+do_record_execution(CmdStruct, EvalOpts, ExecResult) ->
+    Now = erlang:monotonic_time(millisecond),
+    ExitCode = case ExecResult of
+        {ok, #{exit_code := EC}} -> EC;
+        _ -> undefined
+    end,
+    Entry = (cmd_to_entry(CmdStruct, EvalOpts))#{exit_code => ExitCode},
+    beam_agent_ets:insert(?HISTORY_TABLE, {{Now, make_ref()}, Entry}),
+    HistoryMax = persistent_term:get(?PT_HISTORY_MAX),
+    prune_history(HistoryMax),
+    notify_validator(CmdStruct, EvalOpts, ExecResult),
+    ok.
+
+-spec cmd_to_entry(beam_agent_command_parser:command_struct(),
+                   evaluate_opts()) -> map().
+cmd_to_entry(CmdStruct, EvalOpts) ->
+    #{
+        program  => maps:get(program, CmdStruct, undefined),
+        raw      => maps:get(raw, CmdStruct, <<>>),
+        category => beam_agent_command_parser:categorize(
+            maps:get(program, CmdStruct, <<>>)),
+        agent    => maps:get(agent, EvalOpts, undefined)
+    }.
+
+-spec prune_history(pos_integer()) -> ok.
+prune_history(Max) ->
+    Size = beam_agent_ets:info(?HISTORY_TABLE, size),
+    drop_oldest(max(0, Size - Max)).
+
+-spec drop_oldest(non_neg_integer()) -> ok.
+drop_oldest(0) -> ok;
+drop_oldest(N) ->
+    case ets:first(?HISTORY_TABLE) of
+        '$end_of_table' -> ok;
+        Key ->
+            beam_agent_ets:delete(?HISTORY_TABLE, Key),
+            drop_oldest(N - 1)
+    end.
+
+-spec get_history_since(integer()) -> [map()].
+get_history_since(CutoffTime) ->
+    MS = [{{{'$1', '_'}, '$2'}, [{'>=', '$1', CutoffTime}], ['$2']}],
+    beam_agent_ets:select(?HISTORY_TABLE, MS).
+
+-spec get_recent_history(pos_integer()) -> [map()].
+get_recent_history(N) ->
+    collect_last(?HISTORY_TABLE, ets:last(?HISTORY_TABLE), N, []).
+
+-spec collect_last(atom(), term(), non_neg_integer(), [map()]) -> [map()].
+collect_last(_T, '$end_of_table', _N, Acc) -> Acc;
+collect_last(_T, _Key, 0, Acc) -> Acc;
+collect_last(T, Key, N, Acc) ->
+    [{_, Entry}] = beam_agent_ets:lookup(T, Key),
+    collect_last(T, ets:prev(T, Key), N - 1, [Entry | Acc]).
+
+%%--------------------------------------------------------------------
+%% Internal: State helpers
+%%--------------------------------------------------------------------
+
+-spec get_security_state() -> security_state().
+get_security_state() ->
+    case beam_agent_ets:lookup(?STATE_TABLE, security_state) of
+        [{_, State}] -> State;
+        [] -> active
+    end.
+
+-spec get_throttle_until() -> integer().
+get_throttle_until() ->
+    case beam_agent_ets:lookup(?STATE_TABLE, throttle_until) of
+        [{_, Until}] -> Until;
+        [] -> 0
+    end.
+
+-spec get_lockdown_reason() -> binary().
+get_lockdown_reason() ->
+    case beam_agent_ets:lookup(?STATE_TABLE, lockdown_reason) of
+        [{_, Reason}] -> Reason;
+        [] -> <<"Security lockdown">>
+    end.
+
+-spec enter_throttle(rate_limit_config()) -> ok.
+enter_throttle(RC) ->
+    WindowMs = smallest_window(RC),
+    Now = erlang:monotonic_time(millisecond),
+    beam_agent_ets:insert(?STATE_TABLE, {security_state, throttle}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_until, Now + WindowMs}),
+    beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
+    ok.
+
+-spec enter_lockdown(binary()) -> ok.
+enter_lockdown(Reason) ->
+    emit_event(lockdown, #{reason => Reason}),
+    beam_agent_ets:insert(?STATE_TABLE, {security_state, lockdown}),
+    beam_agent_ets:insert(?STATE_TABLE, {lockdown_reason, Reason}),
+    ok.
+
+-spec smallest_window(rate_limit_config()) -> pos_integer().
+smallest_window(RC) ->
+    Base = [W || {_, W} <- [maps:get(global, RC, {0, 60000}),
+                            maps:get(per_program, RC, {0, 60000})]],
+    Cat  = [W || {_, W} <- maps:values(maps:get(per_category, RC, #{}))],
+    case Base ++ Cat of
+        [] -> 60000;
+        All -> lists:min(All)
+    end.
+
+-spec build_status() -> map().
+build_status() ->
+    State = get_security_state(),
+    HistSize = beam_agent_ets:info(?HISTORY_TABLE, size),
+    Rates = beam_agent_ets:tab2list(?RATE_TABLE),
+    Status = #{
+        state        => State,
+        history_size => HistSize,
+        rate_limits  => maps:from_list(
+            [{Key, #{count => C, window_start => WS}}
+             || {Key, C, WS} <- Rates])
+    },
+    case State of
+        lockdown -> Status#{lockdown_reason => get_lockdown_reason()};
+        _        -> Status
+    end.
+
+-spec safe_delete_all(atom()) -> ok.
+safe_delete_all(Table) ->
+    try beam_agent_ets:delete_all_objects(Table)
+    catch _:_ -> ok
+    end,
+    ok.
+
+%%--------------------------------------------------------------------
+%% Internal: Validation context
+%%--------------------------------------------------------------------
+
+-spec build_context(beam_agent_command_parser:command_struct(),
+                    evaluate_opts(),
+                    beam_agent_command_policy:policy_result()) ->
+    beam_agent_command_validator:validation_context().
+build_context(CmdStruct, EvalOpts, PolicyResult) ->
+    #{
+        command_struct => CmdStruct,
+        raw_command    => maps:get(raw, CmdStruct, <<>>),
+        command_form   => maps:get(input_form, CmdStruct, string),
+        session_state  => maps:get(session_state, EvalOpts, undefined),
+        agent          => maps:get(agent, EvalOpts, undefined),
+        opts           => maps:get(opts, EvalOpts, #{}),
+        cwd            => maps:get(cwd, EvalOpts, undefined),
+        env            => maps:get(env, EvalOpts, undefined),
+        history        => get_recent_history(10),
+        timestamp      => erlang:system_time(),
+        policy_result  => PolicyResult,
+        metadata       => maps:get(metadata, EvalOpts, #{})
+    }.
+
+-spec build_execution_context(beam_agent_command_parser:command_struct(),
+                              evaluate_opts()) ->
+    beam_agent_command_validator:execution_context().
+build_execution_context(CmdStruct, EvalOpts) ->
+    #{
+        raw_command    => maps:get(raw, CmdStruct, <<>>),
+        command_form   => maps:get(input_form, CmdStruct, string),
+        session_state  => maps:get(session_state, EvalOpts, undefined),
+        agent          => maps:get(agent, EvalOpts, undefined),
+        opts           => maps:get(opts, EvalOpts, #{}),
+        cwd            => maps:get(cwd, EvalOpts, undefined),
+        env            => maps:get(env, EvalOpts, undefined),
+        history        => get_recent_history(10),
+        timestamp      => erlang:system_time(),
+        metadata       => maps:get(metadata, EvalOpts, #{})
+    }.
+
+%%--------------------------------------------------------------------
+%% Internal: Post-execution notification
+%%--------------------------------------------------------------------
+
+-spec notify_validator(beam_agent_command_parser:command_struct(),
+                       evaluate_opts(),
+                       {ok, map()} | {error, term()}) -> ok.
+notify_validator(CmdStruct, EvalOpts, ExecResult) ->
+    Mod = persistent_term:get(?PT_VALIDATOR_MOD),
+    case erlang:function_exported(Mod, on_execution, 3) of
+        true ->
+            Ctx = build_execution_context(CmdStruct, EvalOpts),
+            try Mod:on_execution(CmdStruct, Ctx, ExecResult)
+            catch Class:Err:Stack ->
+                logger:warning(
+                    "beam_agent_command_guard: on_execution ~p crashed: "
+                    "~p:~p~n~p", [Mod, Class, Err, Stack])
+            end,
+            ok;
+        false ->
+            ok
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Config
+%%--------------------------------------------------------------------
+
+-spec app_config(atom(), term()) -> term().
+app_config(Key, Default) ->
+    application:get_env(beam_agent, Key, Default).
+
+-spec default_rate_limits() -> rate_limit_config().
+default_rate_limits() ->
+    #{
+        global      => {60, 60000},
+        per_program => {20, 60000},
+        per_category => #{
+            destructive      => {5, 60000},
+            filesystem_write => {30, 60000},
+            network          => {10, 60000}
+        }
+    }.
+
+-spec default_temporal_rules() -> [temporal_rule()].
+default_temporal_rules() ->
+    [
+        #{name        => <<"rapid_deletion">>,
+          description => <<"Multiple file deletions in rapid succession">>,
+          pattern     => [#{program => <<"rm">>},
+                          #{program => <<"rm">>},
+                          #{program => <<"rm">>}],
+          window_ms   => 10000,
+          action      => throttle},
+        #{name        => <<"recon_then_destroy">>,
+          description => <<"Directory listing followed by recursive deletion">>,
+          pattern     => [#{program => <<"ls">>},
+                          #{program => <<"rm">>, args_contain => <<"-r">>}],
+          window_ms   => 30000,
+          action      => alert},
+        #{name        => <<"repeated_failures">>,
+          description => <<"Multiple command failures may indicate probing">>,
+          pattern     => [#{exit_code => 1}, #{exit_code => 1},
+                          #{exit_code => 1}, #{exit_code => 1},
+                          #{exit_code => 1}],
+          window_ms   => 30000,
+          action      => alert}
+    ].
+
+%%--------------------------------------------------------------------
+%% Internal: Telemetry
+%%--------------------------------------------------------------------
+
+-spec emit_event(atom(), map()) -> ok.
+emit_event(EventSuffix, Metadata) ->
+    case erlang:function_exported(telemetry, execute, 3) of
+        true ->
+            apply(telemetry, execute,
+                  [[beam_agent, security, EventSuffix],
+                   #{system_time => erlang:system_time()},
+                   Metadata]);
+        false -> ok
+    end.

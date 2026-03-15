@@ -9,6 +9,22 @@ underlying CLI supports it natively.
 Uses `erlang:open_port/2` with `spawn_executable` for safe,
 timeout-aware, output-captured command execution.
 
+## Security
+
+When the security guard (`beam_agent_command_guard`) is running, every
+command is evaluated through the security pipeline before execution:
+
+  1. **Parser** (Layer 0) — structural analysis
+  2. **Policy** (Layer 1) — static deny/allow rules
+  3. **Validator** (Layer 2) — pluggable validation
+  4. **Guard** (Layer 3) — rate limits, temporal patterns
+
+If the guard is not running, commands execute directly — security is
+opt-in and does not break existing callers.
+
+After execution, the result is recorded in the guard's history for
+temporal pattern detection.
+
 ## Telemetry
 
 When the `telemetry` library is present, every command execution emits
@@ -58,7 +74,12 @@ Usage:
 -type command_error() ::
     {port_exit, term()} |
     {port_failed, term()} |
-    {timeout, infinity | non_neg_integer()}.
+    {timeout, infinity | non_neg_integer()} |
+    {security, security_denial()}.
+
+-type security_denial() ::
+    {deny, binary()} |
+    {throttle, pos_integer()}.
 
 %% Default values.
 -define(DEFAULT_TIMEOUT, 30000).
@@ -89,6 +110,63 @@ Options:
 -spec run(binary() | string() | [binary() | string()], command_opts()) ->
     {ok, command_result()} | {error, command_error()}.
 run(Command, Opts) when is_map(Opts) ->
+    CmdStruct = beam_agent_command_parser:parse(Command),
+    EvalOpts = build_eval_opts(Opts),
+    case security_check(CmdStruct, EvalOpts) of
+        allow ->
+            Result = do_run(Command, Opts),
+            record_execution(CmdStruct, EvalOpts, Result),
+            Result;
+        {deny, Reason} ->
+            {error, {security, {deny, Reason}}};
+        {throttle, RetryMs} ->
+            {error, {security, {throttle, RetryMs}}}
+    end.
+
+%%--------------------------------------------------------------------
+%% Internal: Security Integration
+%%--------------------------------------------------------------------
+
+%% Check the security guard if it is running. When not running,
+%% commands execute directly — security is opt-in.
+-spec security_check(beam_agent_command_parser:command_struct(),
+                     beam_agent_command_guard:evaluate_opts()) ->
+    allow | {deny, binary()} | {throttle, pos_integer()}.
+security_check(CmdStruct, EvalOpts) ->
+    case beam_agent_command_guard:running() of
+        true  -> beam_agent_command_guard:evaluate(CmdStruct, EvalOpts);
+        false -> allow
+    end.
+
+%% Record execution result in the guard's history (fire-and-forget cast).
+-spec record_execution(beam_agent_command_parser:command_struct(),
+                       beam_agent_command_guard:evaluate_opts(),
+                       {ok, command_result()} | {error, command_error()}) -> ok.
+record_execution(CmdStruct, EvalOpts, Result) ->
+    case beam_agent_command_guard:running() of
+        true  -> beam_agent_command_guard:record_execution(CmdStruct, EvalOpts, Result);
+        false -> ok
+    end.
+
+%% Build evaluate options from command opts for the guard.
+-spec build_eval_opts(command_opts()) -> beam_agent_command_guard:evaluate_opts().
+build_eval_opts(Opts) ->
+    #{
+        agent => maps:get(agent, Opts, undefined),
+        session_state => maps:get(session_state, Opts, undefined),
+        cwd => maps:get(cwd, Opts, undefined),
+        env => maps:get(env, Opts, undefined),
+        opts => Opts,
+        metadata => maps:get(metadata, Opts, #{})
+    }.
+
+%%--------------------------------------------------------------------
+%% Internal: Command Execution
+%%--------------------------------------------------------------------
+
+-spec do_run(binary() | string() | [binary() | string()], command_opts()) ->
+    {ok, command_result()} | {error, command_error()}.
+do_run(Command, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
     MaxOutput = maps:get(max_output, Opts, ?DEFAULT_MAX_OUTPUT),
     CmdStr = command_string(Command),
