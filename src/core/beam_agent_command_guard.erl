@@ -18,7 +18,7 @@
 %%   beam_agent_guard_state       (set)         - security state machine
 %%   beam_agent_command_history    (ordered_set) - recent command records
 %%   beam_agent_rate_limits        (set)         - rate limit counters
-%%   beam_agent_active_executors   (set)         - tracked executor pids
+%%   beam_agent_active_commands    (set)         - tracked command ports
 
 %% API
 -export([
@@ -32,8 +32,8 @@
     reload_policy/1,
     status/0,
     running/0,
-    register_executor/2,
-    unregister_executor/1
+    register_command/2,
+    unregister_command/1
 ]).
 
 -export_type([
@@ -103,7 +103,7 @@
 -define(RATE_TABLE, beam_agent_rate_limits).
 -define(DEFAULT_HISTORY_MAX, 100).
 -define(LOCKDOWN_THRESHOLD, 10).
--define(EXECUTOR_TABLE, beam_agent_active_executors).
+-define(COMMAND_TABLE, beam_agent_active_commands).
 
 %% persistent_term keys
 -define(PT_INIT, beam_agent_guard_initialized).
@@ -145,7 +145,7 @@ init(Opts) ->
     beam_agent_ets:ensure_table(?RATE_TABLE,
         [set, named_table,
          {read_concurrency, true}, {write_concurrency, true}]),
-    beam_agent_ets:ensure_table(?EXECUTOR_TABLE,
+    beam_agent_ets:ensure_table(?COMMAND_TABLE,
         [set, named_table, {write_concurrency, true}]),
 
     %% Store config in persistent_term (fast concurrent reads)
@@ -196,7 +196,7 @@ teardown() ->
     safe_delete_all(?STATE_TABLE),
     safe_delete_all(?HISTORY_TABLE),
     safe_delete_all(?RATE_TABLE),
-    safe_delete_all(?EXECUTOR_TABLE),
+    safe_delete_all(?COMMAND_TABLE),
     ok.
 
 -doc "Check whether the security guard is initialized.".
@@ -254,20 +254,25 @@ status() ->
     build_status().
 
 %%--------------------------------------------------------------------
-%% Executor Lifecycle
+%% Command Port Tracking
 %%--------------------------------------------------------------------
 
--doc "Register an executor process for tracking and lockdown-kill.".
--spec register_executor(pid(), binary()) -> ok.
-register_executor(Pid, Command) ->
-    beam_agent_ets:insert(?EXECUTOR_TABLE,
-        {Pid, Command, erlang:monotonic_time()}),
+-doc """
+Register a command port for tracking and cooperative lockdown.
+
+The port is keyed in ETS; the calling process's pid is stored as
+the owner so that lockdown can send it a shutdown message.
+""".
+-spec register_command(port(), binary()) -> ok.
+register_command(Port, Command) ->
+    beam_agent_ets:insert(?COMMAND_TABLE,
+        {Port, self(), Command, erlang:monotonic_time()}),
     ok.
 
--doc "Unregister an executor process (called on completion or cleanup).".
--spec unregister_executor(pid()) -> ok.
-unregister_executor(Pid) ->
-    try beam_agent_ets:delete(?EXECUTOR_TABLE, Pid)
+-doc "Unregister a command port (called on completion or cleanup).".
+-spec unregister_command(port()) -> ok.
+unregister_command(Port) ->
+    try beam_agent_ets:delete(?COMMAND_TABLE, Port)
     catch _:_ -> ok
     end,
     ok.
@@ -635,19 +640,19 @@ enter_throttle(RC) ->
     beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
     ok.
 
--spec kill_active_executors() -> ok.
-kill_active_executors() ->
-    Executors = try beam_agent_ets:tab2list(?EXECUTOR_TABLE)
-                catch _:_ -> []
-                end,
-    lists:foreach(fun({Pid, _Cmd, _Time}) ->
-        exit(Pid, kill)
-    end, Executors),
-    safe_delete_all(?EXECUTOR_TABLE).
+-spec signal_active_commands(binary()) -> ok.
+signal_active_commands(Reason) ->
+    Commands = try beam_agent_ets:tab2list(?COMMAND_TABLE)
+               catch _:_ -> []
+               end,
+    lists:foreach(fun({Port, OwnerPid, _Cmd, _Time}) ->
+        OwnerPid ! {beam_agent_lockdown, Port, Reason}
+    end, Commands),
+    safe_delete_all(?COMMAND_TABLE).
 
 -spec enter_lockdown(binary()) -> ok.
 enter_lockdown(Reason) ->
-    kill_active_executors(),
+    signal_active_commands(Reason),
     emit_event(lockdown, #{reason => Reason}),
     beam_agent_ets:insert(?STATE_TABLE, {security_state, lockdown}),
     beam_agent_ets:insert(?STATE_TABLE, {lockdown_reason, Reason}),
@@ -667,12 +672,12 @@ smallest_window(RC) ->
 build_status() ->
     State = get_security_state(),
     HistSize = beam_agent_ets:info(?HISTORY_TABLE, size),
-    ExecCount = beam_agent_ets:info(?EXECUTOR_TABLE, size),
+    CmdCount = beam_agent_ets:info(?COMMAND_TABLE, size),
     Rates = beam_agent_ets:tab2list(?RATE_TABLE),
     Status = #{
         state            => State,
         history_size     => HistSize,
-        active_executors => ExecCount,
+        active_commands => CmdCount,
         rate_limits  => maps:from_list(
             [{Key, #{count => C, window_start => WS}}
              || {Key, C, WS} <- Rates])

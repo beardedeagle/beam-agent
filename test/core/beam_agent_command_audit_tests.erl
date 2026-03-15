@@ -3,8 +3,9 @@
 %%%
 %%% Tests cover:
 %%%   - Sequential trace: start/stop audit trail
-%%%   - System monitor: start/stop, idempotent stop
-%%%   - Resource alarm telemetry emission
+%%%   - Token verification: label, send, receive, timestamp
+%%%   - System monitor: install/uninstall on self()
+%%%   - handle_monitor_message/1 pure function routing
 %%%
 %%% These tests use real seq_trace and system_monitor — no mocks.
 %%% @end
@@ -56,144 +57,98 @@ start_audit_trail_enables_timestamp_test() ->
     beam_agent_command_audit:stop_audit_trail().
 
 %%====================================================================
-%% System Monitor — lifecycle
+%% Idempotency
 %%====================================================================
 
-start_monitor_sets_system_monitor_test() ->
-    beam_agent_command_audit:start_monitor(),
-    try
-        MonSetting = erlang:system_monitor(),
-        ?assertMatch({_Pid, _Opts}, MonSetting),
-        {Pid, _} = MonSetting,
-        ?assert(is_pid(Pid)),
-        ?assert(is_process_alive(Pid))
-    after
-        beam_agent_command_audit:stop_monitor()
-    end.
+stop_audit_trail_idempotent_test() ->
+    %% Stopping when never started should not crash
+    ?assertEqual(ok, beam_agent_command_audit:stop_audit_trail()),
+    ?assertEqual(ok, beam_agent_command_audit:stop_audit_trail()).
 
-stop_monitor_clears_system_monitor_test() ->
-    beam_agent_command_audit:start_monitor(),
-    beam_agent_command_audit:stop_monitor(),
-    ?assertEqual(undefined, erlang:system_monitor()).
+start_stop_cycle_test() ->
+    %% Multiple start/stop cycles should work cleanly
+    beam_agent_command_audit:start_audit_trail(ref1),
+    beam_agent_command_audit:stop_audit_trail(),
+    beam_agent_command_audit:start_audit_trail(ref2),
+    {label, Got} = seq_trace:get_token(label),
+    ?assertEqual(ref2, Got),
+    beam_agent_command_audit:stop_audit_trail(),
+    ?assertEqual([], seq_trace:get_token()).
 
-stop_monitor_idempotent_test() ->
-    %% Calling stop when not started should not crash
-    ?assertEqual(ok, beam_agent_command_audit:stop_monitor()),
-    ?assertEqual(ok, beam_agent_command_audit:stop_monitor()).
+%%====================================================================
+%% System Monitor — install/uninstall on self()
+%%====================================================================
 
-start_monitor_replaces_previous_test() ->
-    beam_agent_command_audit:start_monitor(),
-    {Pid1, _} = erlang:system_monitor(),
-    beam_agent_command_audit:start_monitor(),
-    try
-        {Pid2, _} = erlang:system_monitor(),
-        ?assertNotEqual(Pid1, Pid2),
-        %% Old monitor process should be dead
-        ?assertNot(is_process_alive(Pid1)),
-        ?assert(is_process_alive(Pid2))
-    after
-        beam_agent_command_audit:stop_monitor()
-    end.
+install_system_monitor_sets_self_test() ->
+    %% install_system_monitor/0 sets self() as the VM system monitor.
+    beam_agent_command_audit:install_system_monitor(),
+    {Pid, _Opts} = erlang:system_monitor(),
+    ?assertEqual(self(), Pid),
+    beam_agent_command_audit:uninstall_system_monitor().
 
-start_monitor_custom_thresholds_test() ->
-    beam_agent_command_audit:start_monitor(#{
+uninstall_system_monitor_clears_test() ->
+    beam_agent_command_audit:install_system_monitor(),
+    beam_agent_command_audit:uninstall_system_monitor(),
+    Result = erlang:system_monitor(),
+    ?assertEqual(undefined, Result).
+
+uninstall_system_monitor_idempotent_test() ->
+    %% Uninstalling when never installed should not crash
+    ?assertEqual(ok, beam_agent_command_audit:uninstall_system_monitor()).
+
+install_system_monitor_with_custom_opts_test() ->
+    beam_agent_command_audit:install_system_monitor(#{
         long_gc => 100,
         long_schedule => 200,
         large_heap => 5_000_000,
         busy_port => false
     }),
-    try
-        {_Pid, Opts} = erlang:system_monitor(),
-        ?assert(lists:member({long_gc, 100}, Opts)),
-        ?assert(lists:member({long_schedule, 200}, Opts)),
-        ?assert(lists:member({large_heap, 5_000_000}, Opts)),
-        ?assertNot(lists:member(busy_port, Opts))
-    after
-        beam_agent_command_audit:stop_monitor()
-    end.
+    {Pid, Opts} = erlang:system_monitor(),
+    ?assertEqual(self(), Pid),
+    ?assert(lists:member({long_gc, 100}, Opts)),
+    ?assert(lists:member({long_schedule, 200}, Opts)),
+    ?assert(lists:member({large_heap, 5000000}, Opts)),
+    ?assertNot(lists:member(busy_port, Opts)),
+    beam_agent_command_audit:uninstall_system_monitor().
+
+install_system_monitor_defaults_include_busy_port_test() ->
+    beam_agent_command_audit:install_system_monitor(),
+    {_Pid, Opts} = erlang:system_monitor(),
+    ?assert(lists:member(busy_port, Opts)),
+    beam_agent_command_audit:uninstall_system_monitor().
 
 %%====================================================================
-%% Resource alarm telemetry
+%% handle_monitor_message/1 — pure function tests
 %%====================================================================
 
-resource_alarm_large_heap_telemetry_test() ->
-    {ok, _} = application:ensure_all_started(telemetry),
-    Self = self(),
-    HandlerId = <<"test_resource_alarm_large_heap">>,
-    telemetry:attach(HandlerId,
-        [beam_agent, security, resource_alarm],
-        fun(_EventName, _Measurements, Metadata, _Config) ->
-            Self ! {resource_alarm, Metadata}
-        end,
-        []),
-    beam_agent_command_audit:start_monitor(),
-    try
-        MonPid = persistent_term:get(beam_agent_audit_monitor_pid),
-        %% Send a simulated system_monitor message directly
-        MonPid ! {monitor, self(), large_heap, 999999},
-        receive
-            {resource_alarm, Meta} ->
-                ?assertEqual(large_heap, maps:get(alarm_type, Meta)),
-                ?assertEqual(999999, maps:get(heap_size, Meta)),
-                ?assertEqual(self(), maps:get(pid, Meta))
-        after 1000 ->
-            ?assert(false)
-        end
-    after
-        beam_agent_command_audit:stop_monitor(),
-        telemetry:detach(HandlerId)
-    end.
+handle_monitor_message_long_gc_test() ->
+    Msg = {monitor, self(), long_gc, [{timeout, 55}]},
+    Result = beam_agent_command_audit:handle_monitor_message(Msg),
+    ?assertMatch({alarm, long_gc, #{pid := _, info := _}}, Result).
 
-resource_alarm_long_gc_telemetry_test() ->
-    {ok, _} = application:ensure_all_started(telemetry),
-    Self = self(),
-    HandlerId = <<"test_resource_alarm_long_gc">>,
-    telemetry:attach(HandlerId,
-        [beam_agent, security, resource_alarm],
-        fun(_EventName, _Measurements, Metadata, _Config) ->
-            Self ! {resource_alarm, Metadata}
-        end,
-        []),
-    beam_agent_command_audit:start_monitor(),
-    try
-        MonPid = persistent_term:get(beam_agent_audit_monitor_pid),
-        FakeInfo = [{timeout, 100}],
-        MonPid ! {monitor, self(), long_gc, FakeInfo},
-        receive
-            {resource_alarm, Meta} ->
-                ?assertEqual(long_gc, maps:get(alarm_type, Meta)),
-                ?assertEqual(FakeInfo, maps:get(info, Meta))
-        after 1000 ->
-            ?assert(false)
-        end
-    after
-        beam_agent_command_audit:stop_monitor(),
-        telemetry:detach(HandlerId)
-    end.
+handle_monitor_message_long_schedule_test() ->
+    Msg = {monitor, self(), long_schedule, [{timeout, 60}]},
+    Result = beam_agent_command_audit:handle_monitor_message(Msg),
+    ?assertMatch({alarm, long_schedule, #{pid := _, info := _}}, Result).
 
-resource_alarm_busy_port_telemetry_test() ->
-    {ok, _} = application:ensure_all_started(telemetry),
-    Self = self(),
-    HandlerId = <<"test_resource_alarm_busy_port">>,
-    telemetry:attach(HandlerId,
-        [beam_agent, security, resource_alarm],
-        fun(_EventName, _Measurements, Metadata, _Config) ->
-            Self ! {resource_alarm, Metadata}
-        end,
-        []),
-    beam_agent_command_audit:start_monitor(),
-    try
-        MonPid = persistent_term:get(beam_agent_audit_monitor_pid),
-        %% Use a fake port-like value for testing
-        MonPid ! {monitor, self(), busy_port, fake_port},
-        receive
-            {resource_alarm, Meta} ->
-                ?assertEqual(busy_port, maps:get(alarm_type, Meta)),
-                ?assertEqual(fake_port, maps:get(port, Meta))
-        after 1000 ->
-            ?assert(false)
-        end
-    after
-        beam_agent_command_audit:stop_monitor(),
-        telemetry:detach(HandlerId)
-    end.
+handle_monitor_message_large_heap_test() ->
+    Msg = {monitor, self(), large_heap, 15_000_000},
+    Result = beam_agent_command_audit:handle_monitor_message(Msg),
+    ?assertMatch({alarm, large_heap, #{pid := _, heap_size := 15000000}}, Result).
+
+handle_monitor_message_busy_port_test() ->
+    FakePort = fake_port,
+    Msg = {monitor, self(), busy_port, FakePort},
+    Result = beam_agent_command_audit:handle_monitor_message(Msg),
+    ?assertMatch({alarm, busy_port, #{pid := _, port := _}}, Result).
+
+handle_monitor_message_unknown_ignored_test() ->
+    ?assertEqual(ignore,
+        beam_agent_command_audit:handle_monitor_message({unexpected, data})).
+
+handle_monitor_message_preserves_details_test() ->
+    Msg = {monitor, self(), long_gc, [{timeout, 42}]},
+    {alarm, long_gc, Details} =
+        beam_agent_command_audit:handle_monitor_message(Msg),
+    ?assertEqual(self(), maps:get(pid, Details)),
+    ?assertEqual([{timeout, 42}], maps:get(info, Details)).

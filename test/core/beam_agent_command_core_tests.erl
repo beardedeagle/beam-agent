@@ -388,7 +388,7 @@ run_executor_registers_with_guard_test() ->
         {ok, _} = beam_agent_command_core:run(<<"echo guarded">>),
         Status = beam_agent_command_guard:status(),
         %% After completion, executor should be unregistered
-        ?assertEqual(0, maps:get(active_executors, Status))
+        ?assertEqual(0, maps:get(active_commands, Status))
     after
         beam_agent_command_guard:teardown()
     end.

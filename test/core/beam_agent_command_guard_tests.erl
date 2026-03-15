@@ -13,11 +13,11 @@
 %%%   - Validator crash -> fail-safe deny
 %%%   - on_execution/3 post-execution notification
 %%%   - on_execution/3 crash -> fail-safe (no break)
-%%%   - Executor registration and unregistration
-%%%   - Lockdown kills active executors
-%%%   - Status includes active_executors count
+%%%   - Command port registration and unregistration
+%%%   - Lockdown signals active commands (cooperative)
+%%%   - Status includes active_commands count
 %%%
-%%% These tests use real ETS tables — no mocks, no processes.
+%%% These tests use real ETS tables — no mocks, minimal processes.
 %%% Each test initializes/tears down the guard for isolation.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -385,69 +385,71 @@ on_execution_crash_safe_test() ->
     end).
 
 %%====================================================================
-%% Executor registration
+%% Command port registration
 %%====================================================================
 
-register_executor_tracks_pid_test() ->
+register_command_tracks_port_test() ->
     with_guard(relaxed_config(), fun() ->
-        Pid = spawn(fun() -> receive stop -> ok end end),
-        beam_agent_command_guard:register_executor(Pid, <<"echo hello">>),
+        FakePort = fake_port_key,
+        beam_agent_command_guard:register_command(FakePort, <<"echo hello">>),
         Status = beam_agent_command_guard:status(),
-        ?assertEqual(1, maps:get(active_executors, Status)),
-        beam_agent_command_guard:unregister_executor(Pid),
-        Pid ! stop
+        ?assertEqual(1, maps:get(active_commands, Status)),
+        beam_agent_command_guard:unregister_command(FakePort)
     end).
 
-unregister_executor_removes_pid_test() ->
+unregister_command_removes_port_test() ->
     with_guard(relaxed_config(), fun() ->
-        Pid = spawn(fun() -> receive stop -> ok end end),
-        beam_agent_command_guard:register_executor(Pid, <<"test">>),
-        beam_agent_command_guard:unregister_executor(Pid),
+        FakePort = fake_port_key,
+        beam_agent_command_guard:register_command(FakePort, <<"test">>),
+        beam_agent_command_guard:unregister_command(FakePort),
         Status = beam_agent_command_guard:status(),
-        ?assertEqual(0, maps:get(active_executors, Status)),
-        Pid ! stop
+        ?assertEqual(0, maps:get(active_commands, Status))
     end).
 
-unregister_executor_idempotent_test() ->
+unregister_command_idempotent_test() ->
     with_guard(relaxed_config(), fun() ->
-        %% Unregistering a never-registered pid should not crash
+        %% Unregistering a never-registered key should not crash
         ?assertEqual(ok,
-            beam_agent_command_guard:unregister_executor(self()))
+            beam_agent_command_guard:unregister_command(fake_port_key))
     end).
 
-status_includes_active_executors_test() ->
+status_includes_active_commands_test() ->
     with_guard(relaxed_config(), fun() ->
         Status = beam_agent_command_guard:status(),
-        ?assert(maps:is_key(active_executors, Status)),
-        ?assertEqual(0, maps:get(active_executors, Status))
+        ?assert(maps:is_key(active_commands, Status)),
+        ?assertEqual(0, maps:get(active_commands, Status))
     end).
 
 %%====================================================================
-%% Lockdown kills active executors
+%% Lockdown signals active commands (cooperative)
 %%====================================================================
 
-lockdown_kills_active_executors_test() ->
+lockdown_signals_active_commands_test() ->
     with_guard(relaxed_config(), fun() ->
-        Pid1 = spawn(fun() -> receive never -> ok end end),
-        Pid2 = spawn(fun() -> receive never -> ok end end),
-        Mon1 = monitor(process, Pid1),
-        Mon2 = monitor(process, Pid2),
-        beam_agent_command_guard:register_executor(Pid1, <<"cmd1">>),
-        beam_agent_command_guard:register_executor(Pid2, <<"cmd2">>),
-        %% Lockdown should kill both
-        beam_agent_command_guard:lockdown(<<"test kill">>),
-        receive {'DOWN', Mon1, process, Pid1, killed} -> ok
-        after 1000 -> error(pid1_not_killed) end,
-        receive {'DOWN', Mon2, process, Pid2, killed} -> ok
-        after 1000 -> error(pid2_not_killed) end,
-        %% Executor table should be cleared
+        Port1 = fake_port_1,
+        Port2 = fake_port_2,
+        %% Register commands with self() as owner (register_command uses self())
+        beam_agent_command_guard:register_command(Port1, <<"cmd1">>),
+        beam_agent_command_guard:register_command(Port2, <<"cmd2">>),
+        %% Lockdown should send lockdown messages to owner (self())
+        beam_agent_command_guard:lockdown(<<"test signal">>),
+        %% We should receive lockdown messages for both ports
+        receive
+            {beam_agent_lockdown, Port1, <<"test signal">>} -> ok
+        after 1000 -> error(no_lockdown_message_for_port1)
+        end,
+        receive
+            {beam_agent_lockdown, Port2, <<"test signal">>} -> ok
+        after 1000 -> error(no_lockdown_message_for_port2)
+        end,
+        %% Command table should be cleared
         Status = beam_agent_command_guard:status(),
-        ?assertEqual(0, maps:get(active_executors, Status))
+        ?assertEqual(0, maps:get(active_commands, Status))
     end).
 
-lockdown_with_no_executors_test() ->
+lockdown_with_no_commands_test() ->
     with_guard(relaxed_config(), fun() ->
-        %% Lockdown with no executors should not crash
+        %% Lockdown with no registered commands should not crash
         beam_agent_command_guard:lockdown(<<"empty lockdown">>),
         Status = beam_agent_command_guard:status(),
         ?assertEqual(lockdown, maps:get(state, Status))

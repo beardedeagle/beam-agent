@@ -3,17 +3,17 @@
 Security audit and observability for the BEAM Agent command system (Layer 5).
 
 Provides opt-in audit capabilities that extend the command security
-architecture with deeper observability:
+architecture with deeper observability.  No processes are spawned —
+all functions operate on the calling process or are pure.
 
   - **Sequential trace** (`seq_trace`) — enables causal audit trails
-    across processes for a command execution.  Useful for tracing the
-    full evaluation path from parse to policy to validator to guard
-    to executor.
+    across processes for a command execution.  Sets per-process tokens
+    on the caller.
 
   - **System monitor** (`erlang:system_monitor/2`) — detects resource
-    abuse (long GC, large heaps, busy ports) and emits telemetry events.
-    This is a VM-global setting — only one system monitor can be active
-    at any time.
+    abuse (long GC, large heaps, busy ports).  The caller installs
+    itself as the monitor and handles messages in its own receive loop
+    via `handle_monitor_message/1`.
 
 Both features are opt-in.  The command security system works without them.
 
@@ -28,11 +28,26 @@ beam_agent_command_audit:stop_audit_trail().
 
 ## System Monitor
 
+Install the calling process as the system monitor, then handle
+messages in its receive loop or `handle_info`:
+
 ```erlang
-beam_agent_command_audit:start_monitor(),
-%% Resource abuse events emitted as telemetry:
-%%   [beam_agent, security, resource_alarm]
-beam_agent_command_audit:stop_monitor().
+%% In init or start:
+beam_agent_command_audit:install_system_monitor(),
+
+%% In handle_info or receive loop:
+handle_info(Msg, State) ->
+    case beam_agent_command_audit:handle_monitor_message(Msg) of
+        {alarm, Type, Details} ->
+            %% Resource abuse detected — telemetry already emitted
+            logger:warning("resource alarm: ~p ~p", [Type, Details]),
+            {noreply, State};
+        ignore ->
+            {noreply, State}
+    end.
+
+%% On shutdown:
+beam_agent_command_audit:uninstall_system_monitor().
 ```
 """.
 
@@ -41,14 +56,12 @@ beam_agent_command_audit:stop_monitor().
     start_audit_trail/1,
     stop_audit_trail/0,
 
-    %% System monitor
-    start_monitor/0,
-    start_monitor/1,
-    stop_monitor/0
+    %% System monitor (caller owns the process)
+    install_system_monitor/0,
+    install_system_monitor/1,
+    uninstall_system_monitor/0,
+    handle_monitor_message/1
 ]).
-
-%% persistent_term key for monitor pid
--define(PT_MONITOR_PID, beam_agent_audit_monitor_pid).
 
 %% Default thresholds
 -define(DEFAULT_LONG_GC_MS, 50).
@@ -83,11 +96,11 @@ stop_audit_trail() ->
     ok.
 
 %%--------------------------------------------------------------------
-%% System Monitor
+%% System Monitor (caller owns the process)
 %%--------------------------------------------------------------------
 
 -doc """
-Start the system monitor with default thresholds.
+Install the calling process as the VM system monitor with defaults.
 
 Default thresholds:
   - `long_gc`: 50ms
@@ -98,13 +111,17 @@ Default thresholds:
 WARNING: `erlang:system_monitor/2` is a VM-global setting.  Only one
 process can be the system monitor at any time.  Calling this replaces
 any existing system monitor.
+
+The caller must handle monitor messages in its receive loop using
+`handle_monitor_message/1`.
 """.
--spec start_monitor() -> ok.
-start_monitor() ->
-    start_monitor(#{}).
+-spec install_system_monitor() -> ok.
+install_system_monitor() ->
+    install_system_monitor(#{}).
 
 -doc """
-Start the system monitor with custom thresholds.
+Install the calling process as the VM system monitor with custom
+thresholds.
 
 Options:
   - `long_gc` — GC pause threshold in ms (default: 50)
@@ -112,53 +129,53 @@ Options:
   - `large_heap` — heap size threshold in words (default: 10,000,000)
   - `busy_port` — monitor busy ports (default: true)
 """.
--spec start_monitor(map()) -> ok.
-start_monitor(Opts) ->
-    stop_monitor(),
+-spec install_system_monitor(map()) -> ok.
+install_system_monitor(Opts) ->
     MonitorOpts = build_monitor_opts(Opts),
-    Pid = spawn(fun() -> monitor_loop() end),
-    _ = erlang:system_monitor(Pid, MonitorOpts),
-    persistent_term:put(?PT_MONITOR_PID, Pid),
+    _ = erlang:system_monitor(self(), MonitorOpts),
     ok.
 
--doc "Stop the system monitor and clean up.".
--spec stop_monitor() -> ok.
-stop_monitor() ->
-    case persistent_term:get(?PT_MONITOR_PID, undefined) of
-        undefined ->
-            ok;
-        Pid ->
-            _ = erlang:system_monitor(undefined),
-            exit(Pid, shutdown),
-            _ = persistent_term:erase(?PT_MONITOR_PID),
-            ok
-    end.
+-doc "Remove the system monitor.  Safe to call even if not installed.".
+-spec uninstall_system_monitor() -> ok.
+uninstall_system_monitor() ->
+    _ = erlang:system_monitor(undefined),
+    ok.
+
+-doc """
+Parse a system monitor message, emit telemetry, and return a
+structured result.
+
+Returns `{alarm, AlarmType, Details}` for recognized monitor messages,
+or `ignore` for unrecognized messages.  Telemetry is emitted under
+`[beam_agent, security, resource_alarm]` before returning.
+
+Call this from your process's `handle_info` or receive loop.
+""".
+-spec handle_monitor_message(_) ->
+    {alarm, long_gc | long_schedule | large_heap | busy_port,
+     #{pid := pid(), info => term(), heap_size => non_neg_integer(),
+       port => port() | term()}} | ignore.
+handle_monitor_message({monitor, Pid, long_gc, Info}) ->
+    Details = #{pid => Pid, info => Info},
+    emit_resource_alarm(long_gc, Details),
+    {alarm, long_gc, Details};
+handle_monitor_message({monitor, Pid, long_schedule, Info}) ->
+    Details = #{pid => Pid, info => Info},
+    emit_resource_alarm(long_schedule, Details),
+    {alarm, long_schedule, Details};
+handle_monitor_message({monitor, Pid, large_heap, Size}) ->
+    Details = #{pid => Pid, heap_size => Size},
+    emit_resource_alarm(large_heap, Details),
+    {alarm, large_heap, Details};
+handle_monitor_message({monitor, Pid, busy_port, Port}) ->
+    Details = #{pid => Pid, port => Port},
+    emit_resource_alarm(busy_port, Details),
+    {alarm, busy_port, Details};
+handle_monitor_message(_) ->
+    ignore.
 
 %%--------------------------------------------------------------------
-%% Internal: Monitor process
-%%--------------------------------------------------------------------
-
--spec monitor_loop() -> no_return().
-monitor_loop() ->
-    receive
-        {monitor, Pid, long_gc, Info} ->
-            emit_resource_alarm(long_gc, #{pid => Pid, info => Info}),
-            monitor_loop();
-        {monitor, Pid, long_schedule, Info} ->
-            emit_resource_alarm(long_schedule, #{pid => Pid, info => Info}),
-            monitor_loop();
-        {monitor, Pid, large_heap, Size} ->
-            emit_resource_alarm(large_heap, #{pid => Pid, heap_size => Size}),
-            monitor_loop();
-        {monitor, Pid, busy_port, Port} ->
-            emit_resource_alarm(busy_port, #{pid => Pid, port => Port}),
-            monitor_loop();
-        _ ->
-            monitor_loop()
-    end.
-
-%%--------------------------------------------------------------------
-%% Internal: Helpers
+%% Internal
 %%--------------------------------------------------------------------
 
 -type monitor_opt() :: busy_port
