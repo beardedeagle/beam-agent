@@ -13,8 +13,11 @@
 %%%   - Validator crash -> fail-safe deny
 %%%   - on_execution/3 post-execution notification
 %%%   - on_execution/3 crash -> fail-safe (no break)
+%%%   - Command port registration and unregistration
+%%%   - Lockdown signals active commands (cooperative)
+%%%   - Status includes active_commands count
 %%%
-%%% These tests use real ETS tables — no mocks, no processes.
+%%% These tests use real ETS tables — no mocks, minimal processes.
 %%% Each test initializes/tears down the guard for isolation.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -379,4 +382,75 @@ on_execution_crash_safe_test() ->
         %% History should still be recorded
         Status = beam_agent_command_guard:status(),
         ?assert(maps:get(history_size, Status) > 0)
+    end).
+
+%%====================================================================
+%% Command port registration
+%%====================================================================
+
+register_command_tracks_port_test() ->
+    with_guard(relaxed_config(), fun() ->
+        FakePort = fake_port_key,
+        beam_agent_command_guard:register_command(FakePort, <<"echo hello">>),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(1, maps:get(active_commands, Status)),
+        beam_agent_command_guard:unregister_command(FakePort)
+    end).
+
+unregister_command_removes_port_test() ->
+    with_guard(relaxed_config(), fun() ->
+        FakePort = fake_port_key,
+        beam_agent_command_guard:register_command(FakePort, <<"test">>),
+        beam_agent_command_guard:unregister_command(FakePort),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(0, maps:get(active_commands, Status))
+    end).
+
+unregister_command_idempotent_test() ->
+    with_guard(relaxed_config(), fun() ->
+        %% Unregistering a never-registered key should not crash
+        ?assertEqual(ok,
+            beam_agent_command_guard:unregister_command(fake_port_key))
+    end).
+
+status_includes_active_commands_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Status = beam_agent_command_guard:status(),
+        ?assert(maps:is_key(active_commands, Status)),
+        ?assertEqual(0, maps:get(active_commands, Status))
+    end).
+
+%%====================================================================
+%% Lockdown signals active commands (cooperative)
+%%====================================================================
+
+lockdown_signals_active_commands_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Port1 = fake_port_1,
+        Port2 = fake_port_2,
+        %% Register commands with self() as owner (register_command uses self())
+        beam_agent_command_guard:register_command(Port1, <<"cmd1">>),
+        beam_agent_command_guard:register_command(Port2, <<"cmd2">>),
+        %% Lockdown should send lockdown messages to owner (self())
+        beam_agent_command_guard:lockdown(<<"test signal">>),
+        %% We should receive lockdown messages for both ports
+        receive
+            {beam_agent_lockdown, Port1, <<"test signal">>} -> ok
+        after 1000 -> error(no_lockdown_message_for_port1)
+        end,
+        receive
+            {beam_agent_lockdown, Port2, <<"test signal">>} -> ok
+        after 1000 -> error(no_lockdown_message_for_port2)
+        end,
+        %% Command table should be cleared
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(0, maps:get(active_commands, Status))
+    end).
+
+lockdown_with_no_commands_test() ->
+    with_guard(relaxed_config(), fun() ->
+        %% Lockdown with no registered commands should not crash
+        beam_agent_command_guard:lockdown(<<"empty lockdown">>),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(lockdown, maps:get(state, Status))
     end).
