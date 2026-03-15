@@ -341,3 +341,54 @@ telemetry_long_command_truncated_test() ->
         ?assert(false)
     end,
     telemetry:detach(HandlerId).
+
+%%====================================================================
+%% Restricted executor tests (Layer 4)
+%%====================================================================
+
+run_with_max_heap_option_test() ->
+    {ok, Result} = beam_agent_command_core:run(
+        <<"echo heap_test">>, #{max_heap => 10000000}),
+    ?assertEqual(0, maps:get(exit_code, Result)),
+    Output = maps:get(output, Result),
+    ?assert(binary:match(Output, <<"heap_test">>) =/= nomatch).
+
+run_with_sensitive_option_test() ->
+    {ok, Result} = beam_agent_command_core:run(
+        <<"echo secret_data">>, #{sensitive => true}),
+    ?assertEqual(0, maps:get(exit_code, Result)),
+    Output = maps:get(output, Result),
+    ?assert(binary:match(Output, <<"secret_data">>) =/= nomatch).
+
+run_with_both_executor_options_test() ->
+    {ok, Result} = beam_agent_command_core:run(
+        <<"echo combined">>,
+        #{max_heap => 10000000, sensitive => true}),
+    ?assertEqual(0, maps:get(exit_code, Result)).
+
+run_timeout_still_works_with_executor_test() ->
+    Result = beam_agent_command_core:run(
+        <<"sleep 10">>, #{timeout => 100}),
+    ?assertMatch({error, {timeout, 100}}, Result).
+
+run_nonzero_exit_with_executor_test() ->
+    {ok, Result} = beam_agent_command_core:run(<<"exit 42">>),
+    ?assertEqual(42, maps:get(exit_code, Result)).
+
+run_executor_registers_with_guard_test() ->
+    beam_agent_command_guard:init(#{
+        policy => #{deny => [], allow => [],
+                    default_string_action => allow,
+                    default_list_action => allow},
+        rate_limits => #{global => {1000, 60000},
+                         per_program => {1000, 60000},
+                         per_category => #{}},
+        temporal_rules => []}),
+    try
+        {ok, _} = beam_agent_command_core:run(<<"echo guarded">>),
+        Status = beam_agent_command_guard:status(),
+        %% After completion, executor should be unregistered
+        ?assertEqual(0, maps:get(active_executors, Status))
+    after
+        beam_agent_command_guard:teardown()
+    end.

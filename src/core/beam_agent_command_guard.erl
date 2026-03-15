@@ -15,9 +15,10 @@
 %% ETS provides cross-session state sharing.
 %%
 %% Tables (created via beam_agent_ets:ensure_table):
-%%   beam_agent_guard_state     (set)         - security state machine
-%%   beam_agent_command_history  (ordered_set) - recent command records
-%%   beam_agent_rate_limits      (set)         - rate limit counters
+%%   beam_agent_guard_state       (set)         - security state machine
+%%   beam_agent_command_history    (ordered_set) - recent command records
+%%   beam_agent_rate_limits        (set)         - rate limit counters
+%%   beam_agent_active_executors   (set)         - tracked executor pids
 
 %% API
 -export([
@@ -30,7 +31,9 @@
     reset/0,
     reload_policy/1,
     status/0,
-    running/0
+    running/0,
+    register_executor/2,
+    unregister_executor/1
 ]).
 
 -export_type([
@@ -100,6 +103,7 @@
 -define(RATE_TABLE, beam_agent_rate_limits).
 -define(DEFAULT_HISTORY_MAX, 100).
 -define(LOCKDOWN_THRESHOLD, 10).
+-define(EXECUTOR_TABLE, beam_agent_active_executors).
 
 %% persistent_term keys
 -define(PT_INIT, beam_agent_guard_initialized).
@@ -141,6 +145,8 @@ init(Opts) ->
     beam_agent_ets:ensure_table(?RATE_TABLE,
         [set, named_table,
          {read_concurrency, true}, {write_concurrency, true}]),
+    beam_agent_ets:ensure_table(?EXECUTOR_TABLE,
+        [set, named_table, {write_concurrency, true}]),
 
     %% Store config in persistent_term (fast concurrent reads)
     Policy = maps:get(policy, Opts,
@@ -190,6 +196,7 @@ teardown() ->
     safe_delete_all(?STATE_TABLE),
     safe_delete_all(?HISTORY_TABLE),
     safe_delete_all(?RATE_TABLE),
+    safe_delete_all(?EXECUTOR_TABLE),
     ok.
 
 -doc "Check whether the security guard is initialized.".
@@ -245,6 +252,25 @@ reload_policy(PolicyConfig) ->
 -spec status() -> map().
 status() ->
     build_status().
+
+%%--------------------------------------------------------------------
+%% Executor Lifecycle
+%%--------------------------------------------------------------------
+
+-doc "Register an executor process for tracking and lockdown-kill.".
+-spec register_executor(pid(), binary()) -> ok.
+register_executor(Pid, Command) ->
+    beam_agent_ets:insert(?EXECUTOR_TABLE,
+        {Pid, Command, erlang:monotonic_time()}),
+    ok.
+
+-doc "Unregister an executor process (called on completion or cleanup).".
+-spec unregister_executor(pid()) -> ok.
+unregister_executor(Pid) ->
+    try beam_agent_ets:delete(?EXECUTOR_TABLE, Pid)
+    catch _:_ -> ok
+    end,
+    ok.
 
 %%--------------------------------------------------------------------
 %% Internal: Active state evaluation
@@ -311,11 +337,13 @@ handle_throttle_evaluate(CmdStruct, EvalOpts) ->
 -spec do_evaluate(beam_agent_command_parser:command_struct(),
                   evaluate_opts()) -> allow | {deny, binary()}.
 do_evaluate(CmdStruct, EvalOpts) ->
+    T0 = erlang:monotonic_time(),
     Policy = persistent_term:get(?PT_POLICY),
     PolicyResult = beam_agent_command_policy:evaluate(CmdStruct, Policy),
     case PolicyResult of
         {deny, Reason} ->
-            emit_event(denied, #{layer => policy, reason => Reason}),
+            emit_event(denied, #{layer => policy, reason => Reason,
+                                 evaluation_time_us => eval_time_us(T0)}),
             {deny, Reason};
         _ ->
             Ctx = build_context(CmdStruct, EvalOpts, PolicyResult),
@@ -323,15 +351,18 @@ do_evaluate(CmdStruct, EvalOpts) ->
             try ValidatorMod:validate(CmdStruct, Ctx) of
                 allow ->
                     emit_event(allowed, #{
-                        agent => maps:get(agent, EvalOpts, undefined)}),
+                        agent => maps:get(agent, EvalOpts, undefined),
+                        evaluation_time_us => eval_time_us(T0)}),
                     allow;
                 {deny, Reason2} ->
                     emit_event(denied, #{
-                        layer => validator, reason => Reason2}),
+                        layer => validator, reason => Reason2,
+                        evaluation_time_us => eval_time_us(T0)}),
                     {deny, Reason2};
                 {deny, Reason2, _Details} ->
                     emit_event(denied, #{
-                        layer => validator, reason => Reason2}),
+                        layer => validator, reason => Reason2,
+                        evaluation_time_us => eval_time_us(T0)}),
                     {deny, Reason2}
             catch
                 Class:Err:Stack ->
@@ -604,8 +635,19 @@ enter_throttle(RC) ->
     beam_agent_ets:insert(?STATE_TABLE, {throttle_denied, 0}),
     ok.
 
+-spec kill_active_executors() -> ok.
+kill_active_executors() ->
+    Executors = try beam_agent_ets:tab2list(?EXECUTOR_TABLE)
+                catch _:_ -> []
+                end,
+    lists:foreach(fun({Pid, _Cmd, _Time}) ->
+        exit(Pid, kill)
+    end, Executors),
+    safe_delete_all(?EXECUTOR_TABLE).
+
 -spec enter_lockdown(binary()) -> ok.
 enter_lockdown(Reason) ->
+    kill_active_executors(),
     emit_event(lockdown, #{reason => Reason}),
     beam_agent_ets:insert(?STATE_TABLE, {security_state, lockdown}),
     beam_agent_ets:insert(?STATE_TABLE, {lockdown_reason, Reason}),
@@ -625,10 +667,12 @@ smallest_window(RC) ->
 build_status() ->
     State = get_security_state(),
     HistSize = beam_agent_ets:info(?HISTORY_TABLE, size),
+    ExecCount = beam_agent_ets:info(?EXECUTOR_TABLE, size),
     Rates = beam_agent_ets:tab2list(?RATE_TABLE),
     Status = #{
-        state        => State,
-        history_size => HistSize,
+        state            => State,
+        history_size     => HistSize,
+        active_executors => ExecCount,
         rate_limits  => maps:from_list(
             [{Key, #{count => C, window_start => WS}}
              || {Key, C, WS} <- Rates])
@@ -757,6 +801,10 @@ default_temporal_rules() ->
 %%--------------------------------------------------------------------
 %% Internal: Telemetry
 %%--------------------------------------------------------------------
+
+-spec eval_time_us(integer()) -> integer().
+eval_time_us(T0) ->
+    erlang:convert_time_unit(erlang:monotonic_time() - T0, native, microsecond).
 
 -spec emit_event(atom(), map()) -> ok.
 emit_event(EventSuffix, Metadata) ->

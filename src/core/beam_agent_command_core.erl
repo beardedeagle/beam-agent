@@ -22,6 +22,18 @@ command is evaluated through the security pipeline before execution:
 If the guard is not running, commands execute directly — security is
 opt-in and does not break existing callers.
 
+## Restricted Execution (Layer 4)
+
+Every command runs in a dedicated BEAM process with hard resource limits:
+
+  - **max_heap_size** — VM-enforced memory limit; the executor is killed
+    instantly if it exceeds the threshold (default: ~50MB).
+  - **sensitive mode** — `process_flag(sensitive, true)` prevents
+    `process_info` from leaking command arguments or output from
+    credential-handling commands.
+  - **Guard integration** — when the guard enters lockdown, all active
+    executor processes are force-killed immediately.
+
 After execution, the result is recorded in the guard's history for
 temporal pattern detection.
 
@@ -63,7 +75,9 @@ Usage:
     timeout => pos_integer(),      %% ms, default 30000
     cwd => binary() | string(),    %% working directory
     env => [{string(), string()}], %% environment variables
-    max_output => pos_integer()    %% max output bytes, default 1MB
+    max_output => pos_integer(),   %% max output bytes, default 1MB
+    max_heap => pos_integer(),     %% max executor heap words, default ~50MB
+    sensitive => boolean()         %% hide process state from process_info
 }.
 
 %% Result of command execution.
@@ -75,7 +89,9 @@ Usage:
     {port_exit, term()} |
     {port_failed, term()} |
     {timeout, infinity | non_neg_integer()} |
-    {security, security_denial()}.
+    {security, security_denial()} |
+    {resource_limit, term()} |
+    {executor_crash, term()}.
 
 -type security_denial() ::
     {deny, binary()} |
@@ -84,6 +100,7 @@ Usage:
 %% Default values.
 -define(DEFAULT_TIMEOUT, 30000).
 -define(DEFAULT_MAX_OUTPUT, 1048576). %% 1MB
+-define(DEFAULT_MAX_HEAP, 6553600).  %% ~50MB in words on 64-bit
 
 %% Max command string bytes included in telemetry metadata.
 -define(TELEMETRY_CMD_MAX_BYTES, 512).
@@ -106,6 +123,8 @@ Options:
 - `cwd`: working directory for the command
 - `env`: environment variables as `[{Key, Value}]` strings
 - `max_output`: max bytes to capture (default: 1MB)
+- `max_heap`: max executor heap in words (default: ~50MB)
+- `sensitive`: hide process state from `process_info` (default: false)
 """.
 -spec run(binary() | string() | [binary() | string()], command_opts()) ->
     {ok, command_result()} | {error, command_error()}.
@@ -175,16 +194,100 @@ do_run(Command, Opts) ->
     StartTime = beam_agent_telemetry_core:span_start(command, run, TeleMeta),
     Shell = find_shell(),
     {PortName, PortOpts} = build_port_spec(Shell, CmdStr, Opts),
+    Result = run_in_executor(PortName, PortOpts, Timeout, MaxOutput, CmdStr, Opts),
+    emit_command_telemetry(StartTime, TeleMeta, Result),
+    Result.
+
+%%--------------------------------------------------------------------
+%% Internal: Restricted Executor (Layer 4)
+%%--------------------------------------------------------------------
+
+%% Spawn a restricted executor process to run the port command.
+%% The executor runs with max_heap_size and optional sensitive-mode
+%% restrictions.  If the guard is running, the executor is registered
+%% for force-kill on lockdown.
+-spec run_in_executor({spawn_executable, string()}, [term()],
+                      pos_integer(), pos_integer(), string(),
+                      command_opts()) ->
+    {ok, command_result()} | {error, command_error()}.
+run_in_executor(PortName, PortOpts, Timeout, MaxOutput, CmdStr, Opts) ->
+    CallerRef = make_ref(),
+    Caller = self(),
+    SpawnOpts = executor_spawn_opts(Opts),
+    ExecPid = spawn_opt(fun() ->
+        apply_executor_restrictions(Opts),
+        try
+            Port = erlang:open_port(PortName, PortOpts),
+            Res = collect_output(Port, Timeout, MaxOutput, <<>>),
+            Caller ! {CallerRef, Res}
+        catch
+            error:Reason ->
+                Caller ! {CallerRef, {error, {port_failed, Reason}}}
+        end
+    end, SpawnOpts),
+    MonRef = monitor(process, ExecPid),
+    maybe_register_executor(ExecPid, CmdStr),
     try
-        Port = erlang:open_port(PortName, PortOpts),
-        Result = collect_output(Port, Timeout, MaxOutput, <<>>),
-        emit_command_telemetry(StartTime, TeleMeta, Result),
-        Result
-    catch
-        error:Reason ->
-            beam_agent_telemetry_core:span_exception(command, run,
-                {port_failed, Reason}, TeleMeta),
-            {error, {port_failed, Reason}}
+        await_executor(CallerRef, MonRef, ExecPid, Timeout)
+    after
+        maybe_unregister_executor(ExecPid)
+    end.
+
+%% Wait for the executor result or detect abnormal termination.
+-spec await_executor(reference(), reference(), pid(), pos_integer()) ->
+    {ok, command_result()} | {error, command_error()}.
+await_executor(CallerRef, MonRef, ExecPid, Timeout) ->
+    %% Grace period beyond the port's internal timeout.
+    %% The executor's collect_output handles the port timeout;
+    %% this backstop catches executor hangs.
+    GraceMs = Timeout + 5000,
+    receive
+        {CallerRef, Result} ->
+            demonitor(MonRef, [flush]),
+            Result;
+        {'DOWN', MonRef, process, ExecPid, killed} ->
+            %% max_heap_size exceeded or guard lockdown
+            {error, {resource_limit, killed}};
+        {'DOWN', MonRef, process, ExecPid, Reason} ->
+            {error, {executor_crash, Reason}}
+    after GraceMs ->
+        exit(ExecPid, kill),
+        demonitor(MonRef, [flush]),
+        {error, {timeout, Timeout}}
+    end.
+
+%% Build spawn options for the executor process.
+-spec executor_spawn_opts(command_opts()) -> [term()].
+executor_spawn_opts(Opts) ->
+    MaxHeap = maps:get(max_heap, Opts, ?DEFAULT_MAX_HEAP),
+    [{max_heap_size, #{size => MaxHeap, kill => true,
+                       error_logger => true}}].
+
+%% Apply process-level restrictions inside the executor.
+-spec apply_executor_restrictions(command_opts()) -> ok.
+apply_executor_restrictions(Opts) ->
+    case maps:get(sensitive, Opts, false) of
+        true  -> _ = process_flag(sensitive, true), ok;
+        false -> ok
+    end.
+
+%% Register the executor with the guard for lockdown-kill tracking.
+-spec maybe_register_executor(pid(), string()) -> ok.
+maybe_register_executor(Pid, CmdStr) ->
+    case beam_agent_command_guard:running() of
+        true ->
+            beam_agent_command_guard:register_executor(
+                Pid, telemetry_command(CmdStr));
+        false ->
+            ok
+    end.
+
+%% Unregister the executor from the guard.
+-spec maybe_unregister_executor(pid()) -> ok.
+maybe_unregister_executor(Pid) ->
+    case beam_agent_command_guard:running() of
+        true  -> beam_agent_command_guard:unregister_executor(Pid);
+        false -> ok
     end.
 
 %%--------------------------------------------------------------------
@@ -286,12 +389,9 @@ shell_escape_char(Char) ->
 %%--------------------------------------------------------------------
 
 %% Emit stop or exception telemetry based on the command result.
-%% Only receives results from collect_output/4 — {port_failed, _} is
-%% caught in run/2 and never reaches this function.
 -spec emit_command_telemetry(integer(),
     #{'command' := binary(), 'cwd' := term()},
-    {ok, #{'exit_code' := integer(), 'output' := binary()}} |
-    {error, {port_exit, term()} | {timeout, infinity | non_neg_integer()}}) -> ok.
+    {ok, command_result()} | {error, command_error()}) -> ok.
 emit_command_telemetry(StartTime, TeleMeta, {ok, #{exit_code := ExitCode}}) ->
     beam_agent_telemetry_core:span_stop(command, run, StartTime,
         TeleMeta#{exit_code => ExitCode});

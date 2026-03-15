@@ -13,6 +13,9 @@
 %%%   - Validator crash -> fail-safe deny
 %%%   - on_execution/3 post-execution notification
 %%%   - on_execution/3 crash -> fail-safe (no break)
+%%%   - Executor registration and unregistration
+%%%   - Lockdown kills active executors
+%%%   - Status includes active_executors count
 %%%
 %%% These tests use real ETS tables — no mocks, no processes.
 %%% Each test initializes/tears down the guard for isolation.
@@ -379,4 +382,73 @@ on_execution_crash_safe_test() ->
         %% History should still be recorded
         Status = beam_agent_command_guard:status(),
         ?assert(maps:get(history_size, Status) > 0)
+    end).
+
+%%====================================================================
+%% Executor registration
+%%====================================================================
+
+register_executor_tracks_pid_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Pid = spawn(fun() -> receive stop -> ok end end),
+        beam_agent_command_guard:register_executor(Pid, <<"echo hello">>),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(1, maps:get(active_executors, Status)),
+        beam_agent_command_guard:unregister_executor(Pid),
+        Pid ! stop
+    end).
+
+unregister_executor_removes_pid_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Pid = spawn(fun() -> receive stop -> ok end end),
+        beam_agent_command_guard:register_executor(Pid, <<"test">>),
+        beam_agent_command_guard:unregister_executor(Pid),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(0, maps:get(active_executors, Status)),
+        Pid ! stop
+    end).
+
+unregister_executor_idempotent_test() ->
+    with_guard(relaxed_config(), fun() ->
+        %% Unregistering a never-registered pid should not crash
+        ?assertEqual(ok,
+            beam_agent_command_guard:unregister_executor(self()))
+    end).
+
+status_includes_active_executors_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Status = beam_agent_command_guard:status(),
+        ?assert(maps:is_key(active_executors, Status)),
+        ?assertEqual(0, maps:get(active_executors, Status))
+    end).
+
+%%====================================================================
+%% Lockdown kills active executors
+%%====================================================================
+
+lockdown_kills_active_executors_test() ->
+    with_guard(relaxed_config(), fun() ->
+        Pid1 = spawn(fun() -> receive never -> ok end end),
+        Pid2 = spawn(fun() -> receive never -> ok end end),
+        Mon1 = monitor(process, Pid1),
+        Mon2 = monitor(process, Pid2),
+        beam_agent_command_guard:register_executor(Pid1, <<"cmd1">>),
+        beam_agent_command_guard:register_executor(Pid2, <<"cmd2">>),
+        %% Lockdown should kill both
+        beam_agent_command_guard:lockdown(<<"test kill">>),
+        receive {'DOWN', Mon1, process, Pid1, killed} -> ok
+        after 1000 -> error(pid1_not_killed) end,
+        receive {'DOWN', Mon2, process, Pid2, killed} -> ok
+        after 1000 -> error(pid2_not_killed) end,
+        %% Executor table should be cleared
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(0, maps:get(active_executors, Status))
+    end).
+
+lockdown_with_no_executors_test() ->
+    with_guard(relaxed_config(), fun() ->
+        %% Lockdown with no executors should not crash
+        beam_agent_command_guard:lockdown(<<"empty lockdown">>),
+        Status = beam_agent_command_guard:status(),
+        ?assertEqual(lockdown, maps:get(state, Status))
     end).
