@@ -89,10 +89,10 @@ on_execution(_Command, _Ctx, _Result) ->
     command_form := list | string,
 
     %% Session state from the backend gen_statem
-    session_state := atom(),
+    session_state := atom() | undefined,
 
     %% Agent identity
-    agent := atom(),
+    agent := atom() | undefined,
 
     %% Command execution options
     opts := map(),
@@ -124,10 +124,10 @@ on_execution(_Command, _Ctx, _Result) ->
     command_form := list | string,
 
     %% Session state from the backend gen_statem
-    session_state := atom(),
+    session_state := atom() | undefined,
 
     %% Agent identity
-    agent := atom(),
+    agent := atom() | undefined,
 
     %% Command execution options
     opts := map(),

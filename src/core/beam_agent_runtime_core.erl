@@ -99,14 +99,14 @@ register_session(Session, Opts) when is_map(Opts) ->
 -spec clear_session(pid() | binary()) -> ok.
 clear_session(Session) ->
     ensure_tables(),
-    beam_agent_ets:delete(?RUNTIME_TABLE, session_key(Session)),
+    beam_agent_ets:delete(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)),
     ok.
 
 -doc "Read the current runtime state map for a session.".
 -spec get_state(pid() | binary()) -> {ok, runtime_state()}.
 get_state(Session) ->
     ensure_tables(),
-    case ets:lookup(?RUNTIME_TABLE, session_key(Session)) of
+    case ets:lookup(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)) of
         [{_, State}] when is_map(State) ->
             {ok, State};
         [] ->
@@ -348,16 +348,10 @@ merge_query_opts(Session, Params) when is_map(Params) ->
 %% Internal helpers
 %%--------------------------------------------------------------------
 
--spec session_key(pid() | binary()) -> pid() | binary().
-session_key(Session) when is_pid(Session) ->
-    Session;
-session_key(SessionId) when is_binary(SessionId) ->
-    SessionId.
-
 -spec put_state(pid() | binary(), map()) -> ok.
 put_state(Session, Updates) when is_map(Updates) ->
     ensure_tables(),
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     State = case ets:lookup(?RUNTIME_TABLE, Key) of
         [{_, Existing}] when is_map(Existing) ->
             maps:merge(Existing, defaulted_state(Updates));
@@ -371,7 +365,7 @@ put_state(Session, Updates) when is_map(Updates) ->
 update_state(Session, Fun) ->
     {ok, State} = get_state(Session),
     ensure_tables(),
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     beam_agent_ets:insert(?RUNTIME_TABLE, {Key, defaulted_state(Fun(State))}),
     ok.
 

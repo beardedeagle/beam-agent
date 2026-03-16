@@ -80,7 +80,7 @@ register_app(Session, AppId, Opts)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(AppId), is_map(Opts) ->
     ensure_tables(),
-    Key = {session_key(Session), AppId},
+    Key = {beam_agent_ets:session_key(Session), AppId},
     Existing = case ets:lookup(?TABLE, Key) of
         [{_, E}] -> E;
         []       -> new_app_entry(Session, AppId)
@@ -113,7 +113,7 @@ Opts:
 apps_list(Session, Opts)
   when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
     ensure_tables(),
-    SK = session_key(Session),
+    SK = beam_agent_ets:session_key(Session),
     All = ets:foldl(fun
         ({{S, _}, Entry}, Acc) when S =:= SK ->
             case matches_status(Entry, Opts) of
@@ -176,7 +176,7 @@ Returns `{error, no_app}` if no app is registered for the session.
 -spec app_log(pid() | binary(), term()) -> ok | {error, no_app}.
 app_log(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
     ensure_tables(),
-    SK = session_key(Session),
+    SK = beam_agent_ets:session_key(Session),
     case app_info(Session) of
         {error, no_app} ->
             {error, no_app};
@@ -213,17 +213,13 @@ app_modes(Session) when is_pid(Session) orelse is_binary(Session) ->
 unregister_app(Session, AppId)
   when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
     ensure_tables(),
-    Key = {session_key(Session), AppId},
+    Key = {beam_agent_ets:session_key(Session), AppId},
     beam_agent_ets:delete(?TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------
 %% Internal
 %%--------------------------------------------------------------------
-
--spec session_key(pid() | binary()) -> pid() | binary().
-session_key(Session) when is_pid(Session)    -> Session;
-session_key(Session) when is_binary(Session) -> Session.
 
 -spec new_app_entry(pid() | binary(), binary()) ->
     #{id := binary(), name := binary(), session := pid() | binary(),

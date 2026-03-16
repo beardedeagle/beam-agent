@@ -51,8 +51,8 @@
 -type guard_result() :: allow | {deny, binary()} | {throttle, pos_integer()}.
 
 -type evaluate_opts() :: #{
-    agent => atom(),
-    session_state => atom(),
+    agent => atom() | undefined,
+    session_state => atom() | undefined,
     cwd => binary() | undefined,
     env => [{string(), string()}] | undefined,
     opts => map(),
@@ -82,17 +82,30 @@
 
 -type security_state() :: active | throttle | lockdown.
 
-%% Suppress benign supertype warnings: specs are intentionally wider than
-%% current call-site usage to permit future extension without spec churn.
--dialyzer({nowarn_function, [check_temporal_patterns/3,
-                             safe_delete_all/1,
-                             status/0,
-                             check_field/3,
-                             check_field_contains/3,
-                             get_recent_history/1,
-                             build_status/0,
-                             app_config/2,
-                             default_rate_limits/0]}).
+-type table_name() :: beam_agent_guard_state
+                    | beam_agent_command_history
+                    | beam_agent_rate_limits
+                    | beam_agent_active_commands.
+
+-type rate_status() :: #{count := integer(), window_start := integer()}.
+
+-type status_map() :: #{
+    state := security_state(),
+    history_size := non_neg_integer(),
+    active_commands := non_neg_integer(),
+    rate_limits := #{term() => rate_status()},
+    lockdown_reason => binary()
+}.
+
+-type default_rate_limit_config() :: #{
+    global := {60, 60000},
+    per_program := {20, 60000},
+    per_category := #{
+        destructive := {5, 60000},
+        filesystem_write := {30, 60000},
+        network := {10, 60000}
+    }
+}.
 
 %%--------------------------------------------------------------------
 %% Defines
@@ -104,6 +117,7 @@
 -define(DEFAULT_HISTORY_MAX, 100).
 -define(LOCKDOWN_THRESHOLD, 10).
 -define(COMMAND_TABLE, beam_agent_active_commands).
+-define(CONTEXT_HISTORY_DEPTH, 10).
 
 %% persistent_term keys
 -define(PT_INIT, beam_agent_guard_initialized).
@@ -249,7 +263,7 @@ reload_policy(PolicyConfig) ->
     ok.
 
 -doc "Get the current guard status.".
--spec status() -> map().
+-spec status() -> status_map().
 status() ->
     build_status().
 
@@ -473,8 +487,8 @@ bump_counter(Key, Now, WindowMs) ->
 %%--------------------------------------------------------------------
 
 -spec check_temporal_patterns(beam_agent_command_parser:command_struct(),
-                              evaluate_opts(), guard_result()) ->
-    guard_result().
+                              evaluate_opts(), allow) ->
+    allow.
 check_temporal_patterns(CmdStruct, EvalOpts, Result) ->
     TemporalRules = persistent_term:get(?PT_TEMPORAL_RULES),
     CurrentEntry = cmd_to_entry(CmdStruct, EvalOpts),
@@ -528,14 +542,14 @@ match_entry(Matcher, Entry) ->
     check_field(exit_code, Matcher, Entry) andalso
     check_field(category, Matcher, Entry).
 
--spec check_field(atom(), map(), map()) -> boolean().
+-spec check_field(program | exit_code | category, map(), map()) -> boolean().
 check_field(Key, Matcher, Entry) ->
     case maps:get(Key, Matcher, undefined) of
         undefined -> true;
         Val       -> maps:get(Key, Entry, undefined) =:= Val
     end.
 
--spec check_field_contains(atom(), map(), map()) -> boolean().
+-spec check_field_contains(args_contain, map(), map()) -> boolean().
 check_field_contains(Key, Matcher, Entry) ->
     case maps:get(Key, Matcher, undefined) of
         undefined -> true;
@@ -595,7 +609,7 @@ get_history_since(CutoffTime) ->
     MS = [{{{'$1', '_'}, '$2'}, [{'>=', '$1', CutoffTime}], ['$2']}],
     beam_agent_ets:select(?HISTORY_TABLE, MS).
 
--spec get_recent_history(pos_integer()) -> [map()].
+-spec get_recent_history(?CONTEXT_HISTORY_DEPTH) -> [map()].
 get_recent_history(N) ->
     collect_last(?HISTORY_TABLE, ets:last(?HISTORY_TABLE), N, []).
 
@@ -668,7 +682,7 @@ smallest_window(RC) ->
         All -> lists:min(All)
     end.
 
--spec build_status() -> map().
+-spec build_status() -> status_map().
 build_status() ->
     State = get_security_state(),
     HistSize = beam_agent_ets:info(?HISTORY_TABLE, size),
@@ -687,7 +701,7 @@ build_status() ->
         _        -> Status
     end.
 
--spec safe_delete_all(atom()) -> ok.
+-spec safe_delete_all(table_name()) -> ok.
 safe_delete_all(Table) ->
     try beam_agent_ets:delete_all_objects(Table)
     catch _:_ -> ok
@@ -703,25 +717,20 @@ safe_delete_all(Table) ->
                     beam_agent_command_policy:policy_result()) ->
     beam_agent_command_validator:validation_context().
 build_context(CmdStruct, EvalOpts, PolicyResult) ->
-    #{
+    (base_context(CmdStruct, EvalOpts))#{
         command_struct => CmdStruct,
-        raw_command    => maps:get(raw, CmdStruct, <<>>),
-        command_form   => maps:get(input_form, CmdStruct, string),
-        session_state  => maps:get(session_state, EvalOpts, undefined),
-        agent          => maps:get(agent, EvalOpts, undefined),
-        opts           => maps:get(opts, EvalOpts, #{}),
-        cwd            => maps:get(cwd, EvalOpts, undefined),
-        env            => maps:get(env, EvalOpts, undefined),
-        history        => get_recent_history(10),
-        timestamp      => erlang:system_time(),
-        policy_result  => PolicyResult,
-        metadata       => maps:get(metadata, EvalOpts, #{})
+        policy_result  => PolicyResult
     }.
 
 -spec build_execution_context(beam_agent_command_parser:command_struct(),
                               evaluate_opts()) ->
     beam_agent_command_validator:execution_context().
 build_execution_context(CmdStruct, EvalOpts) ->
+    base_context(CmdStruct, EvalOpts).
+
+-spec base_context(beam_agent_command_parser:command_struct(), evaluate_opts()) ->
+    beam_agent_command_validator:execution_context().
+base_context(CmdStruct, EvalOpts) ->
     #{
         raw_command    => maps:get(raw, CmdStruct, <<>>),
         command_form   => maps:get(input_form, CmdStruct, string),
@@ -730,7 +739,7 @@ build_execution_context(CmdStruct, EvalOpts) ->
         opts           => maps:get(opts, EvalOpts, #{}),
         cwd            => maps:get(cwd, EvalOpts, undefined),
         env            => maps:get(env, EvalOpts, undefined),
-        history        => get_recent_history(10),
+        history        => get_recent_history(?CONTEXT_HISTORY_DEPTH),
         timestamp      => erlang:system_time(),
         metadata       => maps:get(metadata, EvalOpts, #{})
     }.
@@ -762,11 +771,19 @@ notify_validator(CmdStruct, EvalOpts, ExecResult) ->
 %% Internal: Config
 %%--------------------------------------------------------------------
 
--spec app_config(atom(), term()) -> term().
+-spec app_config(command_policy,
+                 beam_agent_command_policy:policy_config()) ->
+    beam_agent_command_policy:policy_config();
+                (command_rate_limits, rate_limit_config()) ->
+    rate_limit_config();
+                (command_temporal_rules, [temporal_rule()]) ->
+    [temporal_rule()];
+                (command_validator, module()) ->
+    module().
 app_config(Key, Default) ->
     application:get_env(beam_agent, Key, Default).
 
--spec default_rate_limits() -> rate_limit_config().
+-spec default_rate_limits() -> default_rate_limit_config().
 default_rate_limits() ->
     #{
         global      => {60, 60000},

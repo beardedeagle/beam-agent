@@ -32,15 +32,6 @@ make_ref_self() ->
     {ConnPid, MonRef, test_mcp_http_client, SessState}.
 
 %%====================================================================
-%% Module loading
-%%====================================================================
-
-module_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_mcp_transport_http) orelse
-        code:ensure_loaded(beam_agent_mcp_transport_http) =:=
-            {module, beam_agent_mcp_transport_http}).
-
-%%====================================================================
 %% start/1
 %%====================================================================
 

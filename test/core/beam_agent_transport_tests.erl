@@ -2,7 +2,6 @@
 %%% @doc EUnit tests for beam_agent_transport (transport behaviour contract).
 %%%
 %%% Tests cover:
-%%%   - Module is loadable
 %%%   - All 6 required callbacks are declared
 %%%     (start, send, close, is_ready, status, classify_message)
 %%%   - No optional callbacks exist
@@ -11,14 +10,6 @@
 -module(beam_agent_transport_tests).
 
 -include_lib("eunit/include/eunit.hrl").
-
-%%====================================================================
-%% Module loading
-%%====================================================================
-
-module_is_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_transport) orelse
-        code:ensure_loaded(beam_agent_transport) =:= {module, beam_agent_transport}).
 
 %%====================================================================
 %% Required callbacks

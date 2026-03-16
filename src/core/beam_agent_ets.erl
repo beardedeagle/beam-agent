@@ -69,7 +69,10 @@ beam_agent_ets:ensure_table(?TABLE, [set, named_table,
     match_object/2,
     tab2list/1,
     info/1,
-    info/2
+    info/2,
+
+    %% Shared key helpers
+    session_key/1
 ]).
 
 %%--------------------------------------------------------------------
@@ -223,6 +226,11 @@ info(Table) ->
 -spec info(atom(), atom()) -> term() | undefined.
 info(Table, Item) ->
     ets:info(Table, Item).
+
+-doc "Normalize a session pid or session id for use as an ETS key.".
+-spec session_key(pid() | binary()) -> pid() | binary().
+session_key(Session) when is_pid(Session) -> Session;
+session_key(Session) when is_binary(Session) -> Session.
 
 %%--------------------------------------------------------------------
 %% Internal

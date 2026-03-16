@@ -24,8 +24,11 @@ logs/
 .backup/
 .claude/
 .omc/
+.omx/
 sgconfig.yml
 AGENTS.md
+.DS_Store
+AI_SLOP_*
 
 # Dolt database files (added by bd init)
 .dolt/

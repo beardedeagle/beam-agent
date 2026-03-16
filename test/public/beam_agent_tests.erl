@@ -9,6 +9,20 @@ list_backends_test() ->
     ?assertEqual([claude, codex, gemini, opencode, copilot],
         beam_agent:list_backends()).
 
+command_run_smoke_test() ->
+    {ok, Result} = beam_agent_command:run([<<"printf">>, <<"beam-agent-smoke">>]),
+    ?assertEqual(0, maps:get(exit_code, Result)),
+    ?assertEqual(<<"beam-agent-smoke">>, maps:get(output, Result)).
+
+runtime_provider_roundtrip_smoke_test() ->
+    Session = list_to_binary(io_lib:format("smoke-runtime-~p",
+                                           [erlang:unique_integer([positive])])),
+    ?assertEqual({error, not_set}, beam_agent_runtime:current_provider(Session)),
+    ok = beam_agent_runtime:set_provider(Session, <<"openai">>),
+    ?assertEqual({ok, <<"openai">>}, beam_agent_runtime:current_provider(Session)),
+    ok = beam_agent_runtime:clear_provider(Session),
+    ?assertEqual({error, not_set}, beam_agent_runtime:current_provider(Session)).
+
 capabilities_projection_test() ->
     {ok, Caps} = beam_agent_capabilities:capabilities(codex),
     [SessionHistory] = [Cap || #{id := session_history} = Cap <- Caps],

@@ -755,7 +755,9 @@ extract_init_field(Session, IRKey, SIKey, Default) ->
 extract_from_system_info(Info, Key, Default) ->
     case maps:find(system_info, Info) of
         {ok, SI} when is_map(SI) ->
-            {ok, maps:get(Key, SI, Default)};
+            KeyBin = atom_to_binary(Key),
+            Value = maps:get(Key, SI, maps:get(KeyBin, SI, Default)),
+            {ok, Value};
         _ ->
             {ok, Default}
     end.
