@@ -296,11 +296,12 @@ register_task(SessionId, TaskId, Pid)
   when is_binary(SessionId), is_binary(TaskId), is_pid(Pid) ->
     ensure_tables(),
     Key = {SessionId, TaskId},
-    case ets:lookup(?TASKS_TABLE, Key) of
+    Replaced = case ets:lookup(?TASKS_TABLE, Key) of
         [{_, ExistingTask}] ->
-            ok = reconcile_replaced_task(ExistingTask);
+            ok = reconcile_replaced_task(ExistingTask),
+            true;
         [] ->
-            ok
+            false
     end,
     Now = erlang:system_time(millisecond),
     RunId = create_task_run(SessionId, TaskId),
@@ -313,6 +314,9 @@ register_task(SessionId, TaskId, Pid)
         run_id => RunId
     },
     beam_agent_ets:insert(?TASKS_TABLE, {Key, Task}),
+    {ok, _Entry} = journal_task_event(<<"task_registered">>, SessionId, Task, #{
+        replaced => Replaced
+    }),
     ok.
 
 -doc "Unregister a task (mark as complete).".
@@ -323,12 +327,13 @@ unregister_task(SessionId, TaskId)
     Key = {SessionId, TaskId},
     case ets:lookup(?TASKS_TABLE, Key) of
         [{_, Task}] ->
-            ok = reconcile_unregistered_task(Task);
+            ok = reconcile_unregistered_task(Task),
+            beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
+            {ok, _Entry} = journal_task_event(<<"task_unregistered">>, SessionId, Task, #{}),
+            ok;
         [] ->
             ok
-    end,
-    beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
-    ok.
+    end.
 
 -doc """
 Stop a running task by sending an interrupt to its process.
@@ -361,6 +366,7 @@ stop_task(SessionId, TaskId)
                 stopped_at => Now
             },
             beam_agent_ets:insert(?TASKS_TABLE, {Key, Updated}),
+            {ok, _Entry} = journal_task_event(<<"task_stopped">>, SessionId, Updated, #{}),
             ok;
         [{_, #{status := stopped}}] ->
             ok;
@@ -406,6 +412,9 @@ submit_feedback(SessionId, Feedback)
         event_class => control,
         feedback => Entry,
         timestamp => Now
+    }),
+    {ok, _Entry} = journal_control_event(<<"feedback_submitted">>, SessionId, #{
+        feedback => Entry
     }),
     ok.
 
@@ -587,6 +596,10 @@ store_pending_request(SessionId, RequestId, Request)
         request => PublicRequest,
         timestamp => Now
     }),
+    {ok, _Entry} = journal_control_event(<<"pending_request_stored">>, SessionId, #{
+        request_id => RequestId,
+        request => PublicRequest
+    }),
     ok.
 
 -doc "Resolve a pending request with a response.".
@@ -614,6 +627,10 @@ resolve_pending_request(SessionId, RequestId, Response)
                 request_id => RequestId,
                 response => beam_agent_redaction:map(Response),
                 timestamp => Now
+            }),
+            {ok, _Entry} = journal_control_event(<<"pending_request_resolved">>, SessionId, #{
+                request_id => RequestId,
+                response => beam_agent_redaction:map(Response)
             }),
             ok;
         [{_, #{status := resolved}}] ->
@@ -737,6 +754,7 @@ pending_user_input_result(SessionId, RequestId, Request, Reason) ->
         event_class => control,
         timestamp => Now
     }),
+    {ok, _Entry} = journal_control_event(<<"user_input_requested">>, SessionId, Pending),
     {ok, Pending}.
 
 -spec normalize_pending_request(binary(), map()) -> map().
@@ -771,14 +789,17 @@ default_permission(_, _Params) ->
     {deny, <<"denied">>}.
 
 publish_control_event(SessionId, Subtype, Payload) ->
-    beam_agent_events:publish(SessionId, Payload#{
+    Event = Payload#{
         type => system,
         subtype => Subtype,
         session_id => SessionId,
         source => universal,
         event_class => control,
         timestamp => erlang:system_time(millisecond)
-    }).
+    },
+    beam_agent_events:publish(SessionId, Event),
+    {ok, _Entry} = journal_control_event(Subtype, SessionId, Payload),
+    ok.
 
 -spec create_task_run(binary(), binary()) -> binary().
 create_task_run(SessionId, TaskId) ->
@@ -888,3 +909,33 @@ task_run_id(TaskId, Attempt) ->
 -spec sanitize_task_id(binary()) -> binary().
 sanitize_task_id(TaskId) ->
     binary:replace(TaskId, <<"/">>, <<"_">>, [global]).
+
+-spec journal_control_event(binary(), binary(), map()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+journal_control_event(EventType, SessionId, Payload) ->
+    beam_agent_journal_core:append(EventType, #{
+        session_id => SessionId,
+        tags => [control],
+        payload => Payload
+    }).
+
+-spec journal_task_event(binary(), binary(), task_meta(), map()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+journal_task_event(EventType, SessionId, Task, ExtraPayload) ->
+    Event0 = #{
+        session_id => SessionId,
+        tags => [control, task],
+        payload => maps:merge(#{task => task_journal_view(Task)}, ExtraPayload)
+    },
+    Event1 = maybe_put(run_id, maps:get(run_id, Task, undefined), Event0),
+    beam_agent_journal_core:append(EventType, Event1).
+
+-spec task_journal_view(task_meta()) -> map().
+task_journal_view(Task) ->
+    maps:without([pid], Task).
+
+-spec maybe_put(atom(), term(), map()) -> map().
+maybe_put(_Key, undefined, Map) ->
+    Map;
+maybe_put(Key, Value, Map) ->
+    Map#{Key => Value}.

@@ -186,12 +186,36 @@ list_steps_returns_oldest_first_test() ->
     ?assertEqual(maps:get(step_id, Second), maps:get(step_id, ListedSecond)),
     reset().
 
+journal_records_run_and_step_lifecycle_test() ->
+    reset(),
+    SessionId = unique_binary("journal-runs-session"),
+    {ok, Run} = beam_agent_runs_core:start_run(SessionId, #{kind => workflow}),
+    RunId = maps:get(run_id, Run),
+    {ok, Step} = beam_agent_runs_core:start_step(RunId, #{kind => review}),
+    ok = timer:sleep(2),
+    {ok, _CompletedStep} = beam_agent_runs_core:complete_step(
+        RunId,
+        maps:get(step_id, Step),
+        #{done => true}
+    ),
+    {ok, _CompletedRun} = beam_agent_runs_core:complete_run(RunId, #{summary => <<"done">>}),
+    {ok, Entries} = beam_agent_journal_core:list(#{run_id => RunId}),
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries],
+    ?assertEqual([
+        <<"run_started">>,
+        <<"step_started">>,
+        <<"step_completed">>,
+        <<"run_completed">>
+    ], EventTypes),
+    reset().
+
 %%--------------------------------------------------------------------
 %% Internal helpers
 %%--------------------------------------------------------------------
 
 reset() ->
-    ok = beam_agent_runs_core:clear().
+    ok = beam_agent_runs_core:clear(),
+    ok = beam_agent_journal_core:clear().
 
 unique_binary(Prefix) ->
     list_to_binary(io_lib:format("~s-~p", [Prefix,

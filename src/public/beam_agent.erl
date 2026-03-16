@@ -16,6 +16,7 @@ public modules:
 - beam_agent_config: session configuration read/write
 - beam_agent_control: collaboration, review, realtime, server admin
 - beam_agent_file: text search, file search, directory listing
+- beam_agent_journal: durable canonical domain-event journal
 - beam_agent_mcp: MCP server management
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_runtime: model, permissions, status, interrupts

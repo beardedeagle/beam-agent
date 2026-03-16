@@ -437,6 +437,37 @@ re_register_task_cancels_previous_run_test() ->
     beam_agent_control_core:clear(),
     beam_agent_runs_core:clear().
 
+journal_records_control_domain_events_test() ->
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear(),
+    beam_agent_journal_core:clear(),
+    SId = <<"control-journal-session">>,
+    Pid = spawn(fun() -> timer:sleep(60000) end),
+    ok = beam_agent_control_core:register_task(SId, <<"task-journal">>, Pid),
+    {ok, _Result} = beam_agent_control_core:dispatch(SId, <<"setModel">>,
+        #{<<"model">> => <<"claude-opus">>}),
+    ok = beam_agent_control_core:store_pending_request(SId, <<"req-journal">>, #{
+        kind => user_input,
+        prompt => <<"Need input">>
+    }),
+    ok = beam_agent_control_core:resolve_pending_request(SId, <<"req-journal">>, #{
+        answer => <<"done">>
+    }),
+    ok = beam_agent_control_core:submit_feedback(SId, #{rating => great}),
+    {ok, Entries} = beam_agent_journal_core:list(#{session_id => SId, tag => control}),
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries],
+    ?assertEqual([
+        <<"task_registered">>,
+        <<"model_updated">>,
+        <<"pending_request_stored">>,
+        <<"pending_request_resolved">>,
+        <<"feedback_submitted">>
+    ], EventTypes),
+    exit(Pid, kill),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear(),
+    beam_agent_journal_core:clear().
+
 %%====================================================================
 %% Feedback
 %%====================================================================

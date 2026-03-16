@@ -164,6 +164,7 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
+`beam_agent_journal`,
 `beam_agent_checkpoint`, `beam_agent_runs`). Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
@@ -173,6 +174,7 @@ All families have universal fallback coverage:
 - shared/native thread management
 - canonical run and step lifecycle
 - typed artifact and context storage
+- durable canonical domain-event journal
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
@@ -223,6 +225,13 @@ beam_agent_artifacts:list(Filter)                        -> {ok, [ArtifactRecord
 beam_agent_artifacts:search(Query, Filter)               -> {ok, [ArtifactRecord]} | {error, Reason}
 beam_agent_artifacts:attach(ArtifactId, RefType, RefId)  -> ok | {error, Reason}
 beam_agent_artifacts:delete(ArtifactId)                  -> ok | {error, not_found}
+
+%% Durable canonical journal -- beam_agent_journal
+beam_agent_journal:append(EventType, Event)              -> {ok, Entry} | {error, Reason}
+beam_agent_journal:list(Filter)                          -> {ok, [Entry]} | {error, Reason}
+beam_agent_journal:stream_from(Cursor, Filter)           -> {ok, [Entry]} | {error, Reason}
+beam_agent_journal:get(EventId)                          -> {ok, Entry} | {error, not_found}
+beam_agent_journal:ack(ConsumerId, EventId)              -> ok | {error, not_found}
 ```
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through

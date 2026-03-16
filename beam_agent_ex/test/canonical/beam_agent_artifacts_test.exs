@@ -1,5 +1,5 @@
 defmodule BeamAgent.ArtifactsTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   setup_all do
     assert Code.ensure_loaded?(BeamAgent.Artifacts)

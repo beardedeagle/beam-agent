@@ -155,6 +155,34 @@ delete_removes_artifact_test() ->
     ?assertEqual({error, not_found}, beam_agent_artifacts_core:get(ArtifactId)),
     reset().
 
+journal_records_artifact_lifecycle_test() ->
+    reset(),
+    SessionId = <<"artifact-journal-session">>,
+    {ok, Artifact0} = beam_agent_artifacts_core:put(SessionId, #{
+        kind => summary,
+        title => <<"Artifact Journal">>,
+        body => <<"v1">>
+    }),
+    ArtifactId = maps:get(artifact_id, Artifact0),
+    ok = beam_agent_artifacts_core:attach(ArtifactId, message, <<"msg-1">>),
+    {ok, _Artifact1} = beam_agent_artifacts_core:put(SessionId, #{
+        artifact_id => ArtifactId,
+        kind => summary,
+        title => <<"Artifact Journal">>,
+        body => <<"v2">>
+    }),
+    ok = beam_agent_artifacts_core:delete(ArtifactId),
+    {ok, Entries} = beam_agent_journal_core:list(#{session_id => SessionId, tag => artifact}),
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries],
+    ?assertEqual([
+        <<"artifact_created">>,
+        <<"artifact_attached">>,
+        <<"artifact_updated">>,
+        <<"artifact_deleted">>
+    ], EventTypes),
+    reset().
+
 reset() ->
     ok = beam_agent_artifacts_core:clear(),
-    ok = beam_agent_runs_core:clear().
+    ok = beam_agent_runs_core:clear(),
+    ok = beam_agent_journal_core:clear().

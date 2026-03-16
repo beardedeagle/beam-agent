@@ -129,10 +129,16 @@ put(Scope, Artifact) when (is_binary(Scope) orelse is_map(Scope)), is_map(Artifa
                             CreatedAt = maps:get(created_at, Existing),
                             Stored = build_artifact_record(ArtifactId, Normalized, CreatedAt, Now),
                             ok = beam_agent_artifacts_store:put_artifact(Stored),
+                            {ok, _Entry} = append_artifact_event(<<"artifact_updated">>, Stored, #{
+                                operation => updated
+                            }),
                             {ok, Stored};
                         {error, not_found} ->
                             Stored = build_artifact_record(ArtifactId, Normalized, Now, Now),
                             ok = beam_agent_artifacts_store:put_artifact(Stored),
+                            {ok, _Entry} = append_artifact_event(<<"artifact_created">>, Stored, #{
+                                operation => created
+                            }),
                             {ok, Stored}
                     end;
                 Error ->
@@ -208,6 +214,9 @@ attach(ArtifactId, RefType, RefId)
                     case apply_attachment(Artifact, Ref, Now) of
                         {ok, Updated} ->
                             ok = beam_agent_artifacts_store:put_artifact(Updated),
+                            {ok, _Entry} = append_artifact_event(<<"artifact_attached">>, Updated, #{
+                                source_ref => Ref
+                            }),
                             ok;
                         Error ->
                             Error
@@ -222,7 +231,16 @@ attach(ArtifactId, RefType, RefId)
 -doc "Delete an artifact by id.".
 -spec delete(binary()) -> ok | {error, not_found}.
 delete(ArtifactId) when is_binary(ArtifactId) ->
-    beam_agent_artifacts_store:delete_artifact(ArtifactId).
+    case beam_agent_artifacts_store:get_artifact(ArtifactId) of
+        {ok, Artifact} ->
+            ok = beam_agent_artifacts_store:delete_artifact(ArtifactId),
+            {ok, _Entry} = append_artifact_event(<<"artifact_deleted">>, Artifact, #{
+                operation => deleted
+            }),
+            ok;
+        {error, not_found} ->
+            {error, not_found}
+    end.
 
 -spec normalize_scope(scope()) ->
     {ok, normalized_scope()} |
@@ -759,6 +777,26 @@ normalize_since(Filter) ->
         {ok, _Other} ->
             {error, {invalid_filter, since}}
     end.
+
+-spec append_artifact_event(binary(), artifact(), map()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+append_artifact_event(EventType, Artifact, ExtraPayload) ->
+    Event0 = #{
+        tags => [artifact],
+        payload => maps:merge(artifact_journal_payload(Artifact), ExtraPayload)
+    },
+    Event1 = maybe_put(session_id, maps:get(session_id, Artifact, undefined), Event0),
+    Event2 = maybe_put(thread_id, maps:get(thread_id, Artifact, undefined), Event1),
+    Event3 = maybe_put(run_id, maps:get(run_id, Artifact, undefined), Event2),
+    beam_agent_journal_core:append(EventType, Event3).
+
+-spec artifact_journal_payload(artifact()) -> map().
+artifact_journal_payload(Artifact) ->
+    #{artifact => artifact_summary(Artifact)}.
+
+-spec artifact_summary(artifact()) -> map().
+artifact_summary(Artifact) ->
+    maps:remove(body, Artifact).
 
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->

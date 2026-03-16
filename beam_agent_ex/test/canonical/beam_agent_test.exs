@@ -13,6 +13,7 @@ defmodule BeamAgentTest do
     BeamAgent.Apps,
     BeamAgent.Config,
     BeamAgent.File,
+    BeamAgent.Journal,
     BeamAgent.Provider,
     BeamAgent.Account,
     BeamAgent.Artifacts,
@@ -273,6 +274,18 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Artifacts, :search, 2)
     assert function_exported?(BeamAgent.Artifacts, :attach, 3)
     assert function_exported?(BeamAgent.Artifacts, :delete, 1)
+  end
+
+  test "Journal module exposes durable journal functions" do
+    assert function_exported?(BeamAgent.Journal, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Journal, :clear, 0)
+    assert function_exported?(BeamAgent.Journal, :append, 2)
+    assert function_exported?(BeamAgent.Journal, :list, 0)
+    assert function_exported?(BeamAgent.Journal, :list, 1)
+    assert function_exported?(BeamAgent.Journal, :stream_from, 1)
+    assert function_exported?(BeamAgent.Journal, :stream_from, 2)
+    assert function_exported?(BeamAgent.Journal, :get, 1)
+    assert function_exported?(BeamAgent.Journal, :ack, 2)
   end
 
   test "Control module exports turn steering and collaboration functions" do

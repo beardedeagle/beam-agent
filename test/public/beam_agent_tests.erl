@@ -104,6 +104,18 @@ exports_artifacts_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_artifacts, attach, 3)),
     ?assert(erlang:function_exported(beam_agent_artifacts, delete, 1)).
 
+exports_journal_domain_surface_test() ->
+    ensure_loaded(beam_agent_journal),
+    ?assert(erlang:function_exported(beam_agent_journal, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_journal, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_journal, append, 2)),
+    ?assert(erlang:function_exported(beam_agent_journal, list, 0)),
+    ?assert(erlang:function_exported(beam_agent_journal, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_journal, stream_from, 1)),
+    ?assert(erlang:function_exported(beam_agent_journal, stream_from, 2)),
+    ?assert(erlang:function_exported(beam_agent_journal, get, 1)),
+    ?assert(erlang:function_exported(beam_agent_journal, ack, 2)).
+
 exports_claude_native_controls_test() ->
     lists:foreach(fun ensure_loaded/1, [beam_agent_checkpoint, beam_agent_runtime,
                                          beam_agent_mcp, beam_agent_session_store]),

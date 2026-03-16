@@ -1,13 +1,15 @@
 defmodule BeamAgent.ControlTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   setup do
     :ok = :beam_agent_control.clear()
     :ok = :beam_agent_runs.clear()
+    :ok = :beam_agent_journal.clear()
 
     on_exit(fn ->
       :ok = :beam_agent_control.clear()
       :ok = :beam_agent_runs.clear()
+      :ok = :beam_agent_journal.clear()
     end)
 
     :ok

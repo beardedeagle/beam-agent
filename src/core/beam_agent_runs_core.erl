@@ -155,7 +155,9 @@ start_run(Scope, Opts) when (is_binary(Scope) orelse is_map(Scope)), is_map(Opts
                     Run1 = maybe_put(input, maps:get(input, Opts1, undefined), Run0),
                     Run2 = maps:merge(Run1, Scope1),
                     case beam_agent_runs_store:insert_run(Run2) of
-                        true -> {ok, Run2};
+                        true ->
+                            {ok, _Entry} = append_run_event(<<"run_started">>, Run2),
+                            {ok, Run2};
                         false -> {error, already_exists}
                     end;
                 Error ->
@@ -218,6 +220,7 @@ complete_run(RunId, Result) when is_binary(RunId) ->
                             Updated = terminalize_run(Run, completed, Result, undefined,
                                 undefined, Now),
                             ok = beam_agent_runs_store:put_run(Updated),
+                            {ok, _Entry} = append_run_event(<<"run_completed">>, Updated),
                             {ok, Updated};
                         [_ | _] ->
                             {error, active_steps}
@@ -281,6 +284,7 @@ start_step(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
                             case beam_agent_runs_store:insert_step(Step2) of
                                 true ->
                                     ok = touch_run(Run, Now),
+                                    {ok, _Entry} = append_step_event(<<"step_started">>, Step2),
                                     {ok, Step2};
                                 false ->
                                     {error, already_exists}
@@ -516,6 +520,7 @@ transition_run_with_step_cascade(RunId, TargetStatus, Payload) ->
                     Updated = terminalize_run(Run, TargetStatus, undefined, Payload,
                         Payload, Now),
                     ok = beam_agent_runs_store:put_run(Updated),
+                    {ok, _Entry} = append_run_event(run_event_type(TargetStatus), Updated),
                     {ok, Updated};
                 Error ->
                     Error
@@ -537,6 +542,7 @@ transition_step(RunId, StepId, TargetStatus, Payload) ->
                     Updated = terminalize_step(Step, TargetStatus, Payload, Now),
                     ok = beam_agent_runs_store:put_step(Updated),
                     ok = touch_run_id(RunId, Now),
+                    {ok, _Entry} = append_step_event(step_event_type(TargetStatus), Updated),
                     {ok, Updated};
                 Error ->
                     Error
@@ -570,7 +576,8 @@ cascade_active_steps(RunId, TargetStatus, Payload, Now) ->
     lists:foreach(fun
         (#{status := running} = Step) ->
             Updated = terminalize_step(Step, TargetStatus, Payload, Now),
-            ok = beam_agent_runs_store:put_step(Updated);
+            ok = beam_agent_runs_store:put_step(Updated),
+            {ok, _Entry} = append_step_event(step_event_type(TargetStatus), Updated);
         (_) ->
             ok
     end, Steps),
@@ -828,3 +835,37 @@ generate_run_id() ->
 generate_step_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"step_", Hex/binary>>.
+
+-spec run_event_type(completed | failed | cancelled) -> binary().
+run_event_type(completed) -> <<"run_completed">>;
+run_event_type(failed) -> <<"run_failed">>;
+run_event_type(cancelled) -> <<"run_cancelled">>.
+
+-spec step_event_type(completed | failed | cancelled) -> binary().
+step_event_type(completed) -> <<"step_completed">>;
+step_event_type(failed) -> <<"step_failed">>;
+step_event_type(cancelled) -> <<"step_cancelled">>.
+
+-spec append_run_event(binary(), run()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+append_run_event(EventType, Run) ->
+    Event0 = #{
+        run_id => maps:get(run_id, Run),
+        tags => [run],
+        payload => #{run => Run}
+    },
+    Event1 = maybe_put(session_id, maps:get(session_id, Run, undefined), Event0),
+    Event2 = maybe_put(thread_id, maps:get(thread_id, Run, undefined), Event1),
+    beam_agent_journal_core:append(EventType, Event2).
+
+-spec append_step_event(binary(), step()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+append_step_event(EventType, Step) ->
+    Event0 = #{
+        run_id => maps:get(run_id, Step),
+        tags => [run, step],
+        payload => #{step => Step}
+    },
+    Event1 = maybe_put(session_id, maps:get(session_id, Step, undefined), Event0),
+    Event2 = maybe_put(thread_id, maps:get(thread_id, Step, undefined), Event1),
+    beam_agent_journal_core:append(EventType, Event2).

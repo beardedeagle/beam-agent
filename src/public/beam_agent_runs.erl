@@ -11,7 +11,7 @@ scope.
 Runs and steps are stored in ETS through the universal layer, so they are
 available across all supported agentic coder backends without adapter-
 specific logic. This makes them suitable for orchestration, audit trails,
-future artifacts/journal linking, and higher-level products such as
+artifact/journal linking, and higher-level products such as
 MonkeyClaw.
 
 ## Getting Started
