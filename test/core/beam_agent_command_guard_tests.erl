@@ -17,7 +17,7 @@
 %%%   - Lockdown signals active commands (cooperative)
 %%%   - Status includes active_commands count
 %%%
-%%% These tests use real ETS tables — no mocks, minimal processes.
+%%% These tests use real ETS tables — no test doubles, minimal processes.
 %%% Each test initializes/tears down the guard for isolation.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -311,7 +311,7 @@ throttle_escalates_to_lockdown_test() ->
 %%====================================================================
 
 validator_crash_failsafe_test() ->
-    %% Use a real test module that always crashes (no mocks)
+    %% Use a real test module that always crashes (no test doubles)
     C = relaxed_config(),
     Config = C#{
         validator => beam_agent_test_crashing_validator
@@ -390,18 +390,18 @@ on_execution_crash_safe_test() ->
 
 register_command_tracks_port_test() ->
     with_guard(relaxed_config(), fun() ->
-        FakePort = fake_port_key,
-        beam_agent_command_guard:register_command(FakePort, <<"echo hello">>),
+        PortKey = command_port_key,
+        beam_agent_command_guard:register_command(PortKey, <<"echo hello">>),
         Status = beam_agent_command_guard:status(),
         ?assertEqual(1, maps:get(active_commands, Status)),
-        beam_agent_command_guard:unregister_command(FakePort)
+        beam_agent_command_guard:unregister_command(PortKey)
     end).
 
 unregister_command_removes_port_test() ->
     with_guard(relaxed_config(), fun() ->
-        FakePort = fake_port_key,
-        beam_agent_command_guard:register_command(FakePort, <<"test">>),
-        beam_agent_command_guard:unregister_command(FakePort),
+        PortKey = command_port_key,
+        beam_agent_command_guard:register_command(PortKey, <<"test">>),
+        beam_agent_command_guard:unregister_command(PortKey),
         Status = beam_agent_command_guard:status(),
         ?assertEqual(0, maps:get(active_commands, Status))
     end).
@@ -410,7 +410,7 @@ unregister_command_idempotent_test() ->
     with_guard(relaxed_config(), fun() ->
         %% Unregistering a never-registered key should not crash
         ?assertEqual(ok,
-            beam_agent_command_guard:unregister_command(fake_port_key))
+            beam_agent_command_guard:unregister_command(command_port_key))
     end).
 
 status_includes_active_commands_test() ->
@@ -426,8 +426,8 @@ status_includes_active_commands_test() ->
 
 lockdown_signals_active_commands_test() ->
     with_guard(relaxed_config(), fun() ->
-        Port1 = fake_port_1,
-        Port2 = fake_port_2,
+        Port1 = command_port_key_1,
+        Port2 = command_port_key_2,
         %% Register commands with self() as owner (register_command uses self())
         beam_agent_command_guard:register_command(Port1, <<"cmd1">>),
         beam_agent_command_guard:register_command(Port2, <<"cmd2">>),

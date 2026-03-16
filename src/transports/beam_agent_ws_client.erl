@@ -92,19 +92,24 @@ init({Owner, Host, Port, Opts}) ->
     Transport = case UseTls of true -> ssl; false -> gen_tcp end,
     MaxFrame = maps:get(max_frame_size, Opts, ?DEFAULT_MAX_FRAME),
     TlsOpts = maps:get(tls_opts, Opts, []),
-    State = #state{
-        owner      = Owner,
-        owner_mon  = MonRef,
-        transport  = Transport,
-        host       = Host,
-        port       = Port,
-        frag_state = undefined,
-        phase      = connecting,
-        max_frame  = MaxFrame
-    },
-    %% Connect asynchronously via self-message
-    self() ! {do_connect, UseTls, TlsOpts},
-    {ok, State}.
+    case validate_tls_opts(UseTls, Host, TlsOpts, maps:get(allow_insecure_tls, Opts, false)) of
+        {ok, ValidatedTls} ->
+            State = #state{
+                owner      = Owner,
+                owner_mon  = MonRef,
+                transport  = Transport,
+                host       = Host,
+                port       = Port,
+                frag_state = undefined,
+                phase      = connecting,
+                max_frame  = MaxFrame
+            },
+            %% Connect asynchronously via self-message
+            self() ! {do_connect, UseTls, ValidatedTls},
+            {ok, State};
+        {error, unsafe_tls_opts} ->
+            {stop, unsafe_tls_opts}
+    end.
 
 -spec handle_call(term(), gen_server:from(), #state{}) ->
     {reply, term(), #state{}} | {stop, normal, term(), #state{}}.
@@ -318,23 +323,18 @@ connect(false, Host, Port, SockOpts, _TlsOpts) ->
         {error, _} = Err -> Err
     end;
 connect(true, Host, Port, SockOpts, TlsOpts) ->
-    DefaultTls = [{verify, verify_peer},
-                  {cacerts, public_key:cacerts_get()},
-                  {depth, 4},
-                  {server_name_indication, Host}],
-    MergedTls = merge_tls_opts(DefaultTls, TlsOpts),
-    AllOpts = SockOpts ++ MergedTls,
+    AllOpts = SockOpts ++ TlsOpts,
     case ssl:connect(Host, Port, AllOpts, ?CONNECT_TIMEOUT) of
         {ok, Socket} -> {ok, Socket, ssl};
         {error, _} = Err -> Err
     end.
 
--spec merge_tls_opts(list(), list()) -> list().
-merge_tls_opts(Defaults, []) ->
-    Defaults;
-merge_tls_opts(_Defaults, Custom) ->
-    %% Custom opts take full precedence (no partial merge).
-    Custom.
+-spec validate_tls_opts(boolean(), string(), list(), boolean()) ->
+    {ok, list()} | {error, unsafe_tls_opts}.
+validate_tls_opts(false, _Host, _TlsOpts, _AllowInsecure) ->
+    {ok, []};
+validate_tls_opts(true, Host, TlsOpts, AllowInsecure) ->
+    beam_agent_transport_utils:tls_client_opts(Host, TlsOpts, AllowInsecure).
 
 %%====================================================================
 %% Internal: WebSocket upgrade handshake

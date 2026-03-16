@@ -59,7 +59,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
@@ -67,7 +67,7 @@ defmodule BeamAgent.Provider do
     `"anthropic"`, `"openai"`).
   - `{:error, :not_set}` if no provider has been explicitly selected.
   """
-  @spec current(pid()) :: {:ok, binary()} | {:error, :not_set}
+  @spec current(pid() | binary()) :: {:ok, binary()} | {:error, :not_set}
   defdelegate current(session), to: :beam_agent_provider
 
   @doc """
@@ -79,7 +79,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
   - `provider_id` -- binary provider identifier (e.g., `"anthropic"`,
     `"openai"`, `"google"`).
 
@@ -91,7 +91,7 @@ defmodule BeamAgent.Provider do
 
       :ok = BeamAgent.Provider.set(session, "anthropic")
   """
-  @spec set(pid(), binary()) :: :ok
+  @spec set(pid() | binary(), binary()) :: :ok
   defdelegate set(session, provider_id), to: :beam_agent_provider
 
   @doc """
@@ -102,13 +102,13 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
   `:ok`
   """
-  @spec clear(pid()) :: :ok
+  @spec clear(pid() | binary()) :: :ok
   defdelegate clear(session), to: :beam_agent_provider
 
   @doc """
@@ -121,14 +121,14 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
   - `{:ok, agent_id}` where `agent_id` is a binary sub-agent identifier.
   - `{:error, :not_set}` if no sub-agent is active (primary agent in use).
   """
-  @spec current_agent(pid()) :: {:ok, binary()} | {:error, :not_set}
+  @spec current_agent(pid() | binary()) :: {:ok, binary()} | {:error, :not_set}
   defdelegate current_agent(session), to: :beam_agent_provider
 
   @doc """
@@ -141,7 +141,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
   - `agent_id` -- binary sub-agent identifier.
 
   ## Returns
@@ -152,7 +152,7 @@ defmodule BeamAgent.Provider do
 
       :ok = BeamAgent.Provider.set_agent(session, "code-reviewer")
   """
-  @spec set_agent(pid(), binary()) :: :ok
+  @spec set_agent(pid() | binary(), binary()) :: :ok
   defdelegate set_agent(session, agent_id), to: :beam_agent_provider
 
   @doc """
@@ -163,13 +163,13 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
   `:ok`
   """
-  @spec clear_agent(pid()) :: :ok
+  @spec clear_agent(pid() | binary()) :: :ok
   defdelegate clear_agent(session), to: :beam_agent_provider
 
   @doc """
@@ -182,7 +182,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
@@ -192,7 +192,7 @@ defmodule BeamAgent.Provider do
     `:unconfigured`).
   - `{:error, reason}` on failure.
   """
-  @spec list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec list(pid() | binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate list(session), to: :beam_agent_provider
 
   @doc """
@@ -205,7 +205,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
 
   ## Returns
 
@@ -214,7 +214,7 @@ defmodule BeamAgent.Provider do
     atoms such as `:api_key`, `:oauth`, or `:sso`).
   - `{:error, reason}` on failure.
   """
-  @spec auth_methods(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec auth_methods(pid() | binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate auth_methods(session), to: :beam_agent_provider
 
   @doc """
@@ -227,7 +227,7 @@ defmodule BeamAgent.Provider do
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
   - `provider_id` -- binary provider identifier (e.g., `"anthropic"`).
   - `body` -- OAuth parameters map. Supported keys:
     - `:redirect_uri` -- binary callback URL for the OAuth redirect
@@ -239,20 +239,19 @@ defmodule BeamAgent.Provider do
     (binary URL the user should visit to authorize).
   - `{:error, reason}` on failure.
   """
-  @spec oauth_authorize(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec oauth_authorize(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate oauth_authorize(session, provider_id, body), to: :beam_agent_provider
 
   @doc """
   Handle an OAuth callback to complete the authorization flow.
 
-  Exchanges the authorization code received from the OAuth redirect for
-  an access token. This is the second step of the OAuth flow started by
-  `oauth_authorize/3`. On success, the session is authenticated
-  with the provider and ready to route queries.
+  Applies the OAuth callback payload received from the provider. Sensitive
+  callback fields are redacted in the public result and runtime config view.
+  This is the second step of the OAuth flow started by `oauth_authorize/3`.
 
   ## Parameters
 
-  - `session` -- pid of a running session.
+  - `session` -- pid of a running session or persisted session ID binary.
   - `provider_id` -- binary provider identifier (e.g., `"anthropic"`).
   - `body` -- OAuth callback parameters map. Required keys:
     - `:code` -- binary authorization code from the OAuth redirect
@@ -260,10 +259,10 @@ defmodule BeamAgent.Provider do
 
   ## Returns
 
-  - `{:ok, result_map}` where `result_map` contains token information
-    such as `:access_token`, `:token_type`, and `:expires_in`.
+  - `{:ok, result_map}` where `result_map` contains the configured status and a
+    redacted provider view.
   - `{:error, reason}` on failure (e.g., invalid code or state mismatch).
   """
-  @spec oauth_callback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec oauth_callback(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate oauth_callback(session, provider_id, body), to: :beam_agent_provider
 end

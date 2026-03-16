@@ -3,7 +3,7 @@
 %%%
 %%% Uses `test_ws_client` — a dependency-injected client replacement that
 %%% captures outgoing WebSocket frames and lets the test simulate
-%%% incoming transport events. No mocking (meck) is used.
+%%% incoming transport events. No monkeypatching is used.
 %%%
 %%% Tests cover:
 %%%   - Full session lifecycle (connect → WS upgrade → ready → query → result)

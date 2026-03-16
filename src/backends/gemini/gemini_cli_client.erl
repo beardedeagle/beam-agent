@@ -228,9 +228,11 @@ query(Session, Prompt, Params) ->
         {error, _} = Err ->
             Err
     end.
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
-session_info(Session) ->
-    gen_statem:call(Session, session_info, 5000).
+-spec session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
+session_info(Session) when is_pid(Session) ->
+    gen_statem:call(Session, session_info, 5000);
+session_info(SessionId) when is_binary(SessionId) ->
+    beam_agent_core:session_info(SessionId).
 -spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
 set_model(Session, Model) ->
     gen_statem:call(Session, {set_model, Model}, 5000).
@@ -713,7 +715,9 @@ send_query_to(Session, Prompt, Params, Timeout) ->
                               {error, term()}.
 receive_message_from(Session, Ref, Timeout) ->
     gen_statem:call(Session, {receive_message, Ref}, Timeout).
--spec get_session_id(pid()) -> binary().
+-spec get_session_id(pid() | binary()) -> binary().
+get_session_id(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    SessionId;
 get_session_id(Session) ->
     case session_info(Session) of
         {ok, #{session_id := SId}}

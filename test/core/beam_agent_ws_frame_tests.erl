@@ -2,7 +2,7 @@
 %%% @doc EUnit tests for beam_agent_ws_frame — RFC 6455 frame codec.
 %%%
 %%% All tests exercise pure functions: no processes, no sockets, no
-%%% mocks. Server frames are constructed as raw binaries (unmasked)
+%%% test doubles. Server frames are constructed as raw binaries (unmasked)
 %%% and fed to decode/2,3.  Client frames produced by encode/2 are
 %%% validated structurally (mask-bit set, correct opcode).
 %%%

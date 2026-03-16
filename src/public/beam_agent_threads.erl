@@ -7,6 +7,9 @@ A thread groups related queries into a named conversation branch,
 enabling parallel workstreams, forking, archiving, and rollback
 within a single session.
 
+Universal thread-management operations accept either a live session pid
+or a persisted session id binary.
+
 Threads are scoped to a session -- each session can have multiple
 threads, and each thread tracks its own query history. Messages
 recorded against a thread are also stored in the parent session
@@ -535,7 +538,7 @@ Returns {ok, ThreadMeta} or {error, Reason}.
 ThreadId = maps:get(thread_id, Thread).
 ```
 """.
--spec thread_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_start(Session, Opts) ->
     beam_agent_core:thread_start(Session, Opts).
 
@@ -556,7 +559,7 @@ Returns {ok, ThreadMeta} or {error, not_found}.
 io:format("Resumed: ~s~n", [maps:get(name, Thread)]).
 ```
 """.
--spec thread_resume(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_resume(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_resume(Session, ThreadId) ->
     beam_agent_core:thread_resume(Session, ThreadId).
 
@@ -574,7 +577,7 @@ Parameters:
 
 Returns {ok, ThreadMeta} or {error, not_found}.
 """.
--spec thread_resume(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_resume(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_resume(Session, ThreadId, Opts) ->
     beam_agent_core:native_or(Session, thread_resume, [ThreadId, Opts],
         fun() -> thread_resume(Session, ThreadId) end).
@@ -587,7 +590,7 @@ Parameters:
 
 Returns {ok, ThreadList} where each entry is a thread metadata map.
 """.
--spec thread_list(pid()) -> {ok, [map()]} | {error, term()}.
+-spec thread_list(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 thread_list(Session) ->
     beam_agent_core:thread_list(Session).
 
@@ -603,7 +606,7 @@ Parameters:
 
 Returns {ok, ThreadList} or {error, Reason}.
 """.
--spec thread_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec thread_list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 thread_list(Session, Opts) ->
     beam_agent_core:native_or(Session, thread_list, [Opts],
         fun() -> thread_list(Session) end).
@@ -620,7 +623,7 @@ Parameters:
 
 Returns {ok, ForkedThreadMeta} or {error, not_found}.
 """.
--spec thread_fork(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_fork(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId) ->
     beam_agent_core:thread_fork(Session, ThreadId).
 
@@ -637,7 +640,7 @@ Parameters:
 
 Returns {ok, ForkedThreadMeta} or {error, not_found}.
 """.
--spec thread_fork(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_fork(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId, Opts) ->
     beam_agent_core:thread_fork(Session, ThreadId, Opts).
 
@@ -650,7 +653,7 @@ Parameters:
 
 Returns {ok, #{thread => ThreadMeta}} or {error, not_found}.
 """.
--spec thread_read(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_read(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId) ->
     beam_agent_core:thread_read(Session, ThreadId).
 
@@ -666,7 +669,7 @@ Parameters:
 Returns {ok, #{thread => ThreadMeta, messages => [message()]}} or
 {error, not_found}.
 """.
--spec thread_read(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_read(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId, Opts) ->
     beam_agent_core:thread_read(Session, ThreadId, Opts).
 
@@ -679,7 +682,7 @@ Parameters:
 
 Returns {ok, UpdatedThreadMeta} or {error, not_found}.
 """.
--spec thread_archive(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_archive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_archive(Session, ThreadId) ->
     beam_agent_core:thread_archive(Session, ThreadId).
 
@@ -692,7 +695,7 @@ Parameters:
 
 Returns {ok, UpdatedThreadMeta} or {error, not_found}.
 """.
--spec thread_unarchive(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_unarchive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_unarchive(Session, ThreadId) ->
     beam_agent_core:thread_unarchive(Session, ThreadId).
 
@@ -711,7 +714,7 @@ Parameters:
 
 Returns {ok, UpdatedThreadMeta} or {error, not_found | invalid_selector}.
 """.
--spec thread_rollback(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_rollback(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_rollback(Session, ThreadId, Selector) ->
     beam_agent_core:thread_rollback(Session, ThreadId, Selector).
 
@@ -725,7 +728,7 @@ Parameters:
 Returns {ok, ResultMap} with thread_id and unsubscribed fields, or
 {error, not_found}.
 """.
--spec thread_unsubscribe(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec thread_unsubscribe(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
 thread_unsubscribe(Session, ThreadId) ->
     beam_agent_core:native_or(Session, thread_unsubscribe, [ThreadId], fun() ->
         universal_thread_unsubscribe(Session, ThreadId)
@@ -741,7 +744,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, not_found}.
 """.
--spec thread_name_set(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec thread_name_set(pid() | binary(), binary(), binary()) -> {ok, term()} | {error, term()}.
 thread_name_set(Session, ThreadId, Name) ->
     beam_agent_core:native_or(Session, thread_name_set, [ThreadId, Name], fun() ->
         universal_thread_name_set(Session, ThreadId, Name)
@@ -758,7 +761,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, not_found}.
 """.
--spec thread_metadata_update(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec thread_metadata_update(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
 thread_metadata_update(Session, ThreadId, MetadataPatch) ->
     beam_agent_core:native_or(Session, thread_metadata_update, [ThreadId, MetadataPatch], fun() ->
         universal_thread_metadata_update(Session, ThreadId, MetadataPatch)
@@ -775,7 +778,7 @@ Parameters:
 
 Returns {ok, ResultMap} with threads, active_thread_id, and count fields.
 """.
--spec thread_loaded_list(pid()) -> {ok, map()} | {error, term()}.
+-spec thread_loaded_list(pid() | binary()) -> {ok, map()} | {error, term()}.
 thread_loaded_list(Session) ->
     beam_agent_core:native_or(Session, thread_loaded_list, [], fun() ->
         universal_thread_loaded_list(Session, #{})
@@ -794,7 +797,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, Reason}.
 """.
--spec thread_loaded_list(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_loaded_list(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_loaded_list(Session, Opts) ->
     beam_agent_core:native_or(Session, thread_loaded_list, [Opts], fun() ->
         universal_thread_loaded_list(Session, Opts)
@@ -817,7 +820,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, not_found}.
 """.
--spec thread_compact(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_compact(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_compact(Session, Opts) ->
     beam_agent_core:native_or(Session, thread_compact, [Opts], fun() ->
         universal_thread_compact(Session, Opts)
@@ -827,7 +830,7 @@ thread_compact(Session, Opts) ->
 %% Private Helpers (universal fallbacks)
 %%--------------------------------------------------------------------
 
--spec universal_thread_unsubscribe(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec universal_thread_unsubscribe(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 universal_thread_unsubscribe(Session, ThreadId) ->
     SessionId = beam_agent_core:session_identity(Session),
     case beam_agent_threads_core:get_thread(SessionId, ThreadId) of
@@ -847,7 +850,7 @@ universal_thread_unsubscribe(Session, ThreadId) ->
             Error
     end.
 
--spec universal_thread_name_set(pid(), binary(), binary()) ->
+-spec universal_thread_name_set(pid() | binary(), binary(), binary()) ->
     {ok, map()} | {error, term()}.
 universal_thread_name_set(Session, ThreadId, Name) ->
     SessionId = beam_agent_core:session_identity(Session),

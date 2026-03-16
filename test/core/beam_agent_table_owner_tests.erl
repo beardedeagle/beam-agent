@@ -11,7 +11,7 @@
 %%%   - Persistent term cleanup on shutdown
 %%%   - Write timeout error on unresponsive owner
 %%%
-%%% All tests use real ETS tables and real processes — zero mocks.
+%%% All tests use real ETS tables and real processes — zero test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_table_owner_tests).

@@ -8,7 +8,7 @@
 %%%   - Output capture correctness
 %%%   - Telemetry: start/stop/exception events with correct metadata
 %%%
-%%% All tests use real shell commands — zero mocks.
+%%% All tests use real shell commands — zero test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_core_tests).
@@ -33,17 +33,22 @@ run_echo_string_command_test() ->
     ?assert(binary:match(Output, <<"world">>) =/= nomatch).
 
 run_segmented_binary_command_test() ->
-    {ok, Result} = beam_agent_command_core:run([<<"printf">>, <<"beam-agent">>]),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_segments(<<"beam-agent">>)),
     ?assertEqual(0, maps:get(exit_code, Result)),
-    ?assertEqual(<<"beam-agent">>, maps:get(output, Result)).
+    ?assertEqual(<<"beam-agent">>,
+        beam_agent_command_test_helpers:trim_output(maps:get(output, Result))).
 
 run_segmented_command_escapes_arguments_test() ->
-    {ok, Result} = beam_agent_command_core:run([<<"printf">>, <<"hello world">>]),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_segments(<<"hello world">>)),
     ?assertEqual(0, maps:get(exit_code, Result)),
-    ?assertEqual(<<"hello world">>, maps:get(output, Result)).
+    ?assertEqual(<<"hello world">>,
+        beam_agent_command_test_helpers:trim_output(maps:get(output, Result))).
 
 run_true_command_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"true">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:success_command()),
     ?assertEqual(0, maps:get(exit_code, Result)).
 
 %%====================================================================
@@ -51,11 +56,24 @@ run_true_command_test() ->
 %%====================================================================
 
 run_false_command_nonzero_exit_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"false">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:failure_command()),
     ?assertNotEqual(0, maps:get(exit_code, Result)).
 
+run_without_initialized_guard_still_denies_dangerous_command_test() ->
+    beam_agent_command_guard:teardown(),
+    try
+        Result = beam_agent_command_core:run(
+            [<<"rm">>, <<"-rf">>, <<"/tmp/beam-agent-test-forbidden">>]),
+        ?assertMatch({error, {security, {deny, _}}}, Result),
+        ?assertNot(beam_agent_command_guard:running())
+    after
+        beam_agent_command_guard:teardown()
+    end.
+
 run_exit_code_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"exit 42">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:exit_command(42)),
     ?assertEqual(42, maps:get(exit_code, Result)).
 
 %%====================================================================
@@ -63,18 +81,21 @@ run_exit_code_test() ->
 %%====================================================================
 
 run_captures_output_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"echo captured">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"captured">>)),
     Output = maps:get(output, Result),
     ?assert(binary:match(Output, <<"captured">>) =/= nomatch).
 
 run_captures_stderr_test() ->
     %% stderr_to_stdout is set, so stderr appears in output
-    {ok, Result} = beam_agent_command_core:run(<<"echo errline 1>&2">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:stderr_command(<<"errline">>)),
     Output = maps:get(output, Result),
     ?assert(binary:match(Output, <<"errline">>) =/= nomatch).
 
 run_empty_output_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"true">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:success_command()),
     Output = maps:get(output, Result),
     ?assert(is_binary(Output)).
 
@@ -83,11 +104,14 @@ run_empty_output_test() ->
 %%====================================================================
 
 run_timeout_test() ->
-    Result = beam_agent_command_core:run(<<"sleep 10">>, #{timeout => 100}),
+    Result = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:sleep_command(10), #{timeout => 100}),
     ?assertEqual({error, {timeout, 100}}, Result).
 
 run_completes_within_timeout_test() ->
-    {ok, R} = beam_agent_command_core:run(<<"echo fast">>, #{timeout => 5000}),
+    {ok, R} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"fast">>),
+        #{timeout => 5000}),
     ?assertEqual(0, maps:get(exit_code, R)).
 
 %%====================================================================
@@ -95,25 +119,29 @@ run_completes_within_timeout_test() ->
 %%====================================================================
 
 run_cwd_binary_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"pwd">>, #{cwd => <<"/tmp">>}),
+    {Cwd, Expected} = beam_agent_command_test_helpers:cwd_fixture(),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:cwd_command(), #{cwd => Cwd}),
     ?assertEqual(0, maps:get(exit_code, Result)),
     Output = maps:get(output, Result),
-    ?assert(binary:match(Output, <<"tmp">>) =/= nomatch).
+    ?assert(binary:match(Output, Expected) =/= nomatch).
 
 run_cwd_string_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"pwd">>, #{cwd => "/tmp"}),
+    {Cwd, Expected} = beam_agent_command_test_helpers:cwd_fixture(),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:cwd_command(),
+        #{cwd => binary_to_list(Cwd)}),
     ?assertEqual(0, maps:get(exit_code, Result)),
     Output = maps:get(output, Result),
-    ?assert(binary:match(Output, <<"tmp">>) =/= nomatch).
+    ?assert(binary:match(Output, Expected) =/= nomatch).
 
 %%====================================================================
 %% run/2 with max_output option
 %%====================================================================
 
 run_max_output_truncates_test() ->
-    %% Generate ~100 bytes of output, cap at 10 bytes
     {ok, Result} = beam_agent_command_core:run(
-        <<"printf '%0.s1234567890' 1 2 3 4 5 6 7 8 9 10">>,
+        beam_agent_command_test_helpers:echo_command(binary:copy(<<"1234567890">>, 10)),
         #{max_output => 10}
     ),
     Output = maps:get(output, Result),
@@ -122,7 +150,7 @@ run_max_output_truncates_test() ->
 run_max_output_not_exceeded_test() ->
     %% Output is smaller than cap — no truncation
     {ok, Result} = beam_agent_command_core:run(
-        <<"echo hi">>,
+        beam_agent_command_test_helpers:echo_command(<<"hi">>),
         #{max_output => 1048576}
     ),
     Output = maps:get(output, Result),
@@ -135,7 +163,7 @@ run_max_output_not_exceeded_test() ->
 
 run_env_variable_test() ->
     {ok, Result} = beam_agent_command_core:run(
-        <<"echo $MY_TEST_VAR">>,
+        beam_agent_command_test_helpers:env_echo_command(<<"MY_TEST_VAR">>),
         #{env => [{"MY_TEST_VAR", "env_value"}]}
     ),
     ?assertEqual(0, maps:get(exit_code, Result)),
@@ -147,16 +175,19 @@ run_env_variable_test() ->
 %%====================================================================
 
 result_has_required_keys_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"echo keys">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"keys">>)),
     ?assert(maps:is_key(exit_code, Result)),
     ?assert(maps:is_key(output, Result)).
 
 result_output_is_binary_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"echo binary">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"binary">>)),
     ?assert(is_binary(maps:get(output, Result))).
 
 result_exit_code_is_integer_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"echo int">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"int">>)),
     ?assert(is_integer(maps:get(exit_code, Result))).
 
 %%====================================================================
@@ -173,14 +204,15 @@ telemetry_start_event_emitted_test() ->
             Self ! {telemetry_start, Measurements, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"echo telemetry">>),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"telemetry">>)),
     receive
         {telemetry_start, Measurements, Metadata} ->
             ?assert(is_integer(maps:get(system_time, Measurements))),
             ?assertEqual(command, maps:get(agent, Metadata)),
             ?assert(is_binary(maps:get(command, Metadata))),
             Cmd = maps:get(command, Metadata),
-            ?assert(binary:match(Cmd, <<"echo telemetry">>) =/= nomatch)
+            ?assert(binary:match(Cmd, <<"telemetry">>) =/= nomatch)
     after 1000 ->
         ?assert(false)
     end,
@@ -196,10 +228,12 @@ telemetry_start_includes_cwd_test() ->
             Self ! {telemetry_start, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"pwd">>, #{cwd => <<"/tmp">>}),
+    {Cwd, _Expected} = beam_agent_command_test_helpers:cwd_fixture(),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:cwd_command(), #{cwd => Cwd}),
     receive
         {telemetry_start, Metadata} ->
-            ?assertEqual(<<"/tmp">>, maps:get(cwd, Metadata))
+            ?assertEqual(Cwd, maps:get(cwd, Metadata))
     after 1000 ->
         ?assert(false)
     end,
@@ -215,7 +249,8 @@ telemetry_start_cwd_undefined_when_omitted_test() ->
             Self ! {telemetry_start, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"true">>),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:success_command()),
     receive
         {telemetry_start, Metadata} ->
             ?assertEqual(undefined, maps:get(cwd, Metadata))
@@ -238,7 +273,8 @@ telemetry_stop_event_on_success_test() ->
             Self ! {telemetry_stop, Measurements, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"echo done">>),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:echo_command(<<"done">>)),
     receive
         {telemetry_stop, Measurements, Metadata} ->
             ?assert(is_integer(maps:get(duration, Measurements))),
@@ -260,7 +296,8 @@ telemetry_stop_nonzero_exit_code_test() ->
             Self ! {telemetry_stop, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"exit 42">>),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:exit_command(42)),
     receive
         {telemetry_stop, Metadata} ->
             ?assertEqual(42, maps:get(exit_code, Metadata))
@@ -279,11 +316,13 @@ telemetry_stop_includes_command_and_cwd_test() ->
             Self ! {telemetry_stop, Metadata}
         end,
         []),
-    {ok, _} = beam_agent_command_core:run(<<"pwd">>, #{cwd => <<"/tmp">>}),
+    {Cwd, _Expected} = beam_agent_command_test_helpers:cwd_fixture(),
+    {ok, _} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:cwd_command(), #{cwd => Cwd}),
     receive
         {telemetry_stop, Metadata} ->
             ?assert(is_binary(maps:get(command, Metadata))),
-            ?assertEqual(<<"/tmp">>, maps:get(cwd, Metadata))
+            ?assertEqual(Cwd, maps:get(cwd, Metadata))
     after 1000 ->
         ?assert(false)
     end,
@@ -304,7 +343,7 @@ telemetry_exception_on_timeout_test() ->
         end,
         []),
     {error, {timeout, 100}} = beam_agent_command_core:run(
-        <<"sleep 10">>, #{timeout => 100}),
+        beam_agent_command_test_helpers:sleep_command(10), #{timeout => 100}),
     receive
         {telemetry_exception, Measurements, Metadata} ->
             ?assert(is_integer(maps:get(system_time, Measurements))),
@@ -331,7 +370,7 @@ telemetry_long_command_truncated_test() ->
         end,
         []),
     %% Generate a command string longer than 512 bytes.
-    LongCmd = iolist_to_binary([<<"echo ">>, binary:copy(<<"x">>, 600)]),
+    LongCmd = beam_agent_command_test_helpers:echo_command(binary:copy(<<"x">>, 600)),
     {ok, _} = beam_agent_command_core:run(LongCmd),
     receive
         {telemetry_start, Metadata} ->
@@ -348,31 +387,34 @@ telemetry_long_command_truncated_test() ->
 
 run_with_max_heap_option_test() ->
     {ok, Result} = beam_agent_command_core:run(
-        <<"echo heap_test">>, #{max_heap => 10000000}),
+        beam_agent_command_test_helpers:echo_command(<<"heap_test">>),
+        #{max_heap => 10000000}),
     ?assertEqual(0, maps:get(exit_code, Result)),
     Output = maps:get(output, Result),
     ?assert(binary:match(Output, <<"heap_test">>) =/= nomatch).
 
 run_with_sensitive_option_test() ->
     {ok, Result} = beam_agent_command_core:run(
-        <<"echo secret_data">>, #{sensitive => true}),
+        beam_agent_command_test_helpers:echo_command(<<"secret_data">>),
+        #{sensitive => true}),
     ?assertEqual(0, maps:get(exit_code, Result)),
     Output = maps:get(output, Result),
     ?assert(binary:match(Output, <<"secret_data">>) =/= nomatch).
 
 run_with_max_heap_and_sensitive_test() ->
     {ok, Result} = beam_agent_command_core:run(
-        <<"echo combined">>,
+        beam_agent_command_test_helpers:echo_command(<<"combined">>),
         #{max_heap => 10000000, sensitive => true}),
     ?assertEqual(0, maps:get(exit_code, Result)).
 
 run_timeout_with_restrictions_test() ->
     Result = beam_agent_command_core:run(
-        <<"sleep 10">>, #{timeout => 100}),
+        beam_agent_command_test_helpers:sleep_command(10), #{timeout => 100}),
     ?assertMatch({error, {timeout, 100}}, Result).
 
 run_nonzero_exit_with_restrictions_test() ->
-    {ok, Result} = beam_agent_command_core:run(<<"exit 42">>),
+    {ok, Result} = beam_agent_command_core:run(
+        beam_agent_command_test_helpers:exit_command(42)),
     ?assertEqual(42, maps:get(exit_code, Result)).
 
 run_registers_with_guard_test() ->
@@ -385,7 +427,8 @@ run_registers_with_guard_test() ->
                          per_category => #{}},
         temporal_rules => []}),
     try
-        {ok, _} = beam_agent_command_core:run(<<"echo guarded">>),
+        {ok, _} = beam_agent_command_core:run(
+            beam_agent_command_test_helpers:echo_command(<<"guarded">>)),
         Status = beam_agent_command_guard:status(),
         %% After completion, the command should be unregistered
         ?assertEqual(0, maps:get(active_commands, Status))

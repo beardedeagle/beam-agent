@@ -582,7 +582,7 @@ test_transport_process_crash() ->
     %% Suppress expected logger:error from transport crash handler
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    %% Kill the fake transport process so the real monitor fires
+    %% Kill the transport process under test so the real monitor fires
     %% Unlink first to prevent the test process from dying
     unlink(ConnPid),
     exit(ConnPid, kill),

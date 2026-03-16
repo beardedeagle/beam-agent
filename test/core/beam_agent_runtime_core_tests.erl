@@ -61,4 +61,42 @@ provider_status_includes_registry_metadata_test() ->
     ?assertEqual(true, maps:get(current, Status)),
     ?assertEqual(true, maps:get(known_provider, Status)),
     ?assert(lists:member(<<"oauth_callback">>, maps:get(auth_methods, Status))),
-    ?assert(lists:member(<<"attachments">>, maps:get(capabilities, Status))).
+    ?assert(lists:member(<<"attachments">>, maps:get(capabilities, Status))),
+    ProviderConfig = maps:get(provider_config, Status),
+    ?assertEqual(redacted, maps:get(api_key, ProviderConfig)).
+
+provider_config_view_redacts_sensitive_fields_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    SessionId = <<"sess-provider-config-redaction">>,
+    ok = beam_agent_runtime_core:set_provider_config(SessionId, #{
+        provider_id => <<"google">>,
+        api_key => <<"secret-key">>,
+        base_url => <<"https://example.test">>,
+        oauth_callback => #{
+            request_id => <<"req-1">>,
+            code => <<"secret-code">>,
+            access_token => <<"secret-token">>
+        }
+    }),
+    {ok, Config} = beam_agent_runtime_core:get_provider_config(SessionId),
+    ?assertEqual(<<"https://example.test">>, maps:get(base_url, Config)),
+    ?assertEqual(redacted, maps:get(api_key, Config)),
+    Callback = maps:get(oauth_callback, Config),
+    ?assertEqual(<<"req-1">>, maps:get(request_id, Callback)),
+    ?assertEqual(redacted, maps:get(code, Callback)),
+    ?assertEqual(redacted, maps:get(access_token, Callback)).
+
+runtime_state_view_redacts_provider_secret_values_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    SessionId = <<"sess-runtime-public-state">>,
+    ok = beam_agent_runtime_core:register_session(SessionId, #{
+        provider_id => <<"openai">>,
+        provider => #{
+            api_key => <<"secret-key">>,
+            base_url => <<"https://example.test">>
+        }
+    }),
+    {ok, State} = beam_agent_runtime_core:get_state(SessionId),
+    Provider = maps:get(provider, State),
+    ?assertEqual(<<"https://example.test">>, maps:get(base_url, Provider)),
+    ?assertEqual(redacted, maps:get(api_key, Provider)).

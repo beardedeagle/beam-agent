@@ -8,7 +8,7 @@
 %%%   - Default validator: ask + string-form → deny
 %%%   - Behaviour type exports exist
 %%%
-%%% All tests are pure — no processes, no ETS, no mocks.
+%%% All tests are pure — no processes, no ETS, no test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_validator_tests).

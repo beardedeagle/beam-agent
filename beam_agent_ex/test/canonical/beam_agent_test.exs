@@ -22,10 +22,7 @@ defmodule BeamAgentTest do
   ]
 
   setup_all do
-    for mod <- @domain_modules do
-      assert Code.ensure_loaded?(mod), "expected #{inspect(mod)} to be loadable"
-    end
-
+    Enum.each(@domain_modules, &Code.ensure_loaded!/1)
     :ok
   end
 
@@ -38,8 +35,10 @@ defmodule BeamAgentTest do
   end
 
   test "command wrapper executes a minimal shell command" do
-    assert {:ok, %{exit_code: 0, output: "beam-agent-smoke"}} =
-             BeamAgent.Command.run(["printf", "beam-agent-smoke"])
+    assert {:ok, %{exit_code: 0, output: output}} =
+             BeamAgent.Command.run(portable_echo_segments("beam-agent-smoke"))
+
+    assert trim_output(output) == "beam-agent-smoke"
   end
 
   test "runtime wrapper round-trips provider state" do
@@ -50,6 +49,50 @@ defmodule BeamAgentTest do
     assert {:ok, "openai"} = BeamAgent.Runtime.current_provider(session)
     assert :ok = BeamAgent.Runtime.clear_provider(session)
     assert {:error, :not_set} = BeamAgent.Runtime.current_provider(session)
+  end
+
+  test "provider wrapper accepts session identity binaries for universal flows" do
+    session = "provider-wrapper-#{System.unique_integer([:positive])}"
+
+    assert {:error, :not_set} = BeamAgent.Provider.current(session)
+    assert :ok = BeamAgent.Provider.set(session, "openai")
+    assert {:ok, "openai"} = BeamAgent.Provider.current(session)
+
+    assert {:ok, pending_result} =
+             BeamAgent.Provider.oauth_authorize(session, "openai", %{
+               authorize_url: "https://example.test/oauth"
+             })
+
+    request_id = pending_result[:request_id] || pending_result["request_id"]
+
+    assert {:ok, callback_result} =
+             BeamAgent.Provider.oauth_callback(session, "openai", %{
+               request_id: request_id,
+               code: "authorized"
+             })
+
+    assert (callback_result[:status] || callback_result["status"]) == :configured
+    assert {:ok, provider_config} = BeamAgent.Runtime.get_provider_config(session)
+
+    oauth_callback =
+      Map.get(provider_config, :oauth_callback) || Map.get(provider_config, "oauth_callback")
+
+    assert is_map(oauth_callback)
+    assert (oauth_callback[:code] || oauth_callback["code"]) == :redacted
+    assert {:ok, providers} = BeamAgent.Provider.list(session)
+    assert Enum.any?(providers, &((Map.get(&1, :id) || Map.get(&1, "id")) == "openai"))
+  end
+
+  test "provider wrapper round-trips provider state with binary session ids" do
+    session = "provider-smoke-#{System.unique_integer([:positive])}"
+
+    assert {:error, :not_set} = BeamAgent.Provider.current(session)
+    assert :ok = BeamAgent.Provider.set(session, "openai")
+    assert {:ok, "openai"} = BeamAgent.Provider.current(session)
+    assert {:ok, providers} = BeamAgent.Provider.list(session)
+    assert Enum.any?(providers, &(&1[:id] == "openai" or &1["id"] == "openai"))
+    assert :ok = BeamAgent.Provider.clear(session)
+    assert {:error, :not_set} = BeamAgent.Provider.current(session)
   end
 
   test "session store remains available on canonical root" do
@@ -372,5 +415,13 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Threads, :thread_loaded_list, 1)
     assert function_exported?(BeamAgent.Threads, :thread_loaded_list, 2)
     assert function_exported?(BeamAgent.Threads, :thread_compact, 2)
+  end
+
+  defp trim_output(output) when is_binary(output) do
+    String.trim_trailing(output)
+  end
+
+  defp portable_echo_segments(text) when is_binary(text) do
+    ["erl", "-noshell", "-eval", "io:put_chars(#{inspect(text)}), halt()."]
   end
 end

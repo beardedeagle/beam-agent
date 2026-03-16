@@ -10,9 +10,11 @@ list_backends_test() ->
         beam_agent:list_backends()).
 
 command_run_smoke_test() ->
-    {ok, Result} = beam_agent_command:run([<<"printf">>, <<"beam-agent-smoke">>]),
+    {ok, Result} = beam_agent_command:run(
+        beam_agent_command_test_helpers:echo_segments(<<"beam-agent-smoke">>)),
     ?assertEqual(0, maps:get(exit_code, Result)),
-    ?assertEqual(<<"beam-agent-smoke">>, maps:get(output, Result)).
+    ?assertEqual(<<"beam-agent-smoke">>,
+        beam_agent_command_test_helpers:trim_output(maps:get(output, Result))).
 
 runtime_provider_roundtrip_smoke_test() ->
     Session = list_to_binary(io_lib:format("smoke-runtime-~p",
@@ -22,6 +24,26 @@ runtime_provider_roundtrip_smoke_test() ->
     ?assertEqual({ok, <<"openai">>}, beam_agent_runtime:current_provider(Session)),
     ok = beam_agent_runtime:clear_provider(Session),
     ?assertEqual({error, not_set}, beam_agent_runtime:current_provider(Session)).
+
+provider_state_roundtrip_supports_binary_session_ids_test() ->
+    Session = list_to_binary(io_lib:format("smoke-provider-~p",
+                                           [erlang:unique_integer([positive])])),
+    ?assertEqual({error, not_set}, beam_agent_provider:current(Session)),
+    ok = beam_agent_provider:set(Session, <<"openai">>),
+    ?assertEqual({ok, <<"openai">>}, beam_agent_provider:current(Session)),
+    {ok, Providers} = beam_agent_provider:list(Session),
+    ?assert(lists:any(fun
+        (#{id := <<"openai">>}) -> true;
+        (_) -> false
+    end, Providers)),
+    ok = beam_agent_provider:clear(Session),
+    ?assertEqual({error, not_set}, beam_agent_provider:current(Session)).
+
+prompt_async_requires_live_session_test() ->
+    Session = list_to_binary(io_lib:format("smoke-prompt-~p",
+                                           [erlang:unique_integer([positive])])),
+    ?assertEqual({error, requires_live_session},
+        beam_agent_command:prompt_async(Session, <<"hello">>)).
 
 capabilities_projection_test() ->
     {ok, Caps} = beam_agent_capabilities:capabilities(codex),

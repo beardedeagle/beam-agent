@@ -10,7 +10,7 @@
 %%%   - Hardened mode: automatic cleanup on subscriber death
 %%%   - monitor_for_cleanup returns ignored in public mode
 %%%
-%%% All tests use real ETS tables and real processes — zero mocks.
+%%% All tests use real ETS tables and real processes — zero test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_events_tests).

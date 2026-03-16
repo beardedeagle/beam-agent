@@ -314,7 +314,8 @@ message). All intermediate messages (text chunks, tool use, thinking,
 etc.) are collected and returned as a list.
 
 Parameters:
-  - Session: pid of a running session.
+  - Session: pid of a running session, or a persisted session id binary
+    for the universal event store.
   - Prompt: the user prompt as a binary string.
 
 Returns {ok, Messages} where Messages is a list of normalized message()
@@ -337,7 +338,7 @@ Like query/2 but accepts a query_opts() map to control model selection,
 tool permissions, timeout, output format, and other query-level settings.
 
 Parameters:
-  - Session: pid of a running session.
+  - Session: pid of a running session, or a persisted session id binary.
   - Prompt: the user prompt as a binary string.
   - Params: query options map. See query_opts/0 for available keys.
 
@@ -367,7 +368,7 @@ Tries the backend's native event subscription first, falling back to
 the universal ETS-backed event layer.
 
 Parameters:
-  - Session: pid of a running session.
+  - Session: pid of a running session, or a persisted session id binary.
 
 Returns {ok, Ref} where Ref is a unique subscription reference, or
 {error, Reason} on failure.
@@ -378,7 +379,7 @@ Returns {ok, Ref} where Ref is a unique subscription reference, or
 {ok, Event} = beam_agent:receive_event(Session, Ref, 5000).
 ```
 """.
--spec event_subscribe(pid()) -> {ok, reference()} | {error, term()}.
+-spec event_subscribe(pid() | binary()) -> {ok, reference()} | {error, term()}.
 event_subscribe(Session) ->
     beam_agent_core:native_or(Session, event_subscribe, [], fun() ->
         beam_agent_events:subscribe(beam_agent_core:session_identity(Session))
@@ -390,7 +391,7 @@ Receive the next event from a subscription with a 5-second default timeout.
 Equivalent to receive_event(Session, Ref, 5000).
 
 Parameters:
-  - Session: pid of a running session.
+  - Session: pid of a running session, or a persisted session id binary.
   - Ref: subscription reference from event_subscribe/1.
 
 Returns {ok, Event} where Event is a message() map, {error, complete}
@@ -407,7 +408,7 @@ case beam_agent:receive_event(Session, Ref) of
 end.
 ```
 """.
--spec receive_event(pid(), reference()) -> {ok, message()} | {error, term()}.
+-spec receive_event(pid() | binary(), reference()) -> {ok, message()} | {error, term()}.
 receive_event(Session, Ref) ->
     receive_event(Session, Ref, 5000).
 
@@ -425,7 +426,7 @@ Parameters:
 Returns {ok, Event}, {error, complete}, {error, timeout}, or
 {error, bad_ref}.
 """.
--spec receive_event(pid(), reference(), timeout()) ->
+-spec receive_event(pid() | binary(), reference(), timeout()) ->
     {ok, message()} | {error, term()}.
 receive_event(Session, Ref, Timeout) ->
     beam_agent_core:native_or(Session, receive_event, [Ref, Timeout], fun() ->
@@ -441,7 +442,7 @@ Parameters:
 
 Returns {ok, ok} on success or {error, bad_ref} if the reference is invalid.
 """.
--spec event_unsubscribe(pid(), reference()) -> {ok, term()} | {error, term()}.
+-spec event_unsubscribe(pid() | binary(), reference()) -> {ok, term()} | {error, term()}.
 event_unsubscribe(Session, Ref) ->
     beam_agent_core:native_or(Session, event_unsubscribe, [Ref], fun() ->
         beam_agent_events:unsubscribe(beam_agent_core:session_identity(Session), Ref)

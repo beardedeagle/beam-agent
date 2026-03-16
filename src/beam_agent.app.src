@@ -64,6 +64,7 @@
         beam_agent_mcp_transport_http,
         beam_agent_mcp_transport_stdio,
         beam_agent_raw_core,
+        beam_agent_redaction,
         beam_agent_router,
         beam_agent_runtime_core,
         beam_agent_session_store_core,

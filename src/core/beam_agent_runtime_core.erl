@@ -26,6 +26,7 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
     set_provider/2,
     clear_provider/1,
     get_provider_config/1,
+    merge_provider_config/2,
     set_provider_config/2,
     current_agent/1,
     set_agent/2,
@@ -105,6 +106,11 @@ clear_session(Session) ->
 -doc "Read the current runtime state map for a session.".
 -spec get_state(pid() | binary()) -> {ok, runtime_state()}.
 get_state(Session) ->
+    {ok, State} = get_raw_state(Session),
+    {ok, beam_agent_redaction:runtime_state(State)}.
+
+-spec get_raw_state(pid() | binary()) -> {ok, runtime_state()}.
+get_raw_state(Session) ->
     ensure_tables(),
     case ets:lookup(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)) of
         [{_, State}] when is_map(State) ->
@@ -116,7 +122,7 @@ get_state(Session) ->
 -doc "Return the currently selected provider, if any.".
 -spec current_provider(pid() | binary()) -> {ok, binary()} | {error, not_set}.
 current_provider(Session) ->
-    case get_state(Session) of
+    case get_raw_state(Session) of
         {ok, #{provider_id := ProviderId}} when is_binary(ProviderId),
                 byte_size(ProviderId) > 0 ->
             {ok, ProviderId};
@@ -197,7 +203,12 @@ clear_provider(Session) ->
 -doc "Read the provider config map associated with this session.".
 -spec get_provider_config(pid() | binary()) -> {ok, map()}.
 get_provider_config(Session) ->
-    case get_state(Session) of
+    {ok, Config} = get_raw_provider_config(Session),
+    {ok, beam_agent_redaction:provider_config(Config)}.
+
+-spec get_raw_provider_config(pid() | binary()) -> {ok, map()}.
+get_raw_provider_config(Session) ->
+    case get_raw_state(Session) of
         {ok, #{provider := Config}} when is_map(Config) ->
             {ok, Config};
         _ ->
@@ -223,10 +234,17 @@ set_provider_config(Session, Config) when is_map(Config) ->
             end
     end.
 
+-doc "Merge provider configuration updates into the stored raw config for a session.".
+-spec merge_provider_config(pid() | binary(), map()) ->
+    ok | {error, invalid_api_key | invalid_provider_config}.
+merge_provider_config(Session, Updates) when is_map(Updates) ->
+    {ok, Existing} = get_raw_provider_config(Session),
+    set_provider_config(Session, maps:merge(Existing, Updates)).
+
 -doc "Return the currently selected default agent, if any.".
 -spec current_agent(pid() | binary()) -> {ok, binary()} | {error, not_set}.
 current_agent(Session) ->
-    case get_state(Session) of
+    case get_raw_state(Session) of
         {ok, #{agent := Agent}} when is_binary(Agent), byte_size(Agent) > 0 ->
             {ok, Agent};
         _ ->
@@ -270,9 +288,12 @@ provider_status(Session) ->
         {ok, ProviderId} ->
             provider_status(Session, ProviderId);
         {error, not_set} ->
-            {ok, Config} = get_provider_config(Session),
-            {ok, #{provider_id => undefined, configured => (map_size(Config) > 0),
-                   provider_config => Config}}
+            {ok, RawConfig} = get_raw_provider_config(Session),
+            {ok, #{
+                provider_id => undefined,
+                configured => (map_size(RawConfig) > 0),
+                provider_config => beam_agent_redaction:provider_config(RawConfig)
+            }}
     end.
 
 -doc """
@@ -288,14 +309,14 @@ provider_status(Session, ProviderId) when is_binary(ProviderId) ->
         {ok, Native} ->
             {ok, Native#{provider_id => ProviderId}};
         {error, _} ->
-            {ok, State} = get_state(Session),
+            {ok, State} = get_raw_state(Session),
             Config = config_for_provider(ProviderId, State),
             CurrentProviderId = maps:get(provider_id, State, undefined),
             Metadata = fallback_provider_entry(ProviderId, State),
             {ok, #{
                 provider_id => ProviderId,
                 configured => (map_size(Config) > 0),
-                provider_config => Config,
+                provider_config => beam_agent_redaction:provider_config(Config),
                 source => maps:get(source, Metadata, runtime),
                 auth_methods => maps:get(auth_methods, Metadata, []),
                 capabilities => maps:get(capabilities, Metadata, []),
@@ -333,7 +354,7 @@ Nested provider config maps are merged shallowly.
 """.
 -spec merge_query_opts(pid() | binary(), map()) -> map().
 merge_query_opts(Session, Params) when is_map(Params) ->
-    {ok, State} = get_state(Session),
+    {ok, State} = get_raw_state(Session),
     Defaults = maps:with([provider_id, provider, model_id, agent, mode, system, tools], State),
     Merged0 = maps:merge(Defaults, Params),
     case {maps:get(provider, Defaults, undefined), maps:get(provider, Params, undefined)} of
@@ -363,7 +384,7 @@ put_state(Session, Updates) when is_map(Updates) ->
 
 -spec update_state(pid() | binary(), fun((map()) -> map())) -> ok.
 update_state(Session, Fun) ->
-    {ok, State} = get_state(Session),
+    {ok, State} = get_raw_state(Session),
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
     beam_agent_ets:insert(?RUNTIME_TABLE, {Key, defaulted_state(Fun(State))}),
@@ -452,7 +473,7 @@ native_provider_list(_SessionId) ->
 
 -spec fallback_provider_list(pid() | binary()) -> {ok, [provider_entry()]}.
 fallback_provider_list(Session) ->
-    {ok, State} = get_state(Session),
+    {ok, State} = get_raw_state(Session),
     CurrentProviderId = maps:get(provider_id, State, undefined),
     Catalog = [decorate_provider_entry(Entry, State) || Entry <- provider_catalog()],
     Entries =

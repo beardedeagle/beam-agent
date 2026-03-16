@@ -26,6 +26,7 @@
     init/1,
     teardown/0,
     evaluate/2,
+    evaluate_default/2,
     record_execution/3,
     lockdown/1,
     reset/0,
@@ -232,6 +233,24 @@ evaluate(CmdStruct, EvalOpts) ->
             handle_active_evaluate(CmdStruct, EvalOpts)
     end.
 
+-doc """
+Evaluate a command against the default stateless security baseline.
+
+Used when the full guard state machine is not initialized. This still enforces
+the default deny policy, but does not apply validator-specific state, rate
+limits, or temporal history rules.
+""".
+-spec evaluate_default(beam_agent_command_parser:command_struct(), evaluate_opts()) ->
+    allow | {deny, binary()}.
+evaluate_default(CmdStruct, _EvalOpts) ->
+    Policy = app_config(command_policy, beam_agent_command_policy:default_policy()),
+    case beam_agent_command_policy:evaluate(CmdStruct, Policy) of
+        {deny, Reason} ->
+            {deny, Reason};
+        _ ->
+            allow
+    end.
+
 -doc "Record a command execution result for history and temporal detection.".
 -spec record_execution(beam_agent_command_parser:command_struct(),
                        evaluate_opts(),
@@ -304,7 +323,7 @@ handle_active_evaluate(CmdStruct, EvalOpts) ->
             case do_evaluate(CmdStruct, EvalOpts) of
                 allow ->
                     update_rate_limits(CmdStruct, RateConfig),
-                    check_temporal_patterns(CmdStruct, EvalOpts, allow);
+                    apply_temporal_actions(CmdStruct, EvalOpts, allow);
                 {deny, _} = Denial ->
                     Denial
             end;
@@ -486,10 +505,10 @@ bump_counter(Key, Now, WindowMs) ->
 %% Internal: Temporal pattern detection
 %%--------------------------------------------------------------------
 
--spec check_temporal_patterns(beam_agent_command_parser:command_struct(),
-                              evaluate_opts(), allow) ->
+-spec apply_temporal_actions(beam_agent_command_parser:command_struct(),
+                             evaluate_opts(), allow) ->
     allow.
-check_temporal_patterns(CmdStruct, EvalOpts, Result) ->
+apply_temporal_actions(CmdStruct, EvalOpts, Result) ->
     TemporalRules = persistent_term:get(?PT_TEMPORAL_RULES),
     CurrentEntry = cmd_to_entry(CmdStruct, EvalOpts),
     case check_temporal(CurrentEntry, TemporalRules) of
@@ -739,10 +758,21 @@ base_context(CmdStruct, EvalOpts) ->
         opts           => maps:get(opts, EvalOpts, #{}),
         cwd            => maps:get(cwd, EvalOpts, undefined),
         env            => maps:get(env, EvalOpts, undefined),
-        history        => get_recent_history(?CONTEXT_HISTORY_DEPTH),
+        history        => maybe_recent_history(?CONTEXT_HISTORY_DEPTH),
         timestamp      => erlang:system_time(),
         metadata       => maps:get(metadata, EvalOpts, #{})
     }.
+
+-spec maybe_recent_history(?CONTEXT_HISTORY_DEPTH) -> [map()].
+maybe_recent_history(N) ->
+    case running() of
+        true ->
+            try get_recent_history(N)
+            catch _:_ -> []
+            end;
+        false ->
+            []
+    end.
 
 %%--------------------------------------------------------------------
 %% Internal: Post-execution notification

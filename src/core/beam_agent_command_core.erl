@@ -19,8 +19,9 @@ command is evaluated through the security pipeline before execution:
   3. **Validator** (Layer 2) — pluggable validation
   4. **Guard** (Layer 3) — rate limits, temporal patterns
 
-If the guard is not running, commands execute directly — security is
-opt-in and does not break existing callers.
+If the guard is running, commands use the full stateful security pipeline.
+If it is not running, commands still go through the default stateless
+deny-policy baseline before execution.
 
 ## Process Restrictions
 
@@ -193,14 +194,14 @@ run(Command, Opts) when is_map(Opts) ->
 %%--------------------------------------------------------------------
 
 %% Check the security guard if it is running. When not running,
-%% commands execute directly — security is opt-in.
+%% fall back to the default stateless deny-policy baseline.
 -spec security_check(beam_agent_command_parser:command_struct(),
                      beam_agent_command_guard:evaluate_opts()) ->
     allow | {deny, binary()} | {throttle, pos_integer()}.
 security_check(CmdStruct, EvalOpts) ->
     case beam_agent_command_guard:running() of
         true  -> beam_agent_command_guard:evaluate(CmdStruct, EvalOpts);
-        false -> allow
+        false -> beam_agent_command_guard:evaluate_default(CmdStruct, EvalOpts)
     end.
 
 %% Record execution result in the guard's history (fire-and-forget cast).
@@ -234,12 +235,11 @@ build_eval_opts(Opts) ->
 do_run(Command, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_TIMEOUT),
     MaxOutput = maps:get(max_output, Opts, ?DEFAULT_MAX_OUTPUT),
-    CmdStr = command_string(Command),
+    CmdStr = display_command(Command),
     Cwd = maps:get(cwd, Opts, undefined),
     TeleMeta = #{command => telemetry_command(CmdStr), cwd => Cwd},
     StartTime = beam_agent_telemetry_core:span_start(command, run, TeleMeta),
-    Shell = find_shell(),
-    {PortName, PortOpts} = build_port_spec(Shell, CmdStr, Opts),
+    {PortName, PortOpts} = build_port_spec(Command, Opts),
     Prev = apply_restrictions(Opts),
     try
         Result = run_port(PortName, PortOpts, Timeout, MaxOutput, CmdStr),
@@ -351,9 +351,27 @@ find_shell() ->
             Shell
     end.
 
--spec build_port_spec(string(), string(), command_opts()) ->
+-spec shell_kind(string()) -> posix | cmd.
+shell_kind(Shell) ->
+    Lower = string:lowercase(filename:basename(Shell)),
+    case Lower of
+        "cmd" -> cmd;
+        "cmd.exe" -> cmd;
+        _ -> posix
+    end.
+
+-spec build_port_spec(binary() | string() | [binary() | string()], command_opts()) ->
     {{spawn_executable, string()}, [term()]}.
-build_port_spec(Shell, CmdStr, Opts) ->
+build_port_spec([Head | _] = Command, Opts) when not is_integer(Head) ->
+    build_exec_port_spec(Command, Opts);
+build_port_spec(Command, Opts) ->
+    Shell = find_shell(),
+    CmdStr = command_string(Command, shell_kind(Shell)),
+    build_shell_port_spec(Shell, CmdStr, Opts).
+
+-spec build_shell_port_spec(string(), string(), command_opts()) ->
+    {{spawn_executable, string()}, [term()]}.
+build_shell_port_spec(Shell, CmdStr, Opts) ->
     Args = case lists:suffix("cmd", Shell) orelse
                 lists:suffix("cmd.exe", Shell) of
         true -> ["/c", CmdStr];
@@ -368,7 +386,7 @@ build_port_spec(Shell, CmdStr, Opts) ->
         stderr_to_stdout
     ],
     WithCwd = case maps:find(cwd, Opts) of
-        {ok, Dir} -> [{cd, command_string(Dir)} | BaseOpts];
+        {ok, Dir} -> [{cd, command_string(Dir, posix)} | BaseOpts];
         error -> BaseOpts
     end,
     WithEnv = case maps:find(env, Opts) of
@@ -376,6 +394,28 @@ build_port_spec(Shell, CmdStr, Opts) ->
         _ -> WithCwd
     end,
     {{spawn_executable, Shell}, WithEnv}.
+
+-spec build_exec_port_spec([binary() | string()], command_opts()) ->
+    {{spawn_executable, string()}, [term()]}.
+build_exec_port_spec([Program | Args], Opts) ->
+    Executable = resolve_executable(Program),
+    BaseOpts = [
+        {args, [segment_string(Arg) || Arg <- Args]},
+        binary,
+        exit_status,
+        use_stdio,
+        hide,
+        stderr_to_stdout
+    ],
+    WithCwd = case maps:find(cwd, Opts) of
+        {ok, Dir} -> [{cd, segment_string(Dir)} | BaseOpts];
+        error -> BaseOpts
+    end,
+    WithEnv = case maps:find(env, Opts) of
+        {ok, Env} when is_list(Env) -> [{env, Env} | WithCwd];
+        _ -> WithCwd
+    end,
+    {{spawn_executable, Executable}, WithEnv}.
 
 %%--------------------------------------------------------------------
 %% Internal: Output Collection
@@ -412,24 +452,79 @@ append_bounded(Acc, Data, MaxOutput) ->
 %% Internal: Helpers
 %%--------------------------------------------------------------------
 
--spec command_string(binary() | string() | [binary() | string()]) -> string().
-command_string(Bin) when is_binary(Bin) ->
+-spec display_command(binary() | string() | [binary() | string()]) -> string().
+display_command(Bin) when is_binary(Bin) ->
     unicode:characters_to_list(Bin);
-command_string(Str) when is_list(Str), (Str =:= [] orelse is_integer(hd(Str))) ->
+display_command(Str) when is_list(Str), (Str =:= [] orelse is_integer(hd(Str))) ->
     Str;
-command_string(Segments) when is_list(Segments) ->
-    string:join([shell_escape_segment(Segment) || Segment <- Segments], " ").
+display_command(Segments) when is_list(Segments) ->
+    string:join([segment_string(Segment) || Segment <- Segments], " ").
 
--spec shell_escape_segment(binary() | string()) -> string().
-shell_escape_segment(Segment) when is_binary(Segment) ->
-    shell_escape_segment(unicode:characters_to_list(Segment));
-shell_escape_segment(Segment) when is_list(Segment) ->
-    [$', lists:flatten([shell_escape_char(Char) || Char <- Segment]), $'].
+-spec command_string(binary() | string() | [binary() | string()], posix | cmd) -> string().
+command_string(Bin, _ShellKind) when is_binary(Bin) ->
+    unicode:characters_to_list(Bin);
+command_string(Str, _ShellKind) when is_list(Str), (Str =:= [] orelse is_integer(hd(Str))) ->
+    Str;
+command_string(Segments, ShellKind) when is_list(Segments) ->
+    string:join([shell_escape_segment(Segment, ShellKind) || Segment <- Segments], " ").
+
+-spec segment_string(binary() | string()) -> string().
+segment_string(Bin) when is_binary(Bin) ->
+    unicode:characters_to_list(Bin);
+segment_string(Str) when is_list(Str) ->
+    Str.
+
+-spec resolve_executable(binary() | string()) -> string().
+resolve_executable(Program) ->
+    ProgramStr = segment_string(Program),
+    case os:find_executable(ProgramStr) of
+        false ->
+            case has_path_separator(ProgramStr) of
+                true -> ProgramStr;
+                false -> error({executable_not_found, ProgramStr})
+            end;
+        Executable ->
+            Executable
+    end.
+
+-spec has_path_separator(string()) -> boolean().
+has_path_separator(Path) ->
+    lists:any(fun(Char) -> Char =:= $/ orelse Char =:= $\\ end, Path).
+
+-spec shell_escape_segment(binary() | string(), posix | cmd) -> string().
+shell_escape_segment(Segment, ShellKind) when is_binary(Segment) ->
+    shell_escape_segment(unicode:characters_to_list(Segment), ShellKind);
+shell_escape_segment(Segment, posix) when is_list(Segment) ->
+    [$', lists:flatten([shell_escape_char(Char) || Char <- Segment]), $'];
+shell_escape_segment(Segment, cmd) ->
+    [$", lists:flatten([cmd_escape_char(Char) || Char <- Segment]), $"].
 
 -spec shell_escape_char(char()) -> string().
 shell_escape_char($') ->
     "'\\''"  ;
 shell_escape_char(Char) ->
+    [Char].
+
+-spec cmd_escape_char(char()) -> string().
+cmd_escape_char($") ->
+    "\\\"";
+cmd_escape_char($%) ->
+    "%%";
+cmd_escape_char($^) ->
+    "^^";
+cmd_escape_char($&) ->
+    "^&";
+cmd_escape_char($|) ->
+    "^|";
+cmd_escape_char($<) ->
+    "^<";
+cmd_escape_char($>) ->
+    "^>";
+cmd_escape_char($() ->
+    "^(";
+cmd_escape_char($)) ->
+    "^)";
+cmd_escape_char(Char) ->
     [Char].
 
 %%--------------------------------------------------------------------

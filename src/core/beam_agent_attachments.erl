@@ -19,9 +19,9 @@ Prepare query input for the selected backend.
 For Claude and Gemini today the fallback converts `attachments` into a textual
 appendix and removes the raw attachment payload from params before dispatch.
 """.
--spec prepare(pid(), binary(), map()) -> {binary(), map()}.
+-spec prepare(pid() | binary(), binary(), map()) -> {binary(), map()}.
 prepare(Session, Prompt, Params)
-  when is_pid(Session), is_binary(Prompt), is_map(Params) ->
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(Prompt), is_map(Params) ->
     case maps:get(attachments, Params, []) of
         Attachments when is_list(Attachments), Attachments =/= [] ->
             case fallback_attachment_backend(Session) of
@@ -50,7 +50,7 @@ prepare(Session, Prompt, Params)
 %% Internal helpers
 %%--------------------------------------------------------------------
 
--spec fallback_attachment_backend(pid()) -> native | gemini | fallback.
+-spec fallback_attachment_backend(pid() | binary()) -> native | gemini | fallback.
 fallback_attachment_backend(Session) ->
     case resolve_backend(Session) of
         {ok, codex} ->
@@ -65,7 +65,7 @@ fallback_attachment_backend(Session) ->
             fallback
     end.
 
--spec resolve_backend(pid()) -> {ok, beam_agent_backend:backend()} | {error, term()}.
+-spec resolve_backend(pid() | binary()) -> {ok, beam_agent_backend:backend()} | {error, term()}.
 resolve_backend(Session) ->
     case beam_agent_backend:session_backend(Session) of
         {ok, _Backend} = Ok ->
@@ -74,22 +74,25 @@ resolve_backend(Session) ->
             maybe_backend_from_session_info(Session)
     end.
 
--spec maybe_backend_from_session_info(pid()) ->
+-spec maybe_backend_from_session_info(pid() | binary()) ->
     {ok, beam_agent_backend:backend()} | {error, term()}.
 maybe_backend_from_session_info(Session) ->
-    try gen_statem:call(Session, session_info, 5000) of
+    case beam_agent_core:session_info(Session) of
         {ok, Info} when is_map(Info) ->
             maybe_register_backend(Session,
                 maps:get(adapter, Info, maps:get(backend, Info, undefined)));
-        Other ->
-            {error, {invalid_session_info, Other}}
-    catch
-        exit:Reason ->
-            {error, Reason}
+        {error, _} = Error ->
+            Error
     end.
 
 maybe_register_backend(_Session, undefined) ->
     {error, backend_not_present};
+maybe_register_backend(SessionId, BackendLike)
+  when is_binary(SessionId), is_binary(BackendLike) ->
+    beam_agent_backend:normalize(BackendLike);
+maybe_register_backend(SessionId, BackendLike)
+  when is_binary(SessionId), is_atom(BackendLike) ->
+    beam_agent_backend:normalize(BackendLike);
 maybe_register_backend(Session, BackendLike) ->
     case beam_agent_backend:register_session(Session, BackendLike) of
         {ok, _Backend} ->

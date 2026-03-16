@@ -541,6 +541,7 @@ store_pending_request(SessionId, RequestId, Request)
     ensure_tables(),
     Now = erlang:system_time(millisecond),
     CanonicalRequest = normalize_pending_request(RequestId, Request),
+    PublicRequest = beam_agent_redaction:map(CanonicalRequest),
     Entry = #{
         request_id => RequestId,
         session_id => SessionId,
@@ -556,7 +557,7 @@ store_pending_request(SessionId, RequestId, Request)
         source => universal,
         event_class => control,
         request_id => RequestId,
-        request => CanonicalRequest,
+        request => PublicRequest,
         timestamp => Now
     }),
     ok.
@@ -584,7 +585,7 @@ resolve_pending_request(SessionId, RequestId, Response)
                 source => universal,
                 event_class => control,
                 request_id => RequestId,
-                response => Response,
+                response => beam_agent_redaction:map(Response),
                 timestamp => Now
             }),
             ok;
@@ -616,7 +617,7 @@ list_pending_requests(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     Requests = ets:foldl(fun
         ({{SId, _}, Entry}, Acc) when SId =:= SessionId ->
-            [Entry | Acc];
+            [beam_agent_redaction:pending_entry(Entry) | Acc];
         (_, Acc) ->
             Acc
     end, [], ?PENDING_TABLE),
@@ -698,7 +699,7 @@ pending_user_input_result(SessionId, RequestId, Request, Reason) ->
     Pending = #{
         request_id => RequestId,
         status => pending,
-        request => Request,
+        request => beam_agent_redaction:map(Request),
         source => universal,
         reason => Reason
     },
@@ -722,6 +723,7 @@ normalize_pending_request(RequestId, Request) ->
         source => maps:get(source, Request, universal),
         schema_version => <<"beam_agent.control.request.v1">>
     }, Request).
+
 
 -spec approval_decision_to_permission(accept | accept_for_session | decline | cancel,
                                       map(), allow | deny) ->

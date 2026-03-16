@@ -3,8 +3,11 @@
 -include_lib("eunit/include/eunit.hrl").
 
 prepare_materializes_non_native_attachments_test() ->
-    Session = fake_session(),
-    {ok, gemini} = beam_agent_backend:register_session(Session, gemini),
+    SessionId = <<"attachments-gemini">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => gemini
+    }),
     TmpFile = temp_path(<<"demo.txt">>),
     ok = file:write_file(binary_to_list(TmpFile), <<"demo file">>),
     Params = #{
@@ -13,7 +16,7 @@ prepare_materializes_non_native_attachments_test() ->
             #{type => text, text => <<"inline note">>}
         ]
     },
-    {Prompt, Prepared} = beam_agent_attachments:prepare(Session, <<"Explain">>, Params),
+    {Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Explain">>, Params),
     ?assertEqual(<<"Explain">>, Prompt),
     ?assertEqual(error, maps:find(attachments, Prepared)),
     AttachmentBlocks = maps:get(beam_agent_attachment_blocks, Prepared),
@@ -31,23 +34,29 @@ prepare_materializes_non_native_attachments_test() ->
         (_) -> false
     end, PromptBlocks)),
     ok = file:delete(binary_to_list(TmpFile)),
-    cleanup_session(Session).
+    ok = beam_agent_session_store_core:delete_session(SessionId).
 
 prepare_keeps_native_attachment_payloads_test() ->
-    Session = fake_session(),
-    {ok, codex} = beam_agent_backend:register_session(Session, codex),
+    SessionId = <<"attachments-codex">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => codex
+    }),
     Params = #{attachments => [#{type => file, path => <<"/tmp/demo.txt">>}]},
-    {Prompt, Prepared} = beam_agent_attachments:prepare(Session, <<"Explain">>, Params),
+    {Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Explain">>, Params),
     ?assertEqual(<<"Explain">>, Prompt),
     ?assertEqual({ok, [#{type => file, path => <<"/tmp/demo.txt">>}]} ,
         maps:find(attachments, Prepared)),
-    cleanup_session(Session).
+    ok = beam_agent_session_store_core:delete_session(SessionId).
 
 prepare_fallback_backend_keeps_structured_manifest_test() ->
-    Session = fake_session(),
-    {ok, claude} = beam_agent_backend:register_session(Session, claude),
+    SessionId = <<"attachments-claude">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
     Params = #{attachments => [#{type => mention, name => <<"repo">>, path => <<"app://repo">>}]},
-    {Prompt, Prepared} = beam_agent_attachments:prepare(Session, <<"Explain">>, Params),
+    {Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Explain">>, Params),
     ?assertMatch(<<"Explain", _/binary>>, Prompt),
     ?assertEqual(error, maps:find(attachments, Prepared)),
     ?assertMatch([#{type := mention, mention := <<"repo">>}],
@@ -58,21 +67,7 @@ prepare_fallback_backend_keeps_structured_manifest_test() ->
         (#{<<"type">> := <<"resource_link">>}) -> true;
         (_) -> false
     end, maps:get(beam_agent_prompt_blocks, Prepared))),
-    cleanup_session(Session).
-
-fake_session() ->
-    spawn(fun Loop() ->
-        receive
-            stop ->
-                ok;
-            _ ->
-                Loop()
-        end
-    end).
-
-cleanup_session(Session) ->
-    ok = beam_agent_backend:unregister_session(Session),
-    Session ! stop.
+    ok = beam_agent_session_store_core:delete_session(SessionId).
 
 temp_path(Name) ->
     unicode:characters_to_binary(
