@@ -1238,6 +1238,7 @@ query(Session, Prompt, Params) ->
 %% Most of these delegate to universal core modules:
 %%   beam_agent_session_store_core (sessions, fork, revert, share)
 %%   beam_agent_threads_core (threads)
+%%   beam_agent_runs_core (runs and steps)
 %%   beam_agent_control_core (permission mode, thinking budget, tasks)
 %%   beam_agent_checkpoint_core (file checkpointing)
 %%   beam_agent_events (event streaming)
@@ -1407,6 +1408,8 @@ fallback path:
 |--------|-------------|
 | `beam_agent_session_store_core` | Session history, fork, revert, share, summarize |
 | `beam_agent_threads_core` | Thread lifecycle, fork, archive, rollback |
+| `beam_agent_runs_core` | Run lifecycle, step lifecycle, parent-child scope |
+| `beam_agent_artifacts_core` | Typed artifact storage, linkage, and search |
 | `beam_agent_file_core` | File search, find text, find symbols |
 | `beam_agent_app_core` | App listing, info, init, log, modes |
 | `beam_agent_account_core` | Login, logout, auth status, rate limits |

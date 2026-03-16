@@ -15,7 +15,9 @@ defmodule BeamAgentTest do
     BeamAgent.File,
     BeamAgent.Provider,
     BeamAgent.Account,
+    BeamAgent.Artifacts,
     BeamAgent.Search,
+    BeamAgent.Runs,
     BeamAgent.Checkpoint,
     BeamAgent.SessionStore,
     BeamAgent.Threads
@@ -239,6 +241,38 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Catalog, :model_list, 1)
     assert function_exported?(BeamAgent.Catalog, :model_list, 2)
     assert function_exported?(BeamAgent.Catalog, :list_commands, 1)
+  end
+
+  test "Runs module exposes run and step lifecycle functions" do
+    assert function_exported?(BeamAgent.Runs, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Runs, :clear, 0)
+    assert function_exported?(BeamAgent.Runs, :start_run, 2)
+    assert function_exported?(BeamAgent.Runs, :get_run, 1)
+    assert function_exported?(BeamAgent.Runs, :list_runs, 0)
+    assert function_exported?(BeamAgent.Runs, :list_runs, 1)
+    assert function_exported?(BeamAgent.Runs, :complete_run, 2)
+    assert function_exported?(BeamAgent.Runs, :fail_run, 2)
+    assert function_exported?(BeamAgent.Runs, :cancel_run, 2)
+    assert function_exported?(BeamAgent.Runs, :start_step, 2)
+    assert function_exported?(BeamAgent.Runs, :get_step, 2)
+    assert function_exported?(BeamAgent.Runs, :list_steps, 1)
+    assert function_exported?(BeamAgent.Runs, :complete_step, 3)
+    assert function_exported?(BeamAgent.Runs, :fail_step, 3)
+    assert function_exported?(BeamAgent.Runs, :cancel_step, 3)
+  end
+
+  test "Artifacts module exposes typed artifact storage functions" do
+    assert function_exported?(BeamAgent.Artifacts, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Artifacts, :clear, 0)
+    assert function_exported?(BeamAgent.Artifacts, :put, 1)
+    assert function_exported?(BeamAgent.Artifacts, :put, 2)
+    assert function_exported?(BeamAgent.Artifacts, :get, 1)
+    assert function_exported?(BeamAgent.Artifacts, :list, 0)
+    assert function_exported?(BeamAgent.Artifacts, :list, 1)
+    assert function_exported?(BeamAgent.Artifacts, :search, 1)
+    assert function_exported?(BeamAgent.Artifacts, :search, 2)
+    assert function_exported?(BeamAgent.Artifacts, :attach, 3)
+    assert function_exported?(BeamAgent.Artifacts, :delete, 1)
   end
 
   test "Control module exports turn steering and collaboration functions" do

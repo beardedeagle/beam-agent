@@ -7,6 +7,10 @@ feedback management, and turn response handling. Implements a
 virtual control protocol for adapters without native control
 message support.
 
+Task registration is bridged into beam_agent_runs_core so live control
+entries have a durable run history even after the task table entry is
+removed.
+
 Uses ETS for per-session state. All state is keyed by session_id
 and persists for the node lifetime or until explicitly cleared.
 
@@ -82,7 +86,9 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
     session_id := binary(),
     pid := pid(),
     started_at := integer(),
-    status := running | stopped
+    status := running | stopped,
+    run_id => binary(),
+    stopped_at => integer()
 }.
 
 -type pending_request() :: #{
@@ -289,15 +295,24 @@ get_max_thinking_tokens(SessionId) when is_binary(SessionId) ->
 register_task(SessionId, TaskId, Pid)
   when is_binary(SessionId), is_binary(TaskId), is_pid(Pid) ->
     ensure_tables(),
+    Key = {SessionId, TaskId},
+    case ets:lookup(?TASKS_TABLE, Key) of
+        [{_, ExistingTask}] ->
+            ok = reconcile_replaced_task(ExistingTask);
+        [] ->
+            ok
+    end,
     Now = erlang:system_time(millisecond),
+    RunId = create_task_run(SessionId, TaskId),
     Task = #{
         task_id => TaskId,
         session_id => SessionId,
         pid => Pid,
         started_at => Now,
-        status => running
+        status => running,
+        run_id => RunId
     },
-    beam_agent_ets:insert(?TASKS_TABLE, {{SessionId, TaskId}, Task}),
+    beam_agent_ets:insert(?TASKS_TABLE, {Key, Task}),
     ok.
 
 -doc "Unregister a task (mark as complete).".
@@ -305,6 +320,13 @@ register_task(SessionId, TaskId, Pid)
 unregister_task(SessionId, TaskId)
   when is_binary(SessionId), is_binary(TaskId) ->
     ensure_tables(),
+    Key = {SessionId, TaskId},
+    case ets:lookup(?TASKS_TABLE, Key) of
+        [{_, Task}] ->
+            ok = reconcile_unregistered_task(Task);
+        [] ->
+            ok
+    end,
     beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
     ok.
 
@@ -319,6 +341,7 @@ stop_task(SessionId, TaskId)
     Key = {SessionId, TaskId},
     case ets:lookup(?TASKS_TABLE, Key) of
         [{_, #{pid := Pid, status := running} = Task}] ->
+            Now = erlang:system_time(millisecond),
             %% Signal the process to stop
             case is_process_alive(Pid) of
                 true ->
@@ -332,7 +355,11 @@ stop_task(SessionId, TaskId)
                 false ->
                     ok
             end,
-            Updated = Task#{status => stopped},
+            ok = reconcile_stopped_task(Task),
+            Updated = Task#{
+                status => stopped,
+                stopped_at => Now
+            },
             beam_agent_ets:insert(?TASKS_TABLE, {Key, Updated}),
             ok;
         [{_, #{status := stopped}}] ->
@@ -752,3 +779,112 @@ publish_control_event(SessionId, Subtype, Payload) ->
         event_class => control,
         timestamp => erlang:system_time(millisecond)
     }).
+
+-spec create_task_run(binary(), binary()) -> binary().
+create_task_run(SessionId, TaskId) ->
+    create_task_run(SessionId, TaskId, 0).
+
+-spec create_task_run(binary(), binary(), non_neg_integer()) -> binary().
+create_task_run(SessionId, TaskId, Attempts) when Attempts < 5 ->
+    case beam_agent_runs_core:start_run(SessionId, #{
+        kind => task,
+        metadata => #{
+            task_id => TaskId,
+            source => control_task
+        }
+    }) of
+        {ok, #{run_id := RunId}} ->
+            RunId;
+        {error, already_exists} ->
+            create_task_run(SessionId, TaskId, Attempts + 1)
+    end;
+create_task_run(SessionId, TaskId, Attempts) ->
+    FallbackRunId = task_run_id(TaskId, Attempts),
+    {ok, #{run_id := RunId}} = beam_agent_runs_core:start_run(SessionId, #{
+        run_id => FallbackRunId,
+        kind => task,
+        metadata => #{
+            task_id => TaskId,
+            source => control_task
+        }
+    }),
+    RunId.
+
+-spec reconcile_replaced_task(task_meta()) -> ok.
+reconcile_replaced_task(Task) ->
+    cancel_task_run(Task, #{
+        reason => task_re_registered,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
+    }).
+
+-spec reconcile_unregistered_task(task_meta()) -> ok.
+reconcile_unregistered_task(#{status := running} = Task) ->
+    complete_task_run(Task, #{
+        source => control_task,
+        task_id => maps:get(task_id, Task),
+        terminal_status => completed
+    });
+reconcile_unregistered_task(#{status := stopped} = Task) ->
+    cancel_task_run(Task, #{
+        reason => task_unregistered_after_stop,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
+    }).
+
+-spec reconcile_stopped_task(task_meta()) -> ok.
+reconcile_stopped_task(Task) ->
+    cancel_task_run(Task, #{
+        reason => task_stopped,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
+    }).
+
+-spec complete_task_run(task_meta(), map()) -> ok.
+complete_task_run(Task, Result) ->
+    case maps:find(run_id, Task) of
+        {ok, RunId} ->
+            case beam_agent_runs_core:complete_run(RunId, Result) of
+                {ok, _Run} ->
+                    ok;
+                {error, active_steps} ->
+                    cancel_task_run(Task, #{
+                        reason => task_unregistered_with_active_steps,
+                        source => control_task,
+                        task_id => maps:get(task_id, Task)
+                    });
+                {error, {invalid_status_transition, _, _}} ->
+                    ok;
+                {error, not_found} ->
+                    ok
+            end;
+        error ->
+            ok
+    end.
+
+-spec cancel_task_run(task_meta(), map()) -> ok.
+cancel_task_run(Task, Reason) ->
+    case maps:find(run_id, Task) of
+        {ok, RunId} ->
+            case beam_agent_runs_core:cancel_run(RunId, Reason) of
+                {ok, _Run} ->
+                    ok;
+                {error, {invalid_status_transition, _, _}} ->
+                    ok;
+                {error, not_found} ->
+                    ok
+            end;
+        error ->
+            ok
+    end.
+
+-spec task_run_id(binary(), non_neg_integer()) -> binary().
+task_run_id(TaskId, Attempt) ->
+    Hex = binary:encode_hex(crypto:strong_rand_bytes(6), lowercase),
+    <<SafeTaskId/binary>> = sanitize_task_id(TaskId),
+    <<"run_task_", SafeTaskId/binary, "_", (integer_to_binary(Attempt))/binary,
+      "_", Hex/binary>>.
+
+-spec sanitize_task_id(binary()) -> binary().
+sanitize_task_id(TaskId) ->
+    binary:replace(TaskId, <<"/">>, <<"_">>, [global]).

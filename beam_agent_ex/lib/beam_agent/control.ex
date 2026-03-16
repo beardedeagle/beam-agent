@@ -44,7 +44,9 @@ defmodule BeamAgent.Control do
 
   - **Task Registration**: long-running background tasks can be registered with a
     session so that they can be listed, monitored, and stopped via the control
-    dispatch protocol.
+    dispatch protocol. Each registered task also creates a linked
+    `BeamAgent.Runs` record so task history survives after the live task entry
+    is removed.
 
   - **Callback Broker**: sessions can register callback functions for permission
     handling, approval decisions, and user input prompts. The broker invokes
@@ -60,7 +62,9 @@ defmodule BeamAgent.Control do
   This module is a thin Elixir facade that `defdelegate`s every call to
   `:beam_agent_control`. The underlying implementation lives in
   `:beam_agent_control_core`, which owns five ETS tables: `config`, `tasks`,
-  `feedback`, `callbacks`, and `pending`.
+  `feedback`, `callbacks`, and `pending`. Task registration is bridged into
+  `BeamAgent.Runs`, so the live task table can stay ephemeral while durable run
+  history remains queryable.
 
   See also: `BeamAgent.Runtime`, `BeamAgent.Catalog`, `BeamAgent`.
   """
@@ -182,6 +186,9 @@ defmodule BeamAgent.Control do
   marked as running. Use `stop_task/2` to signal the task to stop, and
   `unregister_task/2` to remove it after completion.
 
+  Each registered task also creates a linked canonical run. `list_tasks/1`
+  exposes that linkage through the optional `:run_id` field.
+
   ## Example
 
   ```elixir
@@ -208,6 +215,7 @@ defmodule BeamAgent.Control do
   `Process.exit(pid, :shutdown)` if the call fails.
 
   Returns `:ok` if the task was found and signaled, or `{:error, :not_found}`.
+  Stopping a task also cancels its linked run in `BeamAgent.Runs`.
   """
   @spec stop_task(binary(), binary()) :: :ok | {:error, :not_found}
   defdelegate stop_task(session_id, task_id), to: :beam_agent_control
@@ -216,8 +224,9 @@ defmodule BeamAgent.Control do
   List all tasks registered for a session.
 
   Returns `{:ok, tasks}` where each task map contains `:task_id`, `:session_id`,
-  `:pid`, `:started_at` (millisecond timestamp), and `:status` (`:running` or
-  `:stopped`).
+  `:pid`, `:started_at` (millisecond timestamp), `:status` (`:running` or
+  `:stopped`), and an optional `:run_id`. Stopped tasks also carry
+  `:stopped_at`.
   """
   @spec list_tasks(binary()) ::
           {:ok,
@@ -227,7 +236,9 @@ defmodule BeamAgent.Control do
                required(:session_id) => binary(),
                required(:pid) => pid(),
                required(:started_at) => integer(),
-               required(:status) => :running | :stopped
+               required(:status) => :running | :stopped,
+               optional(:run_id) => binary(),
+               optional(:stopped_at) => integer()
              }
            ]}
   defdelegate list_tasks(session_id), to: :beam_agent_control

@@ -7,6 +7,7 @@ and event streaming. Domain-specific operations live in dedicated
 public modules:
 
 - beam_agent_account: login, logout, rate limits
+- beam_agent_artifacts: typed artifact and context storage
 - beam_agent_apps: app/project management
 - beam_agent_capabilities: feature introspection
 - beam_agent_catalog: tools, skills, plugins, agents, models
@@ -18,6 +19,7 @@ public modules:
 - beam_agent_mcp: MCP server management
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_runtime: model, permissions, status, interrupts
+- beam_agent_runs: canonical run and step lifecycle
 - beam_agent_search: fuzzy file search
 - beam_agent_session_store: session history and thread storage
 - beam_agent_skills: skill listing and configuration

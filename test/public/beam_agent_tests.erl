@@ -74,6 +74,36 @@ exports_event_stream_subscription_api_test() ->
     ?assert(erlang:function_exported(beam_agent, receive_event, 3)),
     ?assert(erlang:function_exported(beam_agent, event_unsubscribe, 2)).
 
+exports_runs_domain_surface_test() ->
+    ensure_loaded(beam_agent_runs),
+    ?assert(erlang:function_exported(beam_agent_runs, start_run, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, get_run, 1)),
+    ?assert(erlang:function_exported(beam_agent_runs, list_runs, 0)),
+    ?assert(erlang:function_exported(beam_agent_runs, list_runs, 1)),
+    ?assert(erlang:function_exported(beam_agent_runs, complete_run, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, fail_run, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, cancel_run, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, start_step, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, get_step, 2)),
+    ?assert(erlang:function_exported(beam_agent_runs, list_steps, 1)),
+    ?assert(erlang:function_exported(beam_agent_runs, complete_step, 3)),
+    ?assert(erlang:function_exported(beam_agent_runs, fail_step, 3)),
+    ?assert(erlang:function_exported(beam_agent_runs, cancel_step, 3)).
+
+exports_artifacts_domain_surface_test() ->
+    ensure_loaded(beam_agent_artifacts),
+    ?assert(erlang:function_exported(beam_agent_artifacts, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, put, 1)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, put, 2)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, get, 1)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, list, 0)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, search, 1)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, search, 2)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, attach, 3)),
+    ?assert(erlang:function_exported(beam_agent_artifacts, delete, 1)).
+
 exports_claude_native_controls_test() ->
     lists:foreach(fun ensure_loaded/1, [beam_agent_checkpoint, beam_agent_runtime,
                                          beam_agent_mcp, beam_agent_session_store]),

@@ -4,7 +4,7 @@ defmodule BeamAgent do
   agentic coder backends: Claude, Codex, Gemini, OpenCode, and Copilot.
 
   `BeamAgent` is the primary entry point for session lifecycle, queries,
-  streaming, threads, and session history. Domain-specific features --
+  streaming, threads, session history, and durable runs. Domain-specific features --
   skills, apps, files, MCP, accounts, search, configuration, and more --
   live in focused submodules (see Submodules below) and work identically
   across all five backends thanks to native-first routing with universal
@@ -119,6 +119,7 @@ defmodule BeamAgent do
   `BeamAgent` retains session lifecycle, streaming, and convenience wrappers.
 
   - `BeamAgent.Account` -- authentication, login/logout, rate limits
+  - `BeamAgent.Artifacts` -- typed artifact and context storage
   - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Capabilities` -- backend capability matrix and checks
   - `BeamAgent.Catalog` -- tools, skills, plugins, agents, models, commands
@@ -132,6 +133,7 @@ defmodule BeamAgent do
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
   - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
+  - `BeamAgent.Runs` -- canonical run and step lifecycle
   - `BeamAgent.Search` -- fuzzy file search sessions
   - `BeamAgent.SessionStore` -- session history storage and retrieval
   - `BeamAgent.Skills` -- skill listing, remote export, configuration
