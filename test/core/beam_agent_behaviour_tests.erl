@@ -2,7 +2,6 @@
 %%% @doc EUnit tests for beam_agent_behaviour (adapter behaviour contract).
 %%%
 %%% Tests cover:
-%%%   - Module is loadable
 %%%   - Required callbacks are declared (start_link, send_query, receive_message, health, stop)
 %%%   - Optional callbacks are declared (send_control, interrupt, handle_control_request,
 %%%     session_info, set_model, set_permission_mode)
@@ -13,14 +12,6 @@
 -module(beam_agent_behaviour_tests).
 
 -include_lib("eunit/include/eunit.hrl").
-
-%%====================================================================
-%% Module loading
-%%====================================================================
-
-module_is_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_behaviour) orelse
-        code:ensure_loaded(beam_agent_behaviour) =:= {module, beam_agent_behaviour}).
 
 %%====================================================================
 %% Required callbacks

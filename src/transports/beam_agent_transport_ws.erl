@@ -20,7 +20,8 @@ start(Opts) ->
         <<"wss">> -> #{transport => tls, protocols => [http]};
         _         -> #{protocols => [http]}
     end,
-    case ClientMod:open(ensure_list(Host), Port, ClientOpts) of
+    case ClientMod:open(beam_agent_transport_utils:ensure_list(Host),
+                        Port, ClientOpts) of
         {ok, ConnPid} ->
             MonRef = erlang:monitor(process, ConnPid),
             {ok, {ConnPid, MonRef, ClientMod}};
@@ -49,23 +50,18 @@ send(_, _) ->
 -doc "Close the WebSocket connection and demonitor the client process.".
 -spec close(beam_agent_transport:transport_ref()) -> ok.
 close({ConnPid, MonRef, ClientMod}) ->
-    erlang:demonitor(MonRef, [flush]),
-    catch ClientMod:close(ConnPid),
-    ok.
+    beam_agent_transport_utils:close_client(ConnPid, MonRef, ClientMod).
 
 -doc "Return true if the WebSocket client process is alive.".
 -spec is_ready(beam_agent_transport:transport_ref()) -> boolean().
 is_ready({ConnPid, _, _}) ->
-    erlang:is_process_alive(ConnPid).
+    beam_agent_transport_utils:is_ready(ConnPid).
 
 -doc "Return `running` if the WebSocket client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
     running | {exited, 0}.
 status({ConnPid, _, _}) ->
-    case erlang:is_process_alive(ConnPid) of
-        true  -> running;
-        false -> {exited, 0}
-    end.
+    beam_agent_transport_utils:status(ConnPid).
 
 -doc "Classify an incoming Erlang message as a transport event.".
 -spec classify_message(term(), beam_agent_transport:transport_ref()) ->
@@ -92,10 +88,3 @@ classify_message({'DOWN', MonRef, process, ConnPid, _Reason},
     {exit, 1};
 classify_message(_, _) ->
     ignore.
-
-%%====================================================================
-%% Internal helpers
-%%====================================================================
-
-ensure_list(B) when is_binary(B) -> binary_to_list(B);
-ensure_list(L) when is_list(L) -> L.

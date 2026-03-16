@@ -115,7 +115,7 @@ session_start(Session, SearchSessionId, Roots)
   when is_binary(SearchSessionId), is_list(Roots) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    SKey = session_key(Session),
+    SKey = beam_agent_ets:session_key(Session),
     Entry = #{
         id           => SearchSessionId,
         session      => Session,
@@ -138,7 +138,7 @@ Returns `{error, not_found}` if the session does not exist.
 session_update(Session, SearchSessionId, Query)
   when is_binary(SearchSessionId), is_binary(Query) ->
     ensure_tables(),
-    SKey = session_key(Session),
+    SKey = beam_agent_ets:session_key(Session),
     EtsKey = {SKey, SearchSessionId},
     case ets:lookup(?SESSIONS_TABLE, EtsKey) of
         [{_, Entry}] ->
@@ -156,7 +156,7 @@ session_update(Session, SearchSessionId, Query)
 session_stop(Session, SearchSessionId)
   when is_binary(SearchSessionId) ->
     ensure_tables(),
-    SKey = session_key(Session),
+    SKey = beam_agent_ets:session_key(Session),
     beam_agent_ets:delete(?SESSIONS_TABLE, {SKey, SearchSessionId}),
     ok.
 
@@ -325,7 +325,3 @@ cwd_binary() ->
         {ok, Cwd} -> list_to_binary(Cwd);
         {error, _} -> <<".">>
     end.
-
--spec session_key(pid() | binary()) -> pid() | binary().
-session_key(Session) when is_pid(Session) -> Session;
-session_key(Session) when is_binary(Session) -> Session.

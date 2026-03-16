@@ -24,7 +24,8 @@ start(Opts) ->
     Path    = maps:get(path, Opts, <<"/mcp">>),
     TlsOpts = maps:get(tls_opts, Opts, []),
     ClientOpts = build_client_opts(TlsOpts),
-    case ClientMod:open(ensure_list(Host), Port, ClientOpts) of
+    case ClientMod:open(beam_agent_transport_utils:ensure_list(Host),
+                        Port, ClientOpts) of
         {ok, ConnPid} ->
             MonRef       = erlang:monitor(process, ConnPid),
             SessionState = #{
@@ -72,7 +73,6 @@ session is active. Always closes the connection afterwards.
 """.
 -spec close(beam_agent_transport:transport_ref()) -> ok.
 close({ConnPid, MonRef, ClientMod, SessionState}) ->
-    erlang:demonitor(MonRef, [flush]),
     Path   = maps:get(path, SessionState, <<"/mcp">>),
     SessId = maps:get(session_id, SessionState, undefined),
     case SessId of
@@ -82,22 +82,18 @@ close({ConnPid, MonRef, ClientMod, SessionState}) ->
             Headers = [{<<"mcp-session-id">>, SId}],
             catch ClientMod:delete(ConnPid, Path, Headers)
     end,
-    catch ClientMod:close(ConnPid),
-    ok.
+    beam_agent_transport_utils:close_client(ConnPid, MonRef, ClientMod).
 
 -doc "Return true if the HTTP client process is alive.".
 -spec is_ready(beam_agent_transport:transport_ref()) -> boolean().
 is_ready({ConnPid, _, _, _}) ->
-    erlang:is_process_alive(ConnPid).
+    beam_agent_transport_utils:is_ready(ConnPid).
 
 -doc "Return `running` if the HTTP client is alive, `{exited, 0}` otherwise.".
 -spec status(beam_agent_transport:transport_ref()) ->
     running | {exited, 0}.
 status({ConnPid, _, _, _}) ->
-    case erlang:is_process_alive(ConnPid) of
-        true  -> running;
-        false -> {exited, 0}
-    end.
+    beam_agent_transport_utils:status(ConnPid).
 
 -doc """
 Classify an incoming message as a transport event.
@@ -127,9 +123,6 @@ classify_message(_, _) ->
 %%====================================================================
 %% Internal helpers
 %%====================================================================
-
-ensure_list(B) when is_binary(B) -> binary_to_list(B);
-ensure_list(L) when is_list(L) -> L.
 
 build_client_opts([]) ->
     #{protocols => [http]};

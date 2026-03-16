@@ -178,17 +178,11 @@ account_info(Session) ->
 %% Internal Helpers
 %%--------------------------------------------------------------------
 
-%% Return the ETS key for a session. Pid and binary are used as-is;
-%% the ETS table is a set so both forms are valid keys.
--spec session_key(pid() | binary()) -> pid() | binary().
-session_key(Session) when is_pid(Session) -> Session;
-session_key(Session) when is_binary(Session) -> Session.
-
 %% Look up auth state from ETS. Returns a default inferred state when
 %% no entry is present.
 -spec get_auth_state(pid() | binary()) -> auth_state().
 get_auth_state(Session) ->
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     case ets:lookup(?TABLE, Key) of
         [{_, State}] ->
             State;
@@ -201,6 +195,6 @@ get_auth_state(Session) ->
 %% Insert or replace the auth state for a session.
 -spec put_auth_state(pid() | binary(), auth_state()) -> ok.
 put_auth_state(Session, State) ->
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     beam_agent_ets:insert(?TABLE, {Key, State}),
     ok.

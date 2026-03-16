@@ -37,6 +37,21 @@ defmodule BeamAgentTest do
     assert BeamAgent.list_backends() == [:claude, :codex, :gemini, :opencode, :copilot]
   end
 
+  test "command wrapper executes a minimal shell command" do
+    assert {:ok, %{exit_code: 0, output: "beam-agent-smoke"}} =
+             BeamAgent.Command.run(["printf", "beam-agent-smoke"])
+  end
+
+  test "runtime wrapper round-trips provider state" do
+    session = "runtime-smoke-#{System.unique_integer([:positive])}"
+
+    assert {:error, :not_set} = BeamAgent.Runtime.current_provider(session)
+    assert :ok = BeamAgent.Runtime.set_provider(session, "openai")
+    assert {:ok, "openai"} = BeamAgent.Runtime.current_provider(session)
+    assert :ok = BeamAgent.Runtime.clear_provider(session)
+    assert {:error, :not_set} = BeamAgent.Runtime.current_provider(session)
+  end
+
   test "session store remains available on canonical root" do
     assert {:ok, sessions} = BeamAgent.list_sessions()
     assert is_list(sessions)

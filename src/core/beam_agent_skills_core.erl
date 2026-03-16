@@ -101,7 +101,7 @@ register_skill(Session, SkillId, Opts)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(SkillId), is_map(Opts) ->
     ensure_tables(),
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     Entry = build_entry(SkillId, Opts),
     beam_agent_ets:insert(?SKILLS_TABLE, {{Key, skill, SkillId}, Entry}),
     {ok, Entry}.
@@ -112,7 +112,7 @@ unregister_skill(Session, SkillId)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(SkillId) ->
     ensure_tables(),
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     beam_agent_ets:delete(?SKILLS_TABLE, {Key, skill, SkillId}),
     ok.
 
@@ -206,7 +206,7 @@ skills_config_write(Session, Path, Enabled)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(Path), is_boolean(Enabled) ->
     ensure_tables(),
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     Now = erlang:system_time(millisecond),
     Config = #{path => Path, enabled => Enabled, updated_at => Now},
     beam_agent_ets:insert(?SKILLS_TABLE, {{Key, config, Path}, Config}),
@@ -235,23 +235,13 @@ skills_config_read(Session, _Opts)
     {ok, Configs}.
 
 %%--------------------------------------------------------------------
-%% Internal: Session Key
-%%--------------------------------------------------------------------
-
-%% Derive a stable ETS key from a session reference.
-%% Pids are used as-is; binaries are passed through unchanged.
--spec session_key(pid() | binary()) -> pid() | binary().
-session_key(Session) when is_pid(Session) -> Session;
-session_key(Session) when is_binary(Session) -> Session.
-
-%%--------------------------------------------------------------------
 %% Internal: ETS Collectors
 %%--------------------------------------------------------------------
 
 %% Collect all skill entries for a session from ETS.
 -spec get_skills(pid() | binary()) -> [skill_entry()].
 get_skills(Session) ->
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     %% Match all objects whose ETS key is {Key, skill, _}.
     Pattern = {{Key, skill, '_'}, '_'},
     Matches = ets:match_object(?SKILLS_TABLE, Pattern),
@@ -260,7 +250,7 @@ get_skills(Session) ->
 %% Collect all config entries for a session from ETS.
 -spec get_configs(pid() | binary()) -> [skill_config()].
 get_configs(Session) ->
-    Key = session_key(Session),
+    Key = beam_agent_ets:session_key(Session),
     Pattern = {{Key, config, '_'}, '_'},
     Matches = ets:match_object(?SKILLS_TABLE, Pattern),
     [Config || {_, Config} <- Matches].

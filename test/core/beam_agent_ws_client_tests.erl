@@ -29,15 +29,6 @@
 -define(WS_GUID, "258EAFA5-E914-47DA-95CA-5AB9B3F2115E").
 
 %%====================================================================
-%% Module loading
-%%====================================================================
-
-module_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_ws_client) orelse
-        code:ensure_loaded(beam_agent_ws_client) =:=
-            {module, beam_agent_ws_client}).
-
-%%====================================================================
 %% Full lifecycle: connect → upgrade → frames → close
 %%====================================================================
 

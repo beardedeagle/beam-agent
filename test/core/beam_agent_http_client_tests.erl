@@ -12,21 +12,11 @@
 %%%   - GET request with 200 streaming response
 %%%   - POST request with 200 streaming response
 %%%   - Non-2xx response via full-response path
-%%%   - Module loaded check
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_http_client_tests).
 
 -include_lib("eunit/include/eunit.hrl").
-
-%%====================================================================
-%% Module loading
-%%====================================================================
-
-module_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_http_client) orelse
-        code:ensure_loaded(beam_agent_http_client) =:=
-            {module, beam_agent_http_client}).
 
 %%====================================================================
 %% Process lifecycle

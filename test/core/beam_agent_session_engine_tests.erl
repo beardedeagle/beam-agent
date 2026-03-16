@@ -30,15 +30,6 @@ cleanup(_) ->
     ok.
 
 %%====================================================================
-%% Module loading
-%%====================================================================
-
-module_is_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_session_engine) orelse
-        code:ensure_loaded(beam_agent_session_engine) =:=
-            {module, beam_agent_session_engine}).
-
-%%====================================================================
 %% Public API exports
 %%====================================================================
 

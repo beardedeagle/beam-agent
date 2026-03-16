@@ -15,15 +15,6 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
-%% Module loading
-%%====================================================================
-
-module_loaded_test() ->
-    ?assert(erlang:module_loaded(beam_agent_mcp_transport_stdio) orelse
-        code:ensure_loaded(beam_agent_mcp_transport_stdio) =:=
-            {module, beam_agent_mcp_transport_stdio}).
-
-%%====================================================================
 %% classify_message/2 — eol (complete line returned as raw binary)
 %%====================================================================
 
