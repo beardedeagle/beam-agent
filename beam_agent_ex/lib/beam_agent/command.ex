@@ -32,8 +32,14 @@ defmodule BeamAgent.Command do
   {:ok, result} = BeamAgent.Command.run(["git", "log", "--oneline"])
   ```
 
-  Each segment is single-quote-escaped and joined with spaces before being passed
-  to `sh -c`.
+  Each segment is passed as part of a direct executable plus argument vector.
+  String and binary commands still
+  go through the detected shell (`sh` or `cmd.exe`) for shell semantics.
+
+  Commands always pass through a security baseline before execution. When the
+  full command guard is initialized, the SDK uses the full stateful
+  policy/validator/rate-limit pipeline. Otherwise, it still applies the default
+  deny policy before opening the port.
 
   ## Error handling
 
@@ -69,7 +75,8 @@ defmodule BeamAgent.Command do
   Run a shell command with default options.
 
   Accepts a binary command string, a plain string, or a list of binary/string
-  segments (which are individually shell-escaped and joined with spaces).
+  segments. List-form commands execute directly as an executable plus argument
+  vector instead of going through shell quoting.
 
   Returns `{:ok, command_result()}` on completion (regardless of exit code), or
   `{:error, reason}` if the port could not be started or timed out.
@@ -166,6 +173,8 @@ defmodule BeamAgent.Command do
   Send a prompt asynchronously without blocking for the full response.
 
   Convenience wrapper that calls `prompt_async/3` with empty options.
+  This operation requires a live session pid; persisted session ids
+  return `{:error, :requires_live_session}` from the Erlang layer.
 
   ## Parameters
 
@@ -177,7 +186,7 @@ defmodule BeamAgent.Command do
   - `{:ok, result_map}` with a `:request_id` key.
   - `{:error, reason}` on failure.
   """
-  @spec prompt_async(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec prompt_async(pid() | binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate prompt_async(session, prompt), to: :beam_agent_command
 
   @doc """
@@ -185,7 +194,9 @@ defmodule BeamAgent.Command do
 
   Submits `prompt` to the backend and returns immediately with a result
   map containing a `:request_id`. Use `BeamAgent.event_subscribe/1` and
-  `BeamAgent.receive_event/2` to collect the streamed response.
+  `BeamAgent.receive_event/2` to collect the streamed response. This
+  operation requires a live session pid; persisted session ids return
+  `{:error, :requires_live_session}` from the Erlang layer.
 
   ## Parameters
 
@@ -197,7 +208,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result_map}` or `{:error, reason}`.
   """
-  @spec prompt_async(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec prompt_async(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate prompt_async(session, prompt, opts), to: :beam_agent_command
 
   @doc """

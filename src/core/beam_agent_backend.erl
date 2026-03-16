@@ -127,14 +127,15 @@ unregister_session(Session) when is_pid(Session) ->
     ok.
 
 -doc """
-Resolve the backend for a live session pid.
+Resolve the backend for a live session pid or persisted session id.
 
 Resolution order:
 
   1. cached pid-to-backend entry
   2. `session_info` call on the session process
+  3. persisted session metadata lookup for a session id binary
 """.
--spec session_backend(pid()) -> {ok, backend()} | {error, backend_lookup_error()}.
+-spec session_backend(pid() | binary()) -> {ok, backend()} | {error, backend_lookup_error()}.
 session_backend(Session) when is_pid(Session) ->
     ensure_tables(),
     case ets:lookup(?SESSIONS_TABLE, Session) of
@@ -142,7 +143,9 @@ session_backend(Session) when is_pid(Session) ->
             {ok, Backend};
         [] ->
             infer_session_backend(Session)
-    end.
+    end;
+session_backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    infer_persisted_session_backend(SessionId).
 
 -doc """
 Return whether a message should terminate collection for a backend.
@@ -184,6 +187,16 @@ infer_session_backend(Session) ->
     catch
         exit:Reason ->
             {error, {session_backend_lookup_failed, Reason}}
+    end.
+
+-spec infer_persisted_session_backend(binary()) ->
+    {ok, backend()} | {error, backend_not_present | backend_error()}.
+infer_persisted_session_backend(SessionId) ->
+    case beam_agent_session_store_core:get_session(SessionId) of
+        {ok, Info} when is_map(Info) ->
+            backend_from_info(Info);
+        {error, not_found} ->
+            {error, backend_not_present}
     end.
 
 -spec backend_from_info(map()) ->

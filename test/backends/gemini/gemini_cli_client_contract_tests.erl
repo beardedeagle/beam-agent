@@ -4,7 +4,7 @@
 
 thread_resume_with_opts_reads_messages_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(<<"gemini-thread">>, gemini),
+    Session = beam_agent_test_helpers:register_session(<<"gemini-thread">>, gemini),
     {ok, Thread} = gemini_cli_client:thread_start(Session, #{name => <<"review">>}),
     ThreadId = maps:get(thread_id, Thread),
     ok = beam_agent_threads_core:record_thread_message(<<"gemini-thread">>, ThreadId, #{
@@ -20,7 +20,7 @@ thread_resume_with_opts_reads_messages_test() ->
 
 config_provider_and_collaboration_wrappers_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(<<"gemini-config">>, gemini),
+    Session = beam_agent_test_helpers:register_session(<<"gemini-config">>, gemini),
     {ok, _} = gemini_cli_client:config_update(Session, #{
         provider_id => <<"google">>,
         provider => #{provider_id => <<"google">>, api_key => <<"secret">>}

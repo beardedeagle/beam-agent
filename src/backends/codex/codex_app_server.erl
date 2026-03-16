@@ -566,9 +566,11 @@ fuzzy_file_search_session_stop(Session, SearchSessionId)
                                      {ok, map()} | {error, term()}.
 windows_sandbox_setup_start(Session, Params) when is_map(Params) ->
     send_control_to(Session, <<"windowsSandbox/setupStart">>, Params).
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
-session_info(Session) ->
-    gen_statem:call(Session, session_info, 5000).
+-spec session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
+session_info(Session) when is_pid(Session) ->
+    gen_statem:call(Session, session_info, 5000);
+session_info(SessionId) when is_binary(SessionId) ->
+    beam_agent_core:session_info(SessionId).
 -spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
 set_model(Session, Model) ->
     gen_statem:call(Session, {set_model, Model}, 5000).
@@ -841,7 +843,7 @@ transport_module(Opts) ->
             codex_session
     end.
 
--spec session_transport(pid()) -> app_server | exec | realtime | atom().
+-spec session_transport(pid() | binary()) -> app_server | exec | realtime | atom().
 session_transport(Session) ->
     case session_info(Session) of
         {ok, #{transport := Transport}} ->
@@ -849,7 +851,9 @@ session_transport(Session) ->
         _ ->
             app_server
     end.
--spec get_session_id(pid()) -> binary().
+-spec get_session_id(pid() | binary()) -> binary().
+get_session_id(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    SessionId;
 get_session_id(Session) ->
     case session_info(Session) of
         {ok, #{session_id := SId}}

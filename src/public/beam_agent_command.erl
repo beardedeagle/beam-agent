@@ -15,6 +15,10 @@ This module consolidates two layers of command functionality:
    command execution through the backend's facility, stdin writing, feedback
    submission, turn-based responses, and session teardown.
 
+Universal command helpers that operate on shared runtime/control/session-store
+state accept either a live session pid or a persisted session id binary.
+`prompt_async/2,3` still requires a live session.
+
 ## Direct shell execution
 
 ```erlang
@@ -35,8 +39,9 @@ Pass a list of binaries or strings to avoid shell quoting issues:
 {ok, Result} = beam_agent_command:run([<<"git">>, <<"log">>, <<"--oneline">>]).
 ```
 
-Each segment is single-quote-escaped and joined with spaces before being
-passed to `sh -c`.
+Each segment is passed as part of a direct executable plus argument vector.
+String and binary commands
+still go through the detected shell (`sh` or `cmd.exe`) for shell semantics.
 
 ## Session-routed commands
 
@@ -69,19 +74,26 @@ is not an error -- you need to check exit_code yourself to see if the
 command succeeded.
 
 You can also pass a list of binaries instead of a single command string.
-Each segment is shell-escaped automatically, which avoids quoting issues
-with spaces or special characters.
+List-form commands bypass shell quoting entirely and execute as a direct
+program plus argument vector, which avoids shell-injection and cross-platform
+quoting issues.
 
 ## Architecture deep dive
 
 Execution uses spawn_executable ports via beam_agent_command_core. The
-command is passed to sh -c for shell interpretation. List-form arguments
-are individually single-quote-escaped and space-joined before passing
-to the shell.
+command string form is passed to the detected shell (`sh` on POSIX,
+`cmd.exe` on Windows) for shell interpretation. List-form commands
+resolve the executable directly and pass the remaining items as the
+argument vector.
 
 Output capture is bounded by max_output (default 1 MB) to prevent memory
 issues with verbose commands. Timeout enforcement kills the port process
 and returns {error, {timeout, Ms}}.
+
+Commands always pass through a security baseline before execution. When the
+full command guard is initialized, the full stateful policy/validator/rate-limit
+pipeline is used. Otherwise, the SDK still applies the default deny policy
+before opening the port.
 
 Session-routed commands use `beam_agent_core:native_or/4` for native-first
 routing: the backend adapter gets first crack, with universal fallbacks
@@ -224,9 +236,12 @@ session_messages(Session, Opts) ->
 Send a prompt asynchronously without blocking for the full response.
 
 Convenience wrapper that calls prompt_async/3 with empty options.
-See prompt_async/3 for details.
+See prompt_async/3 for details. This operation requires a live session pid;
+persisted session ids return `{error, requires_live_session}`.
 """.
--spec prompt_async(pid(), binary()) -> {ok, map()} | {error, _}.
+-spec prompt_async(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
+prompt_async(SessionId, _Prompt) when is_binary(SessionId) ->
+    {error, requires_live_session};
 prompt_async(Session, Prompt) ->
     prompt_async(Session, Prompt, #{}).
 
@@ -239,9 +254,13 @@ and receive_event/2 to collect the streamed response. Opts may
 include query parameters such as system_prompt or model.
 
 Unlike query/2, this function does not block until completion. It is
-the preferred approach for UIs and concurrent workflows.
+the preferred approach for UIs and concurrent workflows. This operation
+requires a live session pid; persisted session ids return
+`{error, requires_live_session}`.
 """.
--spec prompt_async(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec prompt_async(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+prompt_async(SessionId, _Prompt, _Opts) when is_binary(SessionId) ->
+    {error, requires_live_session};
 prompt_async(Session, Prompt, Opts) ->
     case beam_agent_core:native_call(Session, prompt_async, [Prompt, Opts]) of
         {ok, Result} ->
@@ -258,7 +277,7 @@ Execute a shell command in the session's working directory.
 Convenience wrapper that calls shell_command/3 with empty options.
 See shell_command/3 for details.
 """.
--spec shell_command(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec shell_command(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
 shell_command(Session, Command) ->
     shell_command(Session, Command, #{}).
 
@@ -270,7 +289,7 @@ Returns a result map containing stdout, stderr, and exit_code. Opts
 may include timeout (milliseconds) and env (environment variable
 overrides). The universal fallback uses os:cmd/1 or open_port/2.
 """.
--spec shell_command(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec shell_command(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
 shell_command(Session, Command, Opts) ->
     beam_agent_core:native_or(Session, shell_command, [Command, Opts], fun() ->
         universal_shell_command(Session, Command, Opts)
@@ -319,7 +338,7 @@ config store, feedback store, callback registry, and tool registry.
 Also unregisters the session from the backend. This is a more
 thorough cleanup than stop/1, which only terminates the process.
 """.
--spec session_destroy(pid()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid() | binary()) -> {ok, term()} | {error, term()}.
 session_destroy(Session) ->
     SessionId = beam_agent_core:session_identity(Session),
     beam_agent_core:native_or(Session, session_destroy, [SessionId], fun() ->
@@ -333,7 +352,7 @@ Same as session_destroy/1 but targets a specific SessionId, which
 may differ from the calling session's own identifier. Useful for
 cleaning up persisted sessions that are no longer needed.
 """.
--spec session_destroy(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
 session_destroy(Session, SessionId) ->
     beam_agent_core:native_or(Session, session_destroy, [SessionId], fun() ->
         universal_session_destroy(Session, SessionId)
@@ -346,7 +365,7 @@ Convenience wrapper that calls command_run/3 with empty options.
 Command may be a single binary or a list of binaries (command + args).
 See command_run/3 for details.
 """.
--spec command_run(pid(), binary() | [binary()]) ->
+-spec command_run(pid() | binary(), binary() | [binary()]) ->
     {ok, #{'source' := 'universal', _ => _}} |
     {error, {port_exit, term()} | {port_failed, term()} |
             {timeout, infinity | non_neg_integer()}}.
@@ -362,7 +381,7 @@ to a universal shell executor when the backend does not support
 native command execution. Opts may include timeout, env, and cwd
 overrides.
 """.
--spec command_run(pid(), binary() | [binary()], map()) ->
+-spec command_run(pid() | binary(), binary() | [binary()], map()) ->
     {ok, #{'source' := 'universal', _ => _}} |
     {error, {port_exit, term()} | {port_failed, term()} |
             {timeout, infinity | non_neg_integer()}}.
@@ -415,7 +434,7 @@ comment (freeform text), and message_id (to associate feedback with
 a specific response). The universal fallback stores the feedback in
 the control core for later retrieval.
 """.
--spec submit_feedback(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec submit_feedback(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 submit_feedback(Session, Feedback) ->
     beam_agent_core:native_or(Session, submit_feedback, [Feedback], fun() ->
         universal_submit_feedback(Session, Feedback)
@@ -429,7 +448,7 @@ that require explicit user approval. RequestId identifies the pending
 request (from the message's request_id field). Params contains the
 response payload (e.g., #{approved => true} for permissions).
 """.
--spec turn_respond(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec turn_respond(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
 turn_respond(Session, RequestId, Params) ->
     beam_agent_core:native_or(Session, turn_respond, [RequestId, Params], fun() ->
         universal_turn_respond(Session, RequestId, Params)
@@ -452,25 +471,40 @@ send_command(Session, Command, Params) ->
 %% Private helpers
 %%--------------------------------------------------------------------
 
--spec universal_session_destroy(pid(), binary()) ->
-    {ok, #{'source' := 'universal', _ => _}}.
+-spec universal_session_destroy(pid() | binary(), binary()) ->
+    {ok, #{
+        source := universal,
+        session_id := binary(),
+        destroyed := true,
+        backend := beam_agent_backend:backend() | undefined
+    }}.
 universal_session_destroy(Session, SessionId) ->
+    Backend = beam_agent_core:session_backend(Session),
     ok = beam_agent_core:delete_session(SessionId),
     ok = beam_agent_runtime_core:clear_session(SessionId),
     ok = beam_agent_control_core:clear_config(SessionId),
     ok = beam_agent_control_core:clear_feedback(SessionId),
     ok = beam_agent_control_core:clear_session_callbacks(SessionId),
-    ok = beam_agent_tool_registry:unregister_session_registry(Session),
-    case beam_agent_core:session_identity(Session) =:= SessionId of
+    case is_pid(Session) of
         true ->
-            ok = beam_agent_backend:unregister_session(Session);
+            ok = beam_agent_tool_registry:unregister_session_registry(Session);
         false ->
             ok
     end,
-    {ok, beam_agent_core:with_universal_source(Session, #{
+    case beam_agent_core:session_identity(Session) =:= SessionId of
+        true when is_pid(Session) ->
+            ok = beam_agent_backend:unregister_session(Session);
+        true ->
+            ok;
+        false ->
+            ok
+    end,
+    {ok, #{
+        source => universal,
         session_id => SessionId,
-        destroyed => true
-    })}.
+        destroyed => true,
+        backend => Backend
+    }}.
 
 -spec normalize_prompt_async_result(pid(), term()) -> map().
 normalize_prompt_async_result(Session, Result) when is_map(Result) ->
@@ -592,18 +626,4 @@ command_to_shell(Command) when is_binary(Command) ->
 command_to_shell(Command) when is_list(Command), Command =:= [] ->
     Command;
 command_to_shell(Command) when is_list(Command) ->
-    Joined = string:join([shell_escape_segment(Segment) || Segment <- Command], " "),
-    unicode:characters_to_binary(Joined).
-
--spec shell_escape_segment(binary() | string()) -> string().
-shell_escape_segment(Segment) ->
-    Raw = unicode:characters_to_list(Segment),
-    [$' | escape_single_quotes(Raw)] ++ [$'].
-
--spec escape_single_quotes(string()) -> string().
-escape_single_quotes([]) ->
-    [];
-escape_single_quotes([$' | Rest]) ->
-    [$', $\\, $', $' | escape_single_quotes(Rest)];
-escape_single_quotes([Char | Rest]) ->
-    [Char | escape_single_quotes(Rest)].
+    Command.

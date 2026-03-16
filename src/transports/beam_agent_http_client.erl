@@ -75,17 +75,21 @@ init({Owner, Host, Port, Opts}) ->
             end,
             BaseUrl = lists:flatten(
                 io_lib:format("~s://~s:~B", [Scheme, Host, Port])),
-            SslOpts = build_ssl_opts(Scheme, maps:get(tls_opts, Opts, [])),
-            MonRef = erlang:monitor(process, Owner),
-            %% Signal readiness — analogous to TCP connect completing.
-            Owner ! {transport_up, self(), http},
-            {ok, #state{
-                owner     = Owner,
-                owner_mon = MonRef,
-                base_url  = BaseUrl,
-                ssl_opts  = SslOpts,
-                pending   = #{}
-            }};
+            case build_ssl_opts(Scheme, Host, Opts) of
+                {ok, SslOpts} ->
+                    MonRef = erlang:monitor(process, Owner),
+                    %% Signal readiness — analogous to TCP connect completing.
+                    Owner ! {transport_up, self(), http},
+                    {ok, #state{
+                        owner     = Owner,
+                        owner_mon = MonRef,
+                        base_url  = BaseUrl,
+                        ssl_opts  = SslOpts,
+                        pending   = #{}
+                    }};
+                {error, unsafe_tls_opts} ->
+                    {stop, unsafe_tls_opts}
+            end;
         {error, Reason} ->
             {stop, Reason}
     end.
@@ -221,15 +225,14 @@ ensure_started(App) ->
         {error, Reason}               -> {error, {app_start_failed, App, Reason}}
     end.
 
--spec build_ssl_opts(string(), list()) -> list().
-build_ssl_opts("https", []) ->
-    [{verify, verify_peer},
-     {cacerts, public_key:cacerts_get()},
-     {depth, 4}];
-build_ssl_opts("https", Custom) ->
-    Custom;
-build_ssl_opts(_, _) ->
-    [].
+-spec build_ssl_opts(string(), string(), map()) -> {ok, list()} | {error, unsafe_tls_opts}.
+build_ssl_opts("https", Host, Opts) ->
+    beam_agent_transport_utils:tls_client_opts(
+        Host,
+        maps:get(tls_opts, Opts, []),
+        maps:get(allow_insecure_tls, Opts, false));
+build_ssl_opts(_, _Host, _Opts) ->
+    {ok, []}.
 
 -spec headers_to_httpc([{binary(), binary()}]) ->
     [{string(), string()}].

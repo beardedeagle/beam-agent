@@ -7,7 +7,7 @@
 %%%   - categorize/1: program-to-category mapping
 %%%   - flatten_commands/1: leaf extraction from nested structures
 %%%
-%%% All tests are pure — no processes, no ETS, no mocks.
+%%% All tests are pure — no processes, no ETS, no test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_parser_tests).

@@ -70,7 +70,7 @@ find_text_with_glob_test() ->
     cleanup_tmp(),
     Dir = tmp_dir(),
     write_tmp_file(Dir, <<"code.erl">>, <<"-module(test).\n">>),
-    write_tmp_file(Dir, <<"notes.txt">>, <<"-module(fake).\n">>),
+    write_tmp_file(Dir, <<"notes.txt">>, <<"-module(sample).\n">>),
     {ok, Results} = beam_agent_file_core:find_text(
         <<"-module">>, <<"*.erl">>, #{cwd => Dir}),
     Paths = [maps:get(path, R) || R <- Results],

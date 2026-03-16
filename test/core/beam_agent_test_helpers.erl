@@ -1,41 +1,36 @@
 -module(beam_agent_test_helpers).
 
--export([fake_session/2, fake_session/3, cleanup_session/1, reset_state/0]).
+-export([
+    register_session/2,
+    register_session/3,
+    cleanup_session/1,
+    reset_state/0
+]).
 
--spec fake_session(binary(), atom()) -> pid().
-fake_session(SessionId, Backend) ->
-    fake_session(SessionId, Backend, #{}).
+-spec register_session(binary(), atom()) -> binary().
+register_session(SessionId, Backend) ->
+    register_session(SessionId, Backend, #{}).
 
--spec fake_session(binary(), atom(), map()) -> pid().
-fake_session(SessionId, Backend, ExtraInfo) ->
-    Session = spawn(fun() -> fake_session_loop(SessionId, Backend, ExtraInfo) end),
-    {ok, Backend} = beam_agent_backend:register_session(Session, Backend),
-    Session.
+-spec register_session(binary(), atom(), map()) -> binary().
+register_session(SessionId, Backend, ExtraInfo)
+  when is_binary(SessionId), is_atom(Backend), is_map(ExtraInfo) ->
+    Meta = maps:merge(#{
+        session_id => SessionId,
+        backend => Backend,
+        adapter => Backend
+    }, ExtraInfo),
+    ok = beam_agent_session_store_core:register_session(SessionId, Meta),
+    SessionId.
 
-fake_session_loop(SessionId, Backend, ExtraInfo) ->
-    receive
-        {'$gen_call', From, session_info} ->
-            BaseInfo = #{
-                session_id => SessionId,
-                backend => Backend,
-                adapter => Backend
-            },
-            gen:reply(From, {ok, maps:merge(BaseInfo, ExtraInfo)}),
-            fake_session_loop(SessionId, Backend, ExtraInfo);
-        stop ->
-            ok;
-        _Other ->
-            fake_session_loop(SessionId, Backend, ExtraInfo)
-    end.
-
--spec cleanup_session(pid()) -> ok.
-cleanup_session(Session) ->
-    ok = beam_agent_backend:unregister_session(Session),
-    Session ! stop,
+-spec cleanup_session(binary()) -> ok.
+cleanup_session(SessionId) when is_binary(SessionId) ->
+    ok = beam_agent_runtime_core:clear_session(SessionId),
+    ok = beam_agent_session_store_core:delete_session(SessionId),
     ok.
 
 -spec reset_state() -> ok.
 reset_state() ->
+    ok = beam_agent_backend:clear(),
     ok = beam_agent_runtime_core:clear(),
     ok = beam_agent_control_core:clear(),
     ok = beam_agent_session_store_core:clear(),

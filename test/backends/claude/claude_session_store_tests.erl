@@ -90,7 +90,7 @@ list_sessions_with_files_test_() ->
           TmpDir = setup_tmp_dir(),
           ProjectDir = binary_to_list(TmpDir) ++ "/projects/test-project",
           ok = filelib:ensure_dir(ProjectDir ++ "/"),
-          %% Create two mock session files
+          %% Create two fixture session files
           write_session_file(ProjectDir ++ "/session-aaa.jsonl", [
               #{<<"type">> => <<"system">>, <<"subtype">> => <<"init">>,
                 <<"content">> => <<"ready">>,

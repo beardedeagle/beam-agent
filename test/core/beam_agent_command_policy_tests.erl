@@ -9,7 +9,7 @@
 %%%   - Match specs: program, program_args, contains, wildcard
 %%%   - Default policy configuration
 %%%
-%%% All tests are pure — no processes, no ETS, no mocks.
+%%% All tests are pure — no processes, no ETS, no test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_policy_tests).

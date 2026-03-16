@@ -4,7 +4,7 @@
 
 event_stream_fallback_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-session">>, gemini),
+    Session = register_session(<<"fallback-session">>, gemini),
     {ok, Ref} = beam_agent:event_subscribe(Session),
     ok = beam_agent_session_store_core:record_message(<<"fallback-session">>, #{
         type => text,
@@ -21,7 +21,7 @@ event_stream_fallback_test() ->
 
 universal_review_and_config_fallbacks_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-review">>, gemini),
+    Session = register_session(<<"fallback-review">>, gemini),
     {ok, Review} = beam_agent_control:review_start(Session, #{
         target => <<"pull-request">>,
         stage => <<"triage">>,
@@ -55,7 +55,7 @@ universal_review_and_config_fallbacks_test() ->
 
 universal_realtime_fallback_records_thread_history_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-realtime">>, gemini),
+    Session = register_session(<<"fallback-realtime">>, gemini),
     {ok, Realtime} = beam_agent_control:thread_realtime_start(Session, #{
         mode => <<"voice">>,
         transport => mediated
@@ -94,7 +94,7 @@ universal_review_and_realtime_cover_non_native_backends_test() ->
     lists:foreach(fun(Backend) ->
         reset_universal_state(),
         SessionId = <<"fallback-", (atom_to_binary(Backend, utf8))/binary>>,
-        Session = fake_session(SessionId, Backend),
+        Session = register_session(SessionId, Backend),
         {ok, Review} = beam_agent_control:review_start(Session, #{}),
         ?assertEqual(Backend, maps:get(backend, Review)),
         {ok, Realtime} = beam_agent_control:thread_realtime_start(Session, #{}),
@@ -109,7 +109,7 @@ universal_review_and_realtime_cover_non_native_backends_test() ->
 
 universal_provider_oauth_and_config_workflow_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-provider">>, gemini),
+    Session = register_session(<<"fallback-provider">>, gemini),
     ?assertEqual({error, not_set}, beam_agent_provider:current(Session)),
     {ok, Ref} = beam_agent:event_subscribe(Session),
     {ok, Pending} = beam_agent_provider:oauth_authorize(Session, <<"openai">>, #{
@@ -138,15 +138,17 @@ universal_provider_oauth_and_config_workflow_test() ->
     {ok, Config} = beam_agent_config:read(Session),
     Runtime = maps:get(runtime, Config),
     Provider = maps:get(provider, Runtime),
-    OAuthCallback = maps:get(oauth_callback, Provider),
     ?assertEqual(<<"openai">>, maps:get(provider_id, Runtime)),
-    ?assertEqual(<<"authorized">>, maps:get(code, OAuthCallback)),
+    OAuthCallback = maps:get(oauth_callback, Provider),
+    ?assertEqual(redacted, maps:get(code, OAuthCallback)),
+    ?assertMatch({ok, #{oauth_callback := #{code := redacted}}},
+        beam_agent_runtime:get_provider_config(Session)),
     ?assertEqual(ok, beam_agent:event_unsubscribe(Session, Ref)),
     cleanup_session(Session).
 
 universal_config_import_and_key_write_fallbacks_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-import">>, gemini),
+    Session = register_session(<<"fallback-import">>, gemini),
     {ok, Detect0} = beam_agent_config:external_agent_detect(Session),
     ?assertEqual(false, maps:get(detected, Detect0)),
     {ok, Requirements} = beam_agent_config:requirements_read(Session),
@@ -178,7 +180,7 @@ universal_config_import_and_key_write_fallbacks_test() ->
 universal_thread_admin_native_leak_fallbacks_test() ->
     reset_universal_state(),
     SessionId = <<"fallback-thread-admin">>,
-    Session = fake_session(SessionId, gemini),
+    Session = register_session(SessionId, gemini),
     {ok, Thread} = beam_agent_threads:thread_start(Session, #{name => <<"draft">>}),
     ThreadId = maps:get(thread_id, Thread),
     ok = beam_agent_threads_core:record_thread_message(SessionId, ThreadId, #{
@@ -224,7 +226,7 @@ universal_thread_admin_native_leak_fallbacks_test() ->
 universal_status_and_session_admin_native_leak_fallbacks_test() ->
     reset_universal_state(),
     SessionId = <<"fallback-status">>,
-    Session = fake_session(SessionId, gemini, #{
+    Session = register_session(SessionId, gemini, #{
         system_info => #{
             skills => [#{id => <<"skill-a">>, name => <<"Skill A">>}]
         }
@@ -258,10 +260,12 @@ universal_status_and_session_admin_native_leak_fallbacks_test() ->
 universal_command_and_turn_response_fallbacks_test() ->
     reset_universal_state(),
     SessionId = <<"fallback-command">>,
-    Session = fake_session(SessionId, gemini),
-    {ok, RunResult} = beam_agent_command:command_run(Session, [<<"printf">>, <<"beam-agent">>]),
+    Session = register_session(SessionId, gemini),
+    {ok, RunResult} = beam_agent_command:command_run(
+        Session, beam_agent_command_test_helpers:echo_segments(<<"beam-agent">>)),
     ?assertEqual(0, maps:get(exit_code, RunResult)),
-    ?assertEqual(<<"beam-agent">>, maps:get(output, RunResult)),
+    ?assertEqual(<<"beam-agent">>,
+        beam_agent_command_test_helpers:trim_output(maps:get(output, RunResult))),
     ?assertEqual(universal, maps:get(source, RunResult)),
     FeedbackResult = beam_agent_command:submit_feedback(Session, #{rating => good}),
     ?assert(FeedbackResult =:= ok orelse
@@ -287,57 +291,47 @@ universal_command_and_turn_response_fallbacks_test() ->
     ])),
     cleanup_session(Session).
 
-universal_async_prompt_and_shell_command_fallbacks_test() ->
+universal_shell_command_fallback_test() ->
     reset_universal_state(),
-    Session = fake_session(<<"fallback-ux">>, gemini),
-    {ok, PromptResult} = beam_agent_command:prompt_async(Session, <<"hello async">>),
-    ?assertEqual(true, maps:get(accepted, PromptResult)),
-    ?assertEqual(universal, maps:get(source, PromptResult)),
-    ?assertEqual(gemini, maps:get(backend, PromptResult)),
-    ?assert(is_reference(maps:get(query_ref, PromptResult))),
-    {ok, ShellResult} = beam_agent_command:shell_command(Session, <<"printf beam-agent-shell">>),
+    Session = register_session(<<"fallback-ux">>, gemini),
+    {ok, ShellResult} = beam_agent_command:shell_command(
+        Session, beam_agent_command_test_helpers:echo_command(<<"beam-agent-shell">>)),
     ?assertEqual(0, maps:get(exit_code, ShellResult)),
-    ?assertEqual(<<"beam-agent-shell">>, maps:get(output, ShellResult)),
+    ?assertEqual(<<"beam-agent-shell">>,
+        beam_agent_command_test_helpers:trim_output(maps:get(output, ShellResult))),
     ?assertEqual(universal, maps:get(source, ShellResult)),
     ?assertEqual(gemini, maps:get(backend, ShellResult)),
     cleanup_session(Session).
 
-fake_session(SessionId, Backend) ->
-    fake_session(SessionId, Backend, #{}).
+provider_public_api_accepts_session_identity_binary_test() ->
+    reset_universal_state(),
+    SessionId = <<"provider-public-session-id">>,
+    ?assertEqual({error, not_set}, beam_agent_provider:current(SessionId)),
+    ok = beam_agent_provider:set(SessionId, <<"openai">>),
+    ?assertEqual({ok, <<"openai">>}, beam_agent_provider:current(SessionId)),
+    ?assertEqual({error, not_set}, beam_agent_provider:current_agent(SessionId)),
+    ok = beam_agent_provider:set_agent(SessionId, <<"planner">>),
+    ?assertEqual({ok, <<"planner">>}, beam_agent_provider:current_agent(SessionId)),
+    ok = beam_agent_provider:clear_agent(SessionId),
+    ?assertEqual({error, not_set}, beam_agent_provider:current_agent(SessionId)),
+    ok = beam_agent_provider:clear(SessionId),
+    ?assertEqual({error, not_set}, beam_agent_provider:current(SessionId)).
 
-fake_session(SessionId, Backend, InfoExtra) ->
-    Session = spawn(fun() -> fake_session_loop(SessionId, Backend, InfoExtra) end),
-    {ok, Backend} = beam_agent_backend:register_session(Session, Backend),
-    Session.
+register_session(SessionId, Backend) ->
+    register_session(SessionId, Backend, #{}).
 
-fake_session_loop(SessionId, Backend, InfoExtra) ->
-    SessionInfo = maps:merge(#{
+register_session(SessionId, Backend, InfoExtra) ->
+    ok = beam_agent_session_store_core:register_session(SessionId, maps:merge(#{
         session_id => SessionId,
         backend => Backend,
-        adapter => Backend
-    }, InfoExtra),
-    receive
-        {'$gen_call', From, session_info} ->
-            gen:reply(From, {ok, SessionInfo}),
-            fake_session_loop(SessionId, Backend, InfoExtra);
-        {'$gen_call', From, health} ->
-            gen:reply(From, ready),
-            fake_session_loop(SessionId, Backend, InfoExtra);
-        {'$gen_call', From, interrupt} ->
-            gen:reply(From, ok),
-            fake_session_loop(SessionId, Backend, InfoExtra);
-        {'$gen_call', From, {send_query, _Prompt, _Params}} ->
-            gen:reply(From, {ok, make_ref()}),
-            fake_session_loop(SessionId, Backend, InfoExtra);
-        stop ->
-            ok;
-        _Other ->
-            fake_session_loop(SessionId, Backend, InfoExtra)
-    end.
+        adapter => Backend,
+        health => ready
+    }, InfoExtra)),
+    SessionId.
 
-cleanup_session(Session) ->
-    ok = beam_agent_backend:unregister_session(Session),
-    Session ! stop.
+cleanup_session(SessionId) ->
+    ok = beam_agent_runtime_core:clear_session(SessionId),
+    ok = beam_agent_session_store_core:delete_session(SessionId).
 
 reset_universal_state() ->
     ok = beam_agent_runtime_core:clear(),

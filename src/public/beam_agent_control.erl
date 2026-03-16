@@ -11,6 +11,9 @@ All state is ETS-backed, keyed by session ID, and persists for the node
 lifetime or until explicitly cleared. The control layer works identically
 across all five backends (Claude, Codex, Gemini, OpenCode, Copilot).
 
+Operations backed entirely by shared control, collaboration, or session-store
+state accept either a live session pid or a persisted session id binary.
+
 ## Getting Started
 
 ```erlang
@@ -570,6 +573,7 @@ List all pending requests for a session.
 Returns requests sorted by creation time (oldest first).
 Each entry is a pending_request() map with request_id, session_id,
 request, status, created_at, and optionally response and resolved_at.
+Request and response payloads are redacted for display-safe reads.
 """.
 -spec list_pending_requests(binary()) -> {ok, [beam_agent_control_core:pending_request()]}.
 list_pending_requests(SessionId) -> beam_agent_control_core:list_pending_requests(SessionId).
@@ -644,7 +648,7 @@ Parameters:
 
 Returns {ok, ResultMap} with status => interrupted, or {error, Reason}.
 """.
--spec turn_interrupt(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec turn_interrupt(pid() | binary(), binary(), binary()) -> {ok, term()} | {error, term()}.
 turn_interrupt(Session, ThreadId, TurnId) ->
     beam_agent_core:native_or(Session, turn_interrupt, [ThreadId, TurnId], fun() ->
         universal_turn_interrupt(Session, ThreadId, TurnId)
@@ -684,7 +688,7 @@ Example:
   Params = #{mode => <<"voice">>, model => <<"claude-sonnet">>},
   {ok, #{thread_id := Tid}} = beam_agent_control:thread_realtime_start(Session, Params).
 """.
--spec thread_realtime_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_realtime_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_realtime_start(Session, Params) ->
     beam_agent_core:native_or(Session, thread_realtime_start, [Params], fun() ->
         beam_agent_collaboration:start_realtime(
@@ -716,7 +720,7 @@ map containing the audio payload:
 Returns {ok, Map} with an acknowledgment on success, or
 {error, Reason} if the thread is not active or the data is invalid.
 """.
--spec thread_realtime_append_audio(pid(), binary(), map()) ->
+-spec thread_realtime_append_audio(pid() | binary(), binary(), map()) ->
     {ok, map()} | {error, term()}.
 thread_realtime_append_audio(Session, ThreadId, Params) ->
     beam_agent_core:native_or(Session, thread_realtime_append_audio, [ThreadId, Params], fun() ->
@@ -745,7 +749,7 @@ map containing the text payload:
 Returns {ok, Map} on success, or {error, Reason} if the thread is
 not active or the payload is invalid.
 """.
--spec thread_realtime_append_text(pid(), binary(), map()) ->
+-spec thread_realtime_append_text(pid() | binary(), binary(), map()) ->
     {ok, map()} | {error, term()}.
 thread_realtime_append_text(Session, ThreadId, Params) ->
     beam_agent_core:native_or(Session, thread_realtime_append_text, [ThreadId, Params], fun() ->
@@ -771,7 +775,7 @@ binary identifier returned by thread_realtime_start/2.
 Returns {ok, Map} with the final channel status on success, or
 {error, Reason} if the thread was already stopped or never existed.
 """.
--spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_realtime_stop(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_realtime_stop(Session, ThreadId) ->
     beam_agent_core:native_or(Session, thread_realtime_stop, [ThreadId], fun() ->
         beam_agent_collaboration:stop_realtime(
@@ -811,7 +815,7 @@ Example:
   Params = #{files => [<<"src/app.erl">>], review_type => <<"correctness">>},
   {ok, #{review_id := Rid}} = beam_agent_control:review_start(Session, Params).
 """.
--spec review_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec review_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 review_start(Session, Params) ->
     beam_agent_core:native_or(Session, review_start, [Params], fun() ->
         beam_agent_collaboration:start_review(
@@ -836,7 +840,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, Map} keyed by mode name, where each value describes the
 mode's capabilities, or {error, Reason} on failure.
 """.
--spec collaboration_mode_list(pid()) -> {ok, map()} | {error, term()}.
+-spec collaboration_mode_list(pid() | binary()) -> {ok, map()} | {error, term()}.
 collaboration_mode_list(Session) ->
     beam_agent_core:native_or(Session, collaboration_mode_list, [], fun() ->
         beam_agent_collaboration:collaboration_modes(
@@ -853,7 +857,7 @@ Session is the pid of a running beam_agent session.
 
 Returns {ok, List} of feature maps, or {error, Reason} on failure.
 """.
--spec experimental_feature_list(pid()) -> {ok, term()} | {error, term()}.
+-spec experimental_feature_list(pid() | binary()) -> {ok, term()} | {error, term()}.
 experimental_feature_list(Session) ->
     experimental_feature_list(Session, #{}).
 
@@ -879,7 +883,7 @@ Returns {ok, List} of feature maps on success. Each map contains
 at minimum id, name, description, and enabled (boolean). Returns
 {error, Reason} on failure.
 """.
--spec experimental_feature_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec experimental_feature_list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 experimental_feature_list(Session, Opts) ->
     beam_agent_core:native_or(Session, experimental_feature_list, [Opts], fun() ->
         beam_agent_collaboration:experimental_features(
@@ -898,7 +902,7 @@ name, session identifier, and uptime in milliseconds. The universal
 fallback derives health from session_info/1. Returns
 status => unknown when session info is unavailable.
 """.
--spec server_health(pid()) -> {ok, term()} | {error, term()}.
+-spec server_health(pid() | binary()) -> {ok, term()} | {error, term()}.
 server_health(Session) ->
     beam_agent_core:native_or(Session, server_health, [], fun() ->
         case beam_agent_core:session_info(Session) of
@@ -926,7 +930,7 @@ return richer metadata (creation time, model, message count).
 
 The universal fallback delegates to beam_agent_session_store_core.
 """.
--spec list_server_sessions(pid()) -> {ok, [map()]} | {error, term()}.
+-spec list_server_sessions(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 list_server_sessions(Session) ->
     beam_agent_core:native_or(Session, list_server_sessions, [], fun() ->
         case beam_agent_core:backend(Session) of
@@ -944,7 +948,7 @@ Returns the full session map for SessionId, including message history
 when the backend supports it. Returns {error, not_found} if the
 session does not exist in the store.
 """.
--spec get_server_session(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec get_server_session(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 get_server_session(Session, SessionId) ->
     beam_agent_core:native_or(Session, get_server_session, [SessionId], fun() ->
         beam_agent_core:get_session(SessionId)
@@ -957,7 +961,7 @@ Removes the session identified by SessionId from the session store.
 Returns a confirmation map with the session_id and deleted flag on
 success. Does not affect the currently running in-memory session.
 """.
--spec delete_server_session(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec delete_server_session(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
 delete_server_session(Session, SessionId) ->
     beam_agent_core:native_or(Session, delete_server_session, [SessionId], fun() ->
         ok = beam_agent_core:delete_session(SessionId),
@@ -972,7 +976,7 @@ specialized assistants (e.g., a code reviewer or test writer) that the
 primary agent can delegate to. The universal fallback queries the
 in-memory agent registry.
 """.
--spec list_server_agents(pid()) -> {ok, term()} | {error, term()}.
+-spec list_server_agents(pid() | binary()) -> {ok, term()} | {error, term()}.
 list_server_agents(Session) ->
     beam_agent_core:native_or(Session, list_server_agents, [], fun() ->
         beam_agent_core:list_agents(Session)
@@ -982,8 +986,15 @@ list_server_agents(Session) ->
 %% Internal Helpers
 %%--------------------------------------------------------------------
 
--spec universal_turn_interrupt(pid(), binary(), binary()) ->
+-spec universal_turn_interrupt(pid() | binary(), binary(), binary()) ->
     {ok, map()} | {error, term()}.
+universal_turn_interrupt(SessionId, ThreadId, TurnId)
+  when is_binary(SessionId) ->
+    {ok, beam_agent_core:with_universal_source(SessionId, #{
+        thread_id => ThreadId,
+        turn_id => TurnId,
+        status => interrupted
+    })};
 universal_turn_interrupt(Session, ThreadId, TurnId) ->
     case beam_agent_core:interrupt(Session) of
         ok ->

@@ -69,26 +69,32 @@
                            {auth_methods_for_provider, 1},
                            {provider_summary, 1}]}).
 
--doc "Read the universal config/provider view for a live session.".
--spec config_read(pid()) -> {ok, config_view()} | {error, term()}.
-config_read(Session) when is_pid(Session) ->
+-doc "Read the universal config/provider view for a live session pid or persisted session id.".
+-spec config_read(pid() | binary()) -> {ok, config_view()} | {error, term()}.
+config_read(Session) when is_pid(Session); is_binary(Session) ->
     SessionId = session_identity(Session),
     {ok, Runtime} = beam_agent_runtime_core:get_state(Session),
     {ok, Control} = beam_agent_control_core:get_all_config(SessionId),
-    case beam_agent_router:session_info(Session) of
+    case beam_agent_core:session_info(Session) of
         {ok, Info} ->
             {ok, #{
                 runtime => Runtime,
                 control => Control,
                 session => Info
             }};
+        {error, not_found} when is_binary(Session) ->
+            {ok, #{
+                runtime => Runtime,
+                control => Control,
+                session => minimal_session_info(SessionId)
+            }};
         {error, _} = Error ->
             Error
     end.
 
 -doc "Apply universal config updates for backends without native config APIs.".
--spec config_update(pid(), map()) -> {ok, config_view()} | {error, term()}.
-config_update(Session, Body) when is_pid(Session), is_map(Body) ->
+-spec config_update(pid() | binary(), map()) -> {ok, config_view()} | {error, term()}.
+config_update(Session, Body) when (is_pid(Session) orelse is_binary(Session)), is_map(Body) ->
     SessionId = session_identity(Session),
     RuntimeUpdates = runtime_updates(Body),
     ControlUpdates = control_updates(Body),
@@ -97,9 +103,9 @@ config_update(Session, Body) when is_pid(Session), is_map(Body) ->
     config_read(Session).
 
 -doc "Write a single universal config value.".
--spec config_value_write(pid(), binary(), term(), map()) -> {ok, map()} | {error, term()}.
+-spec config_value_write(pid() | binary(), binary(), term(), map()) -> {ok, map()} | {error, term()}.
 config_value_write(Session, KeyPath, Value, _Opts)
-  when is_pid(Session), is_binary(KeyPath) ->
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(KeyPath) ->
     case classify_key_path(KeyPath) of
         {runtime, Key} ->
             config_update(Session, #{runtime => #{Key => Value}});
@@ -110,9 +116,9 @@ config_value_write(Session, KeyPath, Value, _Opts)
     end.
 
 -doc "Apply a batch of universal config writes.".
--spec config_batch_write(pid(), [map()], map()) -> {ok, map()} | {error, term()}.
+-spec config_batch_write(pid() | binary(), [map()], map()) -> {ok, map()} | {error, term()}.
 config_batch_write(Session, Edits, Opts)
-  when is_pid(Session), is_list(Edits), is_map(Opts) ->
+  when (is_pid(Session) orelse is_binary(Session)), is_list(Edits), is_map(Opts) ->
     lists:foldl(fun
         (_Edit, {error, _} = Error) ->
             Error;
@@ -130,7 +136,7 @@ config_batch_write(Session, Edits, Opts)
     end, {ok, #{}}, Edits).
 
 -doc "Describe the universal config keys supported by the canonical fallback.".
--spec config_requirements_read(pid()) -> {ok, map()}.
+-spec config_requirements_read(pid() | binary()) -> {ok, map()}.
 config_requirements_read(_Session) ->
     Providers = beam_agent_runtime_core:provider_catalog(),
     {ok, #{
@@ -163,8 +169,8 @@ config_requirements_read(_Session) ->
     }}.
 
 -doc "Detect universal config already materialized for a session.".
--spec external_agent_config_detect(pid(), map()) -> {ok, map()} | {error, term()}.
-external_agent_config_detect(Session, _Opts) when is_pid(Session) ->
+-spec external_agent_config_detect(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
+external_agent_config_detect(Session, _Opts) when is_pid(Session); is_binary(Session) ->
     case config_read(Session) of
         {ok, Config} ->
             Runtime = maps:get(runtime, Config, #{}),
@@ -179,9 +185,10 @@ external_agent_config_detect(Session, _Opts) when is_pid(Session) ->
     end.
 
 -doc "Import universal config material from an already-decoded map.".
--spec external_agent_config_import(pid(), map()) ->
+-spec external_agent_config_import(pid() | binary(), map()) ->
     {ok, config_view()} | {error, term()}.
-external_agent_config_import(Session, Opts) when is_pid(Session), is_map(Opts) ->
+external_agent_config_import(Session, Opts)
+  when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
     ImportMap = case value(Opts, [config, <<"config">>, settings, <<"settings">>], undefined) of
         Map when is_map(Map) -> Map;
         _ -> Opts
@@ -189,7 +196,7 @@ external_agent_config_import(Session, Opts) when is_pid(Session), is_map(Opts) -
     config_update(Session, ImportMap).
 
 -doc "Describe provider auth methods available through the universal fallback.".
--spec provider_auth_methods(pid()) -> {ok, [map()]}.
+-spec provider_auth_methods(pid() | binary()) -> {ok, [map()]}.
 provider_auth_methods(Session) ->
     {ok,
      case beam_agent_runtime_core:current_provider(Session) of
@@ -200,10 +207,11 @@ provider_auth_methods(Session) ->
      end}.
 
 -doc "Start a universal provider auth flow when native OAuth is unavailable.".
--spec provider_oauth_authorize(pid(), binary(), map()) ->
+-spec provider_oauth_authorize(pid() | binary(), binary(), map()) ->
     {ok, provider_oauth_authorize_result()}.
 provider_oauth_authorize(Session, ProviderId, Body)
-  when is_pid(Session), is_binary(ProviderId), is_map(Body) ->
+  when (is_pid(Session) orelse is_binary(Session)),
+       is_binary(ProviderId), is_map(Body) ->
     SessionId = session_identity(Session),
     RequestId = beam_agent_core:make_request_id(),
     ProviderMeta = provider_summary(ProviderId),
@@ -227,24 +235,25 @@ provider_oauth_authorize(Session, ProviderId, Body)
     }}.
 
 -doc "Complete a universal provider auth flow and persist the callback payload.".
--spec provider_oauth_callback(pid(), binary(), map()) ->
+-spec provider_oauth_callback(pid() | binary(), binary(), map()) ->
     {ok, provider_oauth_callback_result()} |
     {error, invalid_api_key | invalid_provider_config}.
 provider_oauth_callback(Session, ProviderId, Body)
-  when is_pid(Session), is_binary(ProviderId), is_map(Body) ->
+  when (is_pid(Session) orelse is_binary(Session)),
+       is_binary(ProviderId), is_map(Body) ->
     RequestId = value(Body, [request_id, <<"request_id">>, state, <<"state">>], undefined),
     _ = maybe_resolve_request(Session, RequestId, Body),
-    {ok, ProviderConfig} = beam_agent_runtime_core:get_provider_config(Session),
-    CallbackConfig = maps:merge(ProviderConfig, #{
+    CallbackUpdates = #{
         provider_id => ProviderId,
         oauth_callback => Body,
         source => universal
-    }),
-    case beam_agent_runtime_core:set_provider_config(Session, CallbackConfig) of
+    },
+    case beam_agent_runtime_core:merge_provider_config(Session, CallbackUpdates) of
         ok ->
+            {ok, PublicProviderConfig} = beam_agent_runtime_core:get_provider_config(Session),
             {ok, #{
                 provider_id => ProviderId,
-                provider => CallbackConfig,
+                provider => PublicProviderConfig,
                 auth_method => <<"oauth_callback">>,
                 status => configured,
                 source => universal
@@ -278,7 +287,7 @@ normalize_runtime_keys(Updates) ->
             Updates
     end.
 
--spec apply_runtime_updates(pid(), map()) -> ok.
+-spec apply_runtime_updates(pid() | binary(), map()) -> ok.
 apply_runtime_updates(_Session, Updates) when map_size(Updates) =:= 0 ->
     ok;
 apply_runtime_updates(Session, Updates) ->
@@ -323,7 +332,7 @@ classify_key_path(KeyPath) ->
             error
     end.
 
--spec maybe_resolve_request(pid(), binary() | undefined, map()) -> ok.
+-spec maybe_resolve_request(pid() | binary(), binary() | undefined, map()) -> ok.
 maybe_resolve_request(_Session, undefined, _Body) ->
     ok;
 maybe_resolve_request(Session, RequestId, Body) ->
@@ -333,9 +342,21 @@ maybe_resolve_request(Session, RequestId, Body) ->
         {error, _} -> ok
     end.
 
--spec session_identity(pid()) -> binary().
+-spec session_identity(pid() | binary()) -> binary().
 session_identity(Session) ->
     beam_agent_core:session_identity(Session).
+
+-spec minimal_session_info(binary()) -> #{
+    session_id := binary(),
+    backend := beam_agent_backend:backend() | undefined,
+    adapter := beam_agent_backend:backend() | undefined
+}.
+minimal_session_info(SessionId) ->
+    Base = #{session_id => SessionId, backend => undefined, adapter => undefined},
+    case beam_agent_backend:session_backend(SessionId) of
+        {ok, Backend} -> Base#{backend => Backend, adapter => Backend};
+        {error, _} -> Base
+    end.
 
 -spec normalize_map(term()) -> map().
 normalize_map(Map) when is_map(Map) ->

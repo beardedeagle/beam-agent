@@ -7,6 +7,9 @@ exporting skills to remote registries, and toggling skill configuration.
 Every function uses native-first routing with universal fallbacks via
 beam_agent_skills_core.
 
+Universal operations accept either a live session pid or a persisted
+session id binary.
+
 This module is a pure delegation layer — it holds no state, no processes,
 and no side effects.
 
@@ -38,42 +41,42 @@ and no side effects.
 %%--------------------------------------------------------------------
 
 -doc "List skills available for a session.".
--spec list(pid()) -> {ok, term()} | {error, term()}.
+-spec list(pid() | binary()) -> {ok, term()} | {error, term()}.
 list(Session) ->
     beam_agent_core:native_or(Session, skills_list, [], fun() ->
         beam_agent_core:list_skills(Session)
     end).
 
 -doc "List skills with optional filter criteria.".
--spec list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 list(Session, Opts) ->
     beam_agent_core:native_or(Session, skills_list, [Opts], fun() ->
         beam_agent_core:list_skills(Session)
     end).
 
 -doc "List skills available in remote registries.".
--spec remote_list(pid()) -> {ok, term()} | {error, term()}.
+-spec remote_list(pid() | binary()) -> {ok, term()} | {error, term()}.
 remote_list(Session) ->
     beam_agent_core:native_or(Session, skills_remote_list, [], fun() ->
         universal_skills_remote_list(Session, #{})
     end).
 
 -doc "List remote skills with optional filters.".
--spec remote_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec remote_list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 remote_list(Session, Opts) ->
     beam_agent_core:native_or(Session, skills_remote_list, [Opts], fun() ->
         universal_skills_remote_list(Session, Opts)
     end).
 
 -doc "Export a local skill to a remote registry.".
--spec remote_export(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec remote_export(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
 remote_export(Session, Opts) ->
     beam_agent_core:native_or(Session, skills_remote_export, [Opts], fun() ->
         beam_agent_skills_core:skills_remote_export(Session, Opts)
     end).
 
 -doc "Enable or disable a skill by its file path.".
--spec config_write(pid(), binary(), boolean()) -> {ok, term()} | {error, term()}.
+-spec config_write(pid() | binary(), binary(), boolean()) -> {ok, term()} | {error, term()}.
 config_write(Session, Path, Enabled) ->
     beam_agent_core:native_or(Session, skills_config_write, [Path, Enabled], fun() ->
         beam_agent_skills_core:skills_config_write(Session, Path, Enabled),
@@ -84,7 +87,7 @@ config_write(Session, Path, Enabled) ->
 %% Internal
 %%--------------------------------------------------------------------
 
--spec universal_skills_remote_list(pid(), map()) -> {ok, map()} | {error, term()}.
+-spec universal_skills_remote_list(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 universal_skills_remote_list(Session, _Opts) ->
     case beam_agent_core:list_skills(Session) of
         {ok, Skills} ->

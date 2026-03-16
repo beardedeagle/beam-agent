@@ -12,6 +12,9 @@ The runtime layer is backend-agnostic. It stores canonical defaults that
 can be merged into future requests regardless of which backend transport
 is active.
 
+Status and provider/account operations that are backed by shared runtime or
+session-store state also accept a persisted session id binary.
+
 ## Getting Started
 
 ```erlang
@@ -195,7 +198,8 @@ clear_session(Session) -> beam_agent_runtime_core:clear_session(Session).
 Read the current runtime state map for a session.
 
 Returns the full state map, or an empty map if no state has been
-registered. Always returns {ok, Map}.
+registered. Sensitive provider fields are redacted in the public view.
+Always returns {ok, Map}.
 """.
 -spec get_state(pid() | binary()) -> {ok, beam_agent_runtime_core:runtime_state()}.
 get_state(Session) -> beam_agent_runtime_core:get_state(Session).
@@ -243,9 +247,9 @@ clear_provider(Session) -> beam_agent_runtime_core:clear_provider(Session).
 -doc """
 Read the provider configuration map for a session.
 
-Returns the structured provider config (API keys, base URLs, etc.)
-associated with the session. Returns an empty map when no config
-is stored.
+Returns the structured provider config associated with the session.
+Sensitive fields are redacted in the public view. Returns an empty
+map when no config is stored.
 """.
 -spec get_provider_config(pid() | binary()) -> {ok, map()}.
 get_provider_config(Session) -> beam_agent_runtime_core:get_provider_config(Session).
@@ -322,7 +326,7 @@ Return high-level provider status for the session's current provider.
 
 If a provider is selected, returns its detailed status via
 provider_status/2. If no provider is set, returns a summary with
-provider_id set to undefined and whether any config exists.
+provider_id set to undefined and whether any redacted config exists.
 """.
 -spec provider_status(pid() | binary()) ->
     {ok, #{provider_id := undefined | binary(), _ => _}}.
@@ -489,7 +493,7 @@ Returns {ok, Map} on success, where Map includes keys such as
 status, backend, health, and session_id. Returns {error, Reason}
 if the session is unreachable.
 """.
--spec get_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_status(pid() | binary()) -> {ok, term()} | {error, term()}.
 get_status(Session) ->
     beam_agent_core:native_or(Session, get_status, [], fun() ->
         universal_get_status(Session)
@@ -511,7 +515,7 @@ Returns {ok, Map} on success, where Map includes whether the session
 is authenticated, the authentication method, and token expiration if
 applicable. Returns {error, Reason} on failure.
 """.
--spec get_auth_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_auth_status(pid() | binary()) -> {ok, term()} | {error, term()}.
 get_auth_status(Session) ->
     beam_agent_core:native_or(Session, get_auth_status, [], fun() ->
         universal_get_auth_status(Session)
@@ -532,7 +536,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, SessionId} where SessionId is typically a binary string,
 or {error, Reason} if the identifier cannot be determined.
 """.
--spec get_last_session_id(pid()) -> {ok, term()} | {error, term()}.
+-spec get_last_session_id(pid() | binary()) -> {ok, term()} | {error, term()}.
 get_last_session_id(Session) ->
     beam_agent_core:native_or(Session, get_last_session_id, [], fun() ->
         {ok, beam_agent_core:session_identity(Session)}
@@ -595,7 +599,7 @@ stop_task(Session, TaskId) ->
 %% Private Helpers
 %%--------------------------------------------------------------------
 
--spec universal_get_status(pid()) ->
+-spec universal_get_status(pid() | binary()) ->
     {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 universal_get_status(Session) ->
     case beam_agent_core:session_info(Session) of
@@ -607,7 +611,7 @@ universal_get_status(Session) ->
             Error
     end.
 
--spec universal_get_auth_status(pid()) ->
+-spec universal_get_auth_status(pid() | binary()) ->
     {ok, #{'source' := 'universal', _ => _}}.
 universal_get_auth_status(Session) ->
     {ok, Status} = beam_agent_runtime_core:provider_status(Session),

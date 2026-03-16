@@ -7,7 +7,7 @@
 %%%   - System monitor: install/uninstall on self()
 %%%   - handle_monitor_message/1 pure function routing
 %%%
-%%% These tests use real seq_trace and system_monitor — no mocks.
+%%% These tests use real seq_trace and system_monitor — no test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_command_audit_tests).
@@ -137,8 +137,8 @@ handle_monitor_message_large_heap_test() ->
     ?assertMatch({alarm, large_heap, #{pid := _, heap_size := 15000000}}, Result).
 
 handle_monitor_message_busy_port_test() ->
-    FakePort = fake_port,
-    Msg = {monitor, self(), busy_port, FakePort},
+    PortKey = busy_port_key,
+    Msg = {monitor, self(), busy_port, PortKey},
     Result = beam_agent_command_audit:handle_monitor_message(Msg),
     ?assertMatch({alarm, busy_port, #{pid := _, port := _}}, Result).
 

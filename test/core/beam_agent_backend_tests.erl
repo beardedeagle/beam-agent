@@ -19,23 +19,17 @@ register_and_lookup_session_test() ->
 
 infer_backend_from_session_info_test() ->
     ok = beam_agent_backend:clear(),
-    Session = spawn(fun() -> fake_session_loop(#{adapter => claude}) end),
-    ?assertEqual({ok, claude}, beam_agent_backend:session_backend(Session)),
-    Session ! stop.
+    ok = beam_agent_session_store_core:clear(),
+    SessionId = <<"backend-claude">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        adapter => claude
+    }),
+    ?assertEqual({ok, claude}, beam_agent_backend:session_backend(SessionId)),
+    ok = beam_agent_session_store_core:clear().
 
 copilot_terminal_error_semantics_test() ->
     ?assert(beam_agent_backend:is_terminal(copilot, #{type => result})),
     ?assertNot(beam_agent_backend:is_terminal(copilot, #{type => error})),
     ?assert(beam_agent_backend:is_terminal(copilot, #{type => error, is_error => true})),
     ?assert(beam_agent_backend:is_terminal(claude, #{type => error})).
-
-fake_session_loop(Info) ->
-    receive
-        {'$gen_call', From, session_info} ->
-            gen:reply(From, {ok, Info}),
-            fake_session_loop(Info);
-        stop ->
-            ok;
-        _Other ->
-            fake_session_loop(Info)
-    end.

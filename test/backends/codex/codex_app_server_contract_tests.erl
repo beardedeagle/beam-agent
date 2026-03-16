@@ -4,7 +4,7 @@
 
 provider_and_config_wrappers_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(<<"codex-config">>, codex),
+    Session = beam_agent_test_helpers:register_session(<<"codex-config">>, codex),
     {ok, _} = codex_app_server:config_update(Session, #{
         provider_id => <<"openai">>,
         provider => #{provider_id => <<"openai">>, api_key => <<"secret">>}
@@ -25,7 +25,7 @@ provider_and_config_wrappers_test() ->
 
 realtime_transport_bridges_review_and_collaboration_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(
+    Session = beam_agent_test_helpers:register_session(
         <<"codex-realtime">>, codex, #{transport => realtime}),
     {ok, Review} = codex_app_server:review_start(Session, #{
         target => <<"pull-request">>,

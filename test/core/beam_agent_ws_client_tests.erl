@@ -3,7 +3,7 @@
 %%%
 %%% Tests use a real TCP listener with a hand-rolled WebSocket server
 %%% to exercise the full lifecycle: TCP connect → WS upgrade → frame
-%%% exchange → close. No mocking (meck) is used.
+%%% exchange → close. No monkeypatching is used.
 %%%
 %%% The test process is the "owner" that receives transport messages.
 %%% A helper process acts as the WS server: accepts the TCP connection,
@@ -244,6 +244,14 @@ owner_death_stops_client_test() ->
         %% Clean up acceptor if still alive
         exit(Acceptor, shutdown)
     end.
+
+ws_client_rejects_unsafe_tls_override_without_explicit_opt_in_test() ->
+    ?assertEqual({error, unsafe_tls_opts},
+        beam_agent_ws_client:open("example.test", 443, #{
+            transport => tls,
+            scheme => <<"wss">>,
+            tls_opts => [{verify, verify_none}]
+        })).
 
 %%====================================================================
 %% ws_send before WS upgrade (phase = open, not ws_open)

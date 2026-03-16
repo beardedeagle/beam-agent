@@ -2,7 +2,7 @@
 %%% @doc EUnit tests for beam_agent_http_client.
 %%%
 %%% Tests use real TCP listeners to verify the full request/response
-%%% cycle through OTP httpc.  No mocking (meck) is used — the test
+%%% cycle through OTP httpc. No monkeypatching is used — the test
 %%% spawns a minimal TCP acceptor that speaks raw HTTP/1.1 just
 %%% enough for httpc to parse the responses.
 %%%
@@ -229,6 +229,36 @@ request_failure_test() ->
     after
         gen_tcp:close(LSock)
     end.
+
+https_client_preserves_secure_defaults_when_merging_tls_opts_test() ->
+    {ok, Pid} = beam_agent_http_client:open("example.test", 443, #{
+        transport => tls,
+        tls_opts => [{versions, ['tlsv1.3']}]
+    }),
+    State = sys:get_state(Pid),
+    SslOpts = element(5, State),
+    ?assert(lists:member({verify, verify_peer}, SslOpts)),
+    ?assert(lists:member({versions, ['tlsv1.3']}, SslOpts)),
+    ?assert(lists:member({server_name_indication, "example.test"}, SslOpts)),
+    beam_agent_http_client:close(Pid).
+
+https_client_rejects_unsafe_tls_override_without_explicit_opt_in_test() ->
+    ?assertEqual({error, unsafe_tls_opts},
+        beam_agent_http_client:open("example.test", 443, #{
+            transport => tls,
+            tls_opts => [{verify, verify_none}]
+        })).
+
+https_client_allows_explicit_insecure_tls_opt_in_test() ->
+    {ok, Pid} = beam_agent_http_client:open("example.test", 443, #{
+        transport => tls,
+        allow_insecure_tls => true,
+        tls_opts => [{verify, verify_none}]
+    }),
+    State = sys:get_state(Pid),
+    SslOpts = element(5, State),
+    ?assert(lists:member({verify, verify_none}, SslOpts)),
+    beam_agent_http_client:close(Pid).
 
 %%====================================================================
 %% Helpers

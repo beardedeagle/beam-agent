@@ -4,7 +4,7 @@
 
 thread_filter_and_compact_wrappers_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(<<"opencode-thread">>, opencode),
+    Session = beam_agent_test_helpers:register_session(<<"opencode-thread">>, opencode),
     {ok, Thread} = opencode_client:thread_start(Session, #{name => <<"ops">>}),
     ThreadId = maps:get(thread_id, Thread),
     ok = beam_agent_threads_core:record_thread_message(<<"opencode-thread">>, ThreadId, #{
@@ -22,7 +22,7 @@ thread_filter_and_compact_wrappers_test() ->
 
 config_and_realtime_wrappers_test() ->
     ok = beam_agent_test_helpers:reset_state(),
-    Session = beam_agent_test_helpers:fake_session(<<"opencode-config">>, opencode),
+    Session = beam_agent_test_helpers:register_session(<<"opencode-config">>, opencode),
     {ok, _} = opencode_client:config_value_write(Session, <<"runtime.provider_id">>, <<"openai">>),
     {ok, Detect} = opencode_client:external_agent_config_detect(Session),
     ?assertEqual(true, maps:get(detected, Detect)),

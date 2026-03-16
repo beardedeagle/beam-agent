@@ -60,7 +60,8 @@ defmodule BeamAgent.Runtime do
   Return the current runtime state map for a session.
 
   Returns `{:ok, state}` — always succeeds, returning an empty map if no state
-  has been registered.
+  has been registered. Secret-bearing provider fields are redacted in the public
+  view.
   """
   @spec get_state(pid() | binary()) ::
           {:ok,
@@ -109,9 +110,12 @@ defmodule BeamAgent.Runtime do
   defdelegate clear_provider(session), to: :beam_agent_runtime
 
   @doc """
-  Read the provider configuration map for a session.
+  Read the provider configuration view for a session.
 
-  Returns `{:ok, config}` — an empty map when no config is stored.
+  Returns a redacted config map suitable for display and status surfaces. Secret
+  values such as API keys and OAuth callback fields are replaced with
+  `:redacted` markers. Returns `{:ok, config}` or an empty map when no config is
+  stored.
   """
   @spec get_provider_config(pid() | binary()) :: {:ok, map()}
   defdelegate get_provider_config(session), to: :beam_agent_runtime
@@ -174,7 +178,8 @@ defmodule BeamAgent.Runtime do
   Return high-level provider status for the session's current provider.
 
   Returns `{:ok, status_map}` with `:provider_id` and current state details. If
-  no provider is set, `:provider_id` is `nil`.
+  no provider is set, `:provider_id` is `nil` and any config in the public view
+  remains redacted.
   """
   @spec provider_status(pid() | binary()) ::
           {:ok, %{required(:provider_id) => :undefined | binary(), optional(atom()) => term()}}

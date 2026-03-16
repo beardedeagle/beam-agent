@@ -10,7 +10,7 @@
 %%%   - Idempotent table creation (ensure_table on existing table)
 %%%   - Access mode injection (public vs protected based on table name)
 %%%
-%%% All tests use real ETS tables and real processes — zero mocks.
+%%% All tests use real ETS tables and real processes — zero test doubles.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_ets_tests).

@@ -418,24 +418,57 @@ store_and_list_pending_requests_test() ->
     ?assertEqual(universal, maps:get(source, StoredRequest)),
     beam_agent_control_core:clear().
 
+list_pending_requests_redacts_sensitive_payloads_test() ->
+    SId = <<"pr-redacted-session">>,
+    ok = beam_agent_control_core:store_pending_request(SId, <<"req-secret">>, #{
+        kind => provider_oauth_authorize,
+        body => #{api_key => <<"secret">>, authorize_url => <<"https://example.test/oauth">>}
+    }),
+    ok = beam_agent_control_core:resolve_pending_request(SId, <<"req-secret">>, #{
+        access_token => <<"token">>,
+        answer => <<"ok">>
+    }),
+    {ok, [Req]} = beam_agent_control_core:list_pending_requests(SId),
+    Request = maps:get(request, Req),
+    Body = maps:get(body, Request),
+    ?assertEqual(redacted, maps:get(api_key, Body)),
+    ?assertEqual(<<"https://example.test/oauth">>, maps:get(authorize_url, Body)),
+    Response = maps:get(response, Req),
+    ?assertEqual(redacted, maps:get(access_token, Response)),
+    ?assertEqual(<<"ok">>, maps:get(answer, Response)),
+    beam_agent_control_core:clear().
+
 pending_request_events_are_canonicalized_test() ->
     SId = <<"pr-events-session">>,
     ok = beam_agent_events:clear(),
     {ok, Ref} = beam_agent_events:subscribe(SId),
-    ok = beam_agent_control_core:store_pending_request(SId, <<"req-evt">>, #{prompt => <<"Enter">>}),
-    ?assertMatch({ok, #{
+    ok = beam_agent_control_core:store_pending_request(SId, <<"req-evt">>, #{
+        prompt => <<"Enter">>,
+        body => #{api_key => <<"secret">>}
+    }),
+    {ok, StoredEvent} = beam_agent_events:receive_event(Ref, 0),
+    ?assertMatch(#{
         subtype := <<"pending_request_stored">>,
         session_id := SId,
         source := universal,
         event_class := control
-    }}, beam_agent_events:receive_event(Ref, 0)),
-    ok = beam_agent_control_core:resolve_pending_request(SId, <<"req-evt">>, #{answer => <<"ok">>}),
-    ?assertMatch({ok, #{
+    }, StoredEvent),
+    StoredRequest = maps:get(request, StoredEvent),
+    StoredBody = maps:get(body, StoredRequest),
+    ?assertEqual(redacted, maps:get(api_key, StoredBody)),
+    ok = beam_agent_control_core:resolve_pending_request(SId, <<"req-evt">>, #{
+        answer => <<"ok">>,
+        access_token => <<"secret-token">>
+    }),
+    {ok, ResolvedEvent} = beam_agent_events:receive_event(Ref, 0),
+    ?assertMatch(#{
         subtype := <<"pending_request_resolved">>,
         session_id := SId,
         source := universal,
         event_class := control
-    }}, beam_agent_events:receive_event(Ref, 0)),
+    }, ResolvedEvent),
+    EventResponse = maps:get(response, ResolvedEvent),
+    ?assertEqual(redacted, maps:get(access_token, EventResponse)),
     ?assertEqual(ok, beam_agent_events:unsubscribe(SId, Ref)),
     beam_agent_control_core:clear(),
     ok = beam_agent_events:clear().

@@ -486,10 +486,12 @@ query(Session, Prompt, Params)
   when is_pid(Session), is_binary(Prompt), is_map(Params) ->
     beam_agent_router:query(Session, Prompt, Params).
 
--doc "Query session info for a live unified session.".
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-doc "Query session info for a live unified session or persisted session id.".
+-spec session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
 session_info(Session) when is_pid(Session) ->
-    beam_agent_router:session_info(Session).
+    beam_agent_router:session_info(Session);
+session_info(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    beam_agent_session_store_core:get_session(SessionId).
 
 -doc """
 Derive a stable string identifier for a session.
@@ -499,7 +501,9 @@ falls back to the pid stringified via `erlang:pid_to_list/1`. This is the
 canonical implementation — all modules should delegate here rather than
 duplicating the logic.
 """.
--spec session_identity(pid()) -> binary().
+-spec session_identity(pid() | binary()) -> binary().
+session_identity(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    SessionId;
 session_identity(Session) ->
     case session_info(Session) of
         {ok, #{session_id := SessionId}} when is_binary(SessionId),
@@ -509,15 +513,24 @@ session_identity(Session) ->
             unicode:characters_to_binary(erlang:pid_to_list(Session))
     end.
 
--doc "Return the current health state for a live unified session.".
--spec health(pid()) -> atom().
+-doc "Return the current health state for a live unified session or persisted session id.".
+-spec health(pid() | binary()) -> atom().
 health(Session) when is_pid(Session) ->
-    beam_agent_router:health(Session).
+    beam_agent_router:health(Session);
+health(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    case beam_agent_session_store_core:get_session(SessionId) of
+        {ok, Info} when is_map(Info) ->
+            maps:get(health, Info, ready);
+        {error, not_found} ->
+            unknown
+    end.
 
--doc "Resolve the backend for a live unified session.".
--spec backend(pid()) -> {ok, backend()} | {error, term()}.
+-doc "Resolve the backend for a live unified session or persisted session id.".
+-spec backend(pid() | binary()) -> {ok, backend()} | {error, term()}.
 backend(Session) when is_pid(Session) ->
-    beam_agent_router:backend(Session).
+    beam_agent_router:backend(Session);
+backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    beam_agent_backend:session_backend(SessionId).
 
 -doc "List the backends supported by the canonical SDK.".
 -spec list_backends() -> [backend()].
@@ -624,58 +637,81 @@ summarize_session(Session) when is_pid(Session) ->
 summarize_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
     beam_agent_router:summarize_session(Session, Opts).
 
--doc "Start a thread for a live session.".
--spec thread_start(pid(), map()) -> {ok, map()} | {error, term()}.
+-doc "Start a thread for a live session or persisted session id.".
+-spec thread_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_start(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_router:thread_start(Session, Opts).
+    beam_agent_router:thread_start(Session, Opts);
+thread_start(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
+    beam_agent_threads_core:start_thread(SessionId, Opts).
 
--doc "Resume a thread for a live session.".
--spec thread_resume(pid(), binary()) -> {ok, map()} | {error, term()}.
+-doc "Resume a thread for a live session or persisted session id.".
+-spec thread_resume(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_resume(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_resume(Session, ThreadId).
+    beam_agent_router:thread_resume(Session, ThreadId);
+thread_resume(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
+    beam_agent_threads_core:resume_thread(SessionId, ThreadId).
 
--doc "List threads for a live session.".
--spec thread_list(pid()) -> {ok, [map()]} | {error, term()}.
+-doc "List threads for a live session or persisted session id.".
+-spec thread_list(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 thread_list(Session) when is_pid(Session) ->
-    beam_agent_router:thread_list(Session).
+    beam_agent_router:thread_list(Session);
+thread_list(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
+    beam_agent_threads_core:list_threads(SessionId).
 
 -doc "Fork a thread with default opts.".
--spec thread_fork(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_fork(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_fork(Session, ThreadId).
+    beam_agent_router:thread_fork(Session, ThreadId);
+thread_fork(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
+    beam_agent_threads_core:fork_thread(SessionId, ThreadId, #{}).
 
 -doc "Fork a thread.".
--spec thread_fork(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_fork(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId, Opts)
   when is_pid(Session), is_binary(ThreadId), is_map(Opts) ->
-    beam_agent_router:thread_fork(Session, ThreadId, Opts).
+    beam_agent_router:thread_fork(Session, ThreadId, Opts);
+thread_fork(SessionId, ThreadId, Opts)
+  when is_binary(SessionId), is_binary(ThreadId), is_map(Opts) ->
+    beam_agent_threads_core:fork_thread(SessionId, ThreadId, Opts).
 
 -doc "Read a thread with default opts.".
--spec thread_read(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_read(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_read(Session, ThreadId).
+    beam_agent_router:thread_read(Session, ThreadId);
+thread_read(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
+    beam_agent_threads_core:read_thread(SessionId, ThreadId, #{}).
 
 -doc "Read a thread.".
--spec thread_read(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_read(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId, Opts)
   when is_pid(Session), is_binary(ThreadId), is_map(Opts) ->
-    beam_agent_router:thread_read(Session, ThreadId, Opts).
+    beam_agent_router:thread_read(Session, ThreadId, Opts);
+thread_read(SessionId, ThreadId, Opts)
+  when is_binary(SessionId), is_binary(ThreadId), is_map(Opts) ->
+    beam_agent_threads_core:read_thread(SessionId, ThreadId, Opts).
 
 -doc "Archive a thread.".
--spec thread_archive(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_archive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_archive(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_archive(Session, ThreadId).
+    beam_agent_router:thread_archive(Session, ThreadId);
+thread_archive(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
+    beam_agent_threads_core:archive_thread(SessionId, ThreadId).
 
 -doc "Unarchive a thread.".
--spec thread_unarchive(pid(), binary()) -> {ok, map()} | {error, term()}.
+-spec thread_unarchive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_unarchive(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_unarchive(Session, ThreadId).
+    beam_agent_router:thread_unarchive(Session, ThreadId);
+thread_unarchive(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
+    beam_agent_threads_core:unarchive_thread(SessionId, ThreadId).
 
 -doc "Rollback a thread.".
--spec thread_rollback(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
+-spec thread_rollback(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_rollback(Session, ThreadId, Selector)
   when is_pid(Session), is_binary(ThreadId), is_map(Selector) ->
-    beam_agent_router:thread_rollback(Session, ThreadId, Selector).
+    beam_agent_router:thread_rollback(Session, ThreadId, Selector);
+thread_rollback(SessionId, ThreadId, Selector)
+  when is_binary(SessionId), is_binary(ThreadId), is_map(Selector) ->
+    beam_agent_threads_core:rollback_thread(SessionId, ThreadId, Selector).
 
 -doc "List supported slash commands from session init data.".
 -spec supported_commands(pid()) -> {ok, list()} | {error, term()}.
@@ -698,78 +734,84 @@ account_info(Session) when is_pid(Session) ->
     beam_agent_router:account_info(Session).
 
 -doc "List tools from the shared metadata catalog.".
--spec list_tools(pid()) -> {ok, [map()]} | {error, term()}.
-list_tools(Session) when is_pid(Session) ->
+-spec list_tools(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+list_tools(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_tools(Session).
 
 -doc "List skills from the shared metadata catalog.".
--spec list_skills(pid()) -> {ok, [map()]} | {error, term()}.
-list_skills(Session) when is_pid(Session) ->
+-spec list_skills(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+list_skills(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_skills(Session).
 
 -doc "List plugins from the shared metadata catalog.".
--spec list_plugins(pid()) -> {ok, [map()]} | {error, term()}.
-list_plugins(Session) when is_pid(Session) ->
+-spec list_plugins(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+list_plugins(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_plugins(Session).
 
 -doc "List MCP servers from the shared metadata catalog.".
--spec list_mcp_servers(pid()) -> {ok, [map()]} | {error, term()}.
-list_mcp_servers(Session) when is_pid(Session) ->
+-spec list_mcp_servers(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+list_mcp_servers(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_mcp_servers(Session).
 
 -doc "List agents from the shared metadata catalog.".
--spec list_agents(pid()) -> {ok, [map()]} | {error, term()}.
-list_agents(Session) when is_pid(Session) ->
+-spec list_agents(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+list_agents(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_agents(Session).
 
 -doc "Look up a tool from the shared metadata catalog.".
--spec get_tool(pid(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_tool(Session, ToolId) when is_pid(Session), is_binary(ToolId) ->
+-spec get_tool(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+get_tool(Session, ToolId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(ToolId) ->
     beam_agent_catalog_core:get_tool(Session, ToolId).
 
 -doc "Look up a skill from the shared metadata catalog.".
--spec get_skill(pid(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_skill(Session, SkillId) when is_pid(Session), is_binary(SkillId) ->
+-spec get_skill(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+get_skill(Session, SkillId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(SkillId) ->
     beam_agent_catalog_core:get_skill(Session, SkillId).
 
 -doc "Look up a plugin from the shared metadata catalog.".
--spec get_plugin(pid(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_plugin(Session, PluginId) when is_pid(Session), is_binary(PluginId) ->
+-spec get_plugin(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+get_plugin(Session, PluginId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(PluginId) ->
     beam_agent_catalog_core:get_plugin(Session, PluginId).
 
 -doc "Look up an agent from the shared metadata catalog.".
--spec get_agent(pid(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_agent(Session, AgentId) when is_pid(Session), is_binary(AgentId) ->
+-spec get_agent(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+get_agent(Session, AgentId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(AgentId) ->
     beam_agent_catalog_core:get_agent(Session, AgentId).
 
 -doc "Return the current default provider selection for a session.".
--spec current_provider(pid()) -> {ok, binary()} | {error, not_set}.
-current_provider(Session) when is_pid(Session) ->
+-spec current_provider(pid() | binary()) -> {ok, binary()} | {error, not_set}.
+current_provider(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_runtime_core:current_provider(Session).
 
 -doc "Set the default provider for future queries on a session.".
--spec set_provider(pid(), binary()) -> ok.
-set_provider(Session, ProviderId) when is_pid(Session), is_binary(ProviderId) ->
+-spec set_provider(pid() | binary(), binary()) -> ok.
+set_provider(Session, ProviderId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(ProviderId) ->
     beam_agent_runtime_core:set_provider(Session, ProviderId).
 
 -doc "Clear any default provider selection for a session.".
--spec clear_provider(pid()) -> ok.
-clear_provider(Session) when is_pid(Session) ->
+-spec clear_provider(pid() | binary()) -> ok.
+clear_provider(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_runtime_core:clear_provider(Session).
 
 -doc "Return the current default agent selection for a session.".
--spec current_agent(pid()) -> {ok, binary()} | {error, not_set}.
-current_agent(Session) when is_pid(Session) ->
+-spec current_agent(pid() | binary()) -> {ok, binary()} | {error, not_set}.
+current_agent(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:current_agent(Session).
 
 -doc "Set the default agent for future queries on a session.".
--spec set_agent(pid(), binary()) -> ok.
-set_agent(Session, AgentId) when is_pid(Session), is_binary(AgentId) ->
+-spec set_agent(pid() | binary(), binary()) -> ok.
+set_agent(Session, AgentId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(AgentId) ->
     beam_agent_catalog_core:set_default_agent(Session, AgentId).
 
 -doc "Clear any default agent selection for a session.".
--spec clear_agent(pid()) -> ok.
-clear_agent(Session) when is_pid(Session) ->
+-spec clear_agent(pid() | binary()) -> ok.
+clear_agent(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:clear_default_agent(Session).
 
 -doc "Return the canonical capability registry.".
@@ -861,15 +903,17 @@ parse_permission_mode(_)                       -> default.
 %% routing with universal fallbacks.
 
 -doc "Invoke a native backend function via the raw core transport.".
--spec native_call(pid(), atom(), [term()]) -> {ok, term()} | {error, term()}.
-native_call(Session, Function, Args) ->
-    beam_agent_raw_core:call(Session, Function, Args).
+-spec native_call(pid() | binary(), atom(), [term()]) -> {ok, term()} | {error, term()}.
+native_call(Session, Function, Args) when is_pid(Session) ->
+    beam_agent_raw_core:call(Session, Function, Args);
+native_call(_SessionId, Function, _Args) ->
+    {error, {unsupported_native_call, Function}}.
 
 -doc """
 Try a native backend call; on `{error, {unsupported_native_call, _}}`
 fall back to the universal implementation supplied by `Fallback`.
 """.
--spec native_or(pid(), atom(), [term()], fun(() -> {ok, term()} | {error, term()})) ->
+-spec native_or(pid() | binary(), atom(), [term()], fun(() -> {ok, term()} | {error, term()})) ->
     {ok, term()} | {error, term()}.
 native_or(Session, Function, Args, Fallback) ->
     case native_call(Session, Function, Args) of
@@ -880,7 +924,7 @@ native_or(Session, Function, Args, Fallback) ->
     end.
 
 -doc "Annotate a result map with `source => universal` and the session backend.".
--spec with_universal_source(pid(), map()) -> #{'source' := 'universal', _ => _}.
+-spec with_universal_source(pid() | binary(), map()) -> #{'source' := 'universal', _ => _}.
 with_universal_source(Session, Result) ->
     Base = Result#{source => universal},
     case backend(Session) of
@@ -891,7 +935,7 @@ with_universal_source(Session, Result) ->
     end.
 
 -doc "Extract the backend atom from a session, or `undefined` if unavailable.".
--spec session_backend(pid()) -> backend() | undefined.
+-spec session_backend(pid() | binary()) -> backend() | undefined.
 session_backend(Session) ->
     case backend(Session) of
         {ok, Backend} -> Backend;
@@ -899,7 +943,7 @@ session_backend(Session) ->
     end.
 
 -doc "Annotate a params map with the session's backend atom.".
--spec with_session_backend(pid(), map()) -> map().
+-spec with_session_backend(pid() | binary(), map()) -> map().
 with_session_backend(Session, Params) when is_map(Params) ->
     case backend(Session) of
         {ok, Backend} ->
@@ -909,7 +953,7 @@ with_session_backend(Session, Params) when is_map(Params) ->
     end.
 
 -doc "Wrap `health/1` in a try/catch, returning `unknown` on any failure.".
--spec safe_session_health(pid()) -> atom().
+-spec safe_session_health(pid() | binary()) -> atom().
 safe_session_health(Session) ->
     try health(Session) of
         Value -> Value

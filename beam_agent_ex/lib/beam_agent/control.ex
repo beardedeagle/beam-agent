@@ -290,7 +290,8 @@ defmodule BeamAgent.Control do
   List all pending requests for a session, sorted oldest first.
 
   Each entry is a map with `:request_id`, `:session_id`, `:request`, `:status`,
-  `:created_at`, and optionally `:response` and `:resolved_at`.
+  `:created_at`, and optionally `:response` and `:resolved_at`. Sensitive fields
+  inside request/response payloads are redacted for display-safe reads.
   """
   @spec list_pending_requests(binary()) ::
           {:ok,
