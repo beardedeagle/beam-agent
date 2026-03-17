@@ -218,7 +218,6 @@ defmodule ClaudeEx do
             | :result
             | :error
             | :user
-            | :control
             | :control_request
             | :control_response
             | :stream_event
@@ -468,7 +467,7 @@ defmodule ClaudeEx do
 
       :ok = ClaudeEx.set_model(session, "claude-sonnet-4-20250514")
   """
-  @spec set_model(session(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(session(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_model(session, model) do
     BeamAgent.Runtime.set_model(session, model)
   end
@@ -480,7 +479,7 @@ defmodule ClaudeEx do
 
       :ok = ClaudeEx.set_permission_mode(session, "acceptEdits")
   """
-  @spec set_permission_mode(session(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_permission_mode(session(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_permission_mode(session, mode) do
     BeamAgent.Runtime.set_permission_mode(session, mode)
   end

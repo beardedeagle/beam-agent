@@ -457,7 +457,7 @@ defmodule CopilotEx do
 
       {:ok, _} = CopilotEx.set_model(session, "gpt-4o")
   """
-  @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(pid(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_model(session, model) do
     BeamAgent.Runtime.set_model(session, model)
   end
@@ -921,7 +921,7 @@ defmodule CopilotEx do
   # ── Universal: Session Control (beam_agent_core) ──────────────────────
 
   @doc "Change the permission mode at runtime via universal control."
-  @spec set_permission_mode(pid(), binary()) :: {:ok, map()}
+  @spec set_permission_mode(pid(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_permission_mode(session, mode) do
     BeamAgent.Runtime.set_permission_mode(session, mode)
   end

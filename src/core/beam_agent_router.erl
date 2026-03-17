@@ -51,41 +51,34 @@
     server_health/1
 ]).
 
--doc "Start a unified session. `Opts.backend` is required.".
+-doc "Start a unified session after resolving explicit or policy-based backend routing.".
 -spec start_session(beam_agent_core:session_opts()) -> {ok, pid()} | {error, term()}.
 start_session(Opts) when is_map(Opts) ->
-    case maps:get(backend, Opts, undefined) of
-        undefined ->
-            {error, {missing_option, backend}};
-        BackendLike ->
-            case beam_agent_backend:normalize(BackendLike) of
-                {ok, Backend} ->
-                    Module = beam_agent_backend:adapter_module(Backend),
-                    SessionOpts = maps:remove(backend, Opts),
-                    case Module:start_session(SessionOpts) of
-                        {ok, Session} ->
-                            _ = beam_agent_backend:register_session(Session, Backend),
-                            ok = beam_agent_runtime_core:register_session(Session, SessionOpts),
-                            ok = register_callback_broker(Session, SessionOpts),
-                            {ok, Session};
-                        {error, _} = Error ->
-                            Error
-                    end;
+    case resolve_backend_and_opts(Opts) of
+        {ok, Backend, SessionOpts} ->
+            Module = beam_agent_backend:adapter_module(Backend),
+            case Module:start_session(SessionOpts) of
+                {ok, Session} ->
+                    _ = beam_agent_backend:register_session(Session, Backend),
+                    ok = beam_agent_runtime_core:register_session(Session, SessionOpts),
+                    ok = register_callback_broker(Session, SessionOpts),
+                    {ok, Session};
                 {error, _} = Error ->
                     Error
-            end
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
--doc "Return a child spec for a unified session. `Opts.backend` is required.".
+-doc "Return a child spec for a unified session after resolving backend routing.".
 -spec child_spec(beam_agent_core:session_opts()) -> supervisor:child_spec().
 child_spec(Opts) when is_map(Opts) ->
-    case maps:find(backend, Opts) of
-        {ok, BackendLike} ->
-            {ok, Backend} = beam_agent_backend:normalize(BackendLike),
+    case resolve_backend_and_opts(Opts) of
+        {ok, Backend, SessionOpts} ->
             Module = beam_agent_backend:adapter_module(Backend),
-            Module:child_spec(maps:remove(backend, Opts));
-        error ->
-            erlang:error({missing_option, backend})
+            Module:child_spec(SessionOpts);
+        {error, Reason} ->
+            erlang:error(Reason)
     end.
 
 -doc "Stop a live unified session.".
@@ -500,5 +493,20 @@ normalize_list_opts(Opts) ->
                     maps:put(adapter, Backend, maps:remove(backend, Opts));
                 {error, _} ->
                     maps:remove(backend, Opts)
+            end
+    end.
+
+-spec resolve_backend_and_opts(beam_agent_core:session_opts()) ->
+    {ok, beam_agent_backend:backend(), map()} | {error, term()}.
+resolve_backend_and_opts(Opts) when is_map(Opts) ->
+    case {maps:get(backend, Opts, undefined), maps:get(routing, Opts, undefined)} of
+        {undefined, undefined} ->
+            {error, {missing_option, backend}};
+        _ ->
+            case beam_agent_routing_core:select_backend(Opts, #{}) of
+                {ok, #{backend := Backend}} ->
+                    {ok, Backend, maps:without([backend, routing], Opts)};
+                {error, _} = Error ->
+                    Error
             end
     end.

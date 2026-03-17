@@ -31,6 +31,7 @@ ensure_tables_idempotent_test() ->
 clear_empties_all_tables_test() ->
     SId = <<"clear-session">>,
     beam_agent_control_core:ensure_tables(),
+    beam_agent_runs_core:ensure_tables(),
     beam_agent_control_core:set_config(SId, model, <<"claude">>),
     beam_agent_control_core:submit_feedback(SId, #{rating => good}),
     beam_agent_control_core:store_pending_request(SId, <<"r1">>, #{q => <<"hi">>}),
@@ -39,7 +40,8 @@ clear_empties_all_tables_test() ->
     {ok, Feedback} = beam_agent_control_core:get_feedback(SId),
     ?assertEqual([], Feedback),
     {ok, Pending} = beam_agent_control_core:list_pending_requests(SId),
-    ?assertEqual([], Pending).
+    ?assertEqual([], Pending),
+    beam_agent_runs_core:clear().
 
 %%====================================================================
 %% Dispatch: setModel
@@ -124,6 +126,7 @@ dispatch_set_max_thinking_tokens_invalid_string_test() ->
 %%====================================================================
 
 dispatch_stop_task_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"disp-stop-session">>,
     TaskId = <<"task-001">>,
     Pid = spawn(fun() -> ok end),
@@ -131,13 +134,15 @@ dispatch_stop_task_test() ->
     beam_agent_control_core:register_task(SId, TaskId, Pid),
     ok = beam_agent_control_core:dispatch(SId, <<"stopTask">>,
         #{<<"taskId">> => TaskId}),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 dispatch_stop_task_missing_param_test() ->
     SId = <<"disp-stop-miss-session">>,
     ?assertMatch({error, {missing_param, task_id}},
         beam_agent_control_core:dispatch(SId, <<"stopTask">>, #{})),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 %%====================================================================
 %% Dispatch: unknown method
@@ -258,6 +263,7 @@ get_max_thinking_tokens_not_set_test() ->
 %%====================================================================
 
 register_and_list_tasks_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"task-list-session">>,
     Pid = spawn(fun() -> timer:sleep(60000) end),
     ok = beam_agent_control_core:register_task(SId, <<"task-1">>, Pid),
@@ -268,40 +274,91 @@ register_and_list_tasks_test() ->
     ?assertEqual(SId, maps:get(session_id, Task)),
     ?assertEqual(Pid, maps:get(pid, Task)),
     ?assertEqual(running, maps:get(status, Task)),
+    RunId = maps:get(run_id, Task),
+    {ok, Run} = beam_agent_runs_core:get_run(RunId),
+    ?assertEqual(task, maps:get(kind, Run)),
+    ?assertEqual(running, maps:get(status, Run)),
+    ?assertEqual(#{task_id => <<"task-1">>, source => control_task},
+        maps:get(metadata, Run)),
     exit(Pid, kill),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 list_tasks_empty_test() ->
     SId = <<"task-empty-session">>,
     beam_agent_control_core:ensure_tables(),
     {ok, Tasks} = beam_agent_control_core:list_tasks(SId),
     ?assertEqual([], Tasks),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 unregister_task_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"task-unreg-session">>,
     Pid = spawn(fun() -> timer:sleep(60000) end),
     beam_agent_control_core:register_task(SId, <<"task-x">>, Pid),
+    {ok, [Task]} = beam_agent_control_core:list_tasks(SId),
+    RunId = maps:get(run_id, Task),
     ok = beam_agent_control_core:unregister_task(SId, <<"task-x">>),
     {ok, Tasks} = beam_agent_control_core:list_tasks(SId),
     ?assertEqual([], Tasks),
+    {ok, Run} = beam_agent_runs_core:get_run(RunId),
+    ?assertEqual(completed, maps:get(status, Run)),
+    ?assertEqual(#{source => control_task,
+                   task_id => <<"task-x">>,
+                   terminal_status => completed},
+        maps:get(output, Run)),
     exit(Pid, kill),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
+
+unregister_task_with_active_steps_cancels_run_test() ->
+    beam_agent_runs_core:clear(),
+    SId = <<"task-unreg-active-steps-session">>,
+    Pid = spawn(fun() -> timer:sleep(60000) end),
+    beam_agent_control_core:register_task(SId, <<"task-steps">>, Pid),
+    {ok, [Task]} = beam_agent_control_core:list_tasks(SId),
+    RunId = maps:get(run_id, Task),
+    {ok, Step} = beam_agent_runs_core:start_step(RunId, #{kind => review}),
+    ok = beam_agent_control_core:unregister_task(SId, <<"task-steps">>),
+    {ok, Run} = beam_agent_runs_core:get_run(RunId),
+    ?assertEqual(cancelled, maps:get(status, Run)),
+    ?assertEqual(#{reason => task_unregistered_with_active_steps,
+                   source => control_task,
+                   task_id => <<"task-steps">>},
+        maps:get(cancel_reason, Run)),
+    {ok, CancelledStep} = beam_agent_runs_core:get_step(RunId, maps:get(step_id, Step)),
+    ?assertEqual(cancelled, maps:get(status, CancelledStep)),
+    exit(Pid, kill),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 stop_task_running_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"task-stop-session">>,
     Pid = spawn(fun() -> ok end),
     timer:sleep(10),
     beam_agent_control_core:register_task(SId, <<"task-stop">>, Pid),
+    {ok, [Task0]} = beam_agent_control_core:list_tasks(SId),
+    RunId = maps:get(run_id, Task0),
     ok = beam_agent_control_core:stop_task(SId, <<"task-stop">>),
     %% Task should be marked stopped, still in list
     {ok, Tasks} = beam_agent_control_core:list_tasks(SId),
     ?assertEqual(1, length(Tasks)),
     [Task] = Tasks,
     ?assertEqual(stopped, maps:get(status, Task)),
-    beam_agent_control_core:clear().
+    ?assert(is_integer(maps:get(stopped_at, Task))),
+    {ok, Run} = beam_agent_runs_core:get_run(RunId),
+    ?assertEqual(cancelled, maps:get(status, Run)),
+    ?assertEqual(#{reason => task_stopped,
+                   source => control_task,
+                   task_id => <<"task-stop">>},
+        maps:get(cancel_reason, Run)),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 stop_task_already_stopped_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"task-already-stopped-session">>,
     Pid = spawn(fun() -> ok end),
     timer:sleep(10),
@@ -309,26 +366,35 @@ stop_task_already_stopped_test() ->
     ok = beam_agent_control_core:stop_task(SId, <<"task-s2">>),
     %% Second stop on an already-stopped task returns ok
     ok = beam_agent_control_core:stop_task(SId, <<"task-s2">>),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 stop_task_not_found_test() ->
     SId = <<"task-notfound-session">>,
     beam_agent_control_core:ensure_tables(),
     ?assertEqual({error, not_found},
         beam_agent_control_core:stop_task(SId, <<"no-such-task">>)),
-    beam_agent_control_core:clear().
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 stop_task_dead_process_test() ->
+    beam_agent_runs_core:clear(),
     SId = <<"task-dead-session">>,
     Pid = spawn(fun() -> ok end),
     %% Let process finish
     timer:sleep(10),
     beam_agent_control_core:register_task(SId, <<"task-dead">>, Pid),
+    {ok, [Task0]} = beam_agent_control_core:list_tasks(SId),
+    RunId = maps:get(run_id, Task0),
     %% Should handle dead process gracefully
     ok = beam_agent_control_core:stop_task(SId, <<"task-dead">>),
-    beam_agent_control_core:clear().
+    {ok, Run} = beam_agent_runs_core:get_run(RunId),
+    ?assertEqual(cancelled, maps:get(status, Run)),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
 
 list_tasks_isolates_sessions_test() ->
+    beam_agent_runs_core:clear(),
     SId1 = <<"task-iso-1">>,
     SId2 = <<"task-iso-2">>,
     Pid1 = spawn(fun() -> ok end),
@@ -343,7 +409,65 @@ list_tasks_isolates_sessions_test() ->
     [T2] = Tasks2,
     ?assertEqual(<<"t1">>, maps:get(task_id, T1)),
     ?assertEqual(<<"t2">>, maps:get(task_id, T2)),
-    beam_agent_control_core:clear().
+    ?assert(is_binary(maps:get(run_id, T1))),
+    ?assert(is_binary(maps:get(run_id, T2))),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
+
+re_register_task_cancels_previous_run_test() ->
+    beam_agent_runs_core:clear(),
+    SId = <<"task-reregister-session">>,
+    Pid1 = spawn(fun() -> timer:sleep(60000) end),
+    Pid2 = spawn(fun() -> timer:sleep(60000) end),
+    ok = beam_agent_control_core:register_task(SId, <<"task-r">>, Pid1),
+    {ok, [FirstTask]} = beam_agent_control_core:list_tasks(SId),
+    FirstRunId = maps:get(run_id, FirstTask),
+    ok = beam_agent_control_core:register_task(SId, <<"task-r">>, Pid2),
+    {ok, [SecondTask]} = beam_agent_control_core:list_tasks(SId),
+    SecondRunId = maps:get(run_id, SecondTask),
+    ?assertNotEqual(FirstRunId, SecondRunId),
+    {ok, FirstRun} = beam_agent_runs_core:get_run(FirstRunId),
+    ?assertEqual(cancelled, maps:get(status, FirstRun)),
+    ?assertEqual(#{reason => task_re_registered,
+                   source => control_task,
+                   task_id => <<"task-r">>},
+        maps:get(cancel_reason, FirstRun)),
+    exit(Pid1, kill),
+    exit(Pid2, kill),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear().
+
+journal_records_control_domain_events_test() ->
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear(),
+    beam_agent_journal_core:clear(),
+    SId = <<"control-journal-session">>,
+    Pid = spawn(fun() -> timer:sleep(60000) end),
+    ok = beam_agent_control_core:register_task(SId, <<"task-journal">>, Pid),
+    {ok, _Result} = beam_agent_control_core:dispatch(SId, <<"setModel">>,
+        #{<<"model">> => <<"claude-opus">>}),
+    ok = beam_agent_control_core:store_pending_request(SId, <<"req-journal">>, #{
+        kind => user_input,
+        prompt => <<"Need input">>
+    }),
+    ok = beam_agent_control_core:resolve_pending_request(SId, <<"req-journal">>, #{
+        answer => <<"done">>
+    }),
+    ok = beam_agent_control_core:submit_feedback(SId, #{rating => great}),
+    {ok, Entries} = beam_agent_journal_core:list(#{session_id => SId, tag => control}),
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries,
+        maps:get(event_type, Entry) =/= <<"audit">>],
+    ?assertEqual([
+        <<"task_registered">>,
+        <<"model_updated">>,
+        <<"pending_request_stored">>,
+        <<"pending_request_resolved">>,
+        <<"feedback_submitted">>
+    ], EventTypes),
+    exit(Pid, kill),
+    beam_agent_control_core:clear(),
+    beam_agent_runs_core:clear(),
+    beam_agent_journal_core:clear().
 
 %%====================================================================
 %% Feedback

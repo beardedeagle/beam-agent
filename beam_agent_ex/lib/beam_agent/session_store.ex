@@ -147,6 +147,16 @@ defmodule BeamAgent.SessionStore do
         }
 
   @typedoc """
+  Active share state returned by `share_session/1` and `share_session/2`.
+  """
+  @type active_session_share() :: %{
+          required(:share_id) => binary(),
+          required(:session_id) => binary(),
+          required(:created_at) => integer(),
+          required(:status) => :active
+        }
+
+  @typedoc """
   Summary of a session's conversation history.
 
   Contains the session ID, generated content, generation timestamp, message count
@@ -252,8 +262,8 @@ defmodule BeamAgent.SessionStore do
   fork.session_id  # => "sess_fork_001"
   ```
   """
-  @spec fork_session(pid(), map()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate fork_session(session_or_id, opts), to: :beam_agent_session_store
+  @spec fork_session(binary(), map()) :: {:ok, session_meta()} | {:error, :not_found}
+  defdelegate fork_session(session_id, opts), to: :beam_agent_session_store
 
   @doc """
   Revert the visible conversation to a prior message boundary.
@@ -269,8 +279,9 @@ defmodule BeamAgent.SessionStore do
   Returns `{:ok, updated_meta}`, `{:error, :not_found}`, or
   `{:error, :invalid_selector}`.
   """
-  @spec revert_session(pid(), map()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate revert_session(session_or_id, selector), to: :beam_agent_session_store
+  @spec revert_session(binary(), map()) ::
+          {:ok, session_meta()} | {:error, :invalid_selector | :not_found}
+  defdelegate revert_session(session_id, selector), to: :beam_agent_session_store
 
   @doc """
   Clear revert state and restore the full visible history.
@@ -280,8 +291,8 @@ defmodule BeamAgent.SessionStore do
 
   Returns `{:ok, updated_meta}` or `{:error, :not_found}`.
   """
-  @spec unrevert_session(pid()) :: {:ok, session_meta()} | {:error, term()}
-  defdelegate unrevert_session(session_or_id), to: :beam_agent_session_store
+  @spec unrevert_session(binary()) :: {:ok, session_meta()} | {:error, :not_found}
+  defdelegate unrevert_session(session_id), to: :beam_agent_session_store
 
   @doc """
   Generate a share token for a session.
@@ -298,8 +309,8 @@ defmodule BeamAgent.SessionStore do
   share.share_id
   ```
   """
-  @spec share_session(pid()) :: {:ok, session_share()} | {:error, term()}
-  defdelegate share_session(session_or_id), to: :beam_agent_session_store
+  @spec share_session(binary()) :: {:ok, active_session_share()} | {:error, :not_found}
+  defdelegate share_session(session_id), to: :beam_agent_session_store
 
   @doc """
   Generate a share token for a session with options.
@@ -309,8 +320,8 @@ defmodule BeamAgent.SessionStore do
 
   Returns `{:ok, share}` with the active share map, or `{:error, :not_found}`.
   """
-  @spec share_session(pid(), map()) :: {:ok, session_share()} | {:error, term()}
-  defdelegate share_session(session_or_id, opts), to: :beam_agent_session_store
+  @spec share_session(binary(), map()) :: {:ok, active_session_share()} | {:error, :not_found}
+  defdelegate share_session(session_id, opts), to: :beam_agent_session_store
 
   @doc """
   Revoke the current share for a session.
@@ -319,8 +330,8 @@ defmodule BeamAgent.SessionStore do
 
   Returns `:ok` on success or `{:error, :not_found}`.
   """
-  @spec unshare_session(pid()) :: :ok | {:error, term()}
-  defdelegate unshare_session(session_or_id), to: :beam_agent_session_store
+  @spec unshare_session(binary()) :: :ok | {:error, :not_found}
+  defdelegate unshare_session(session_id), to: :beam_agent_session_store
 
   @doc """
   Generate and store a summary for a session.
@@ -331,8 +342,8 @@ defmodule BeamAgent.SessionStore do
 
   Returns `{:ok, summary}` or `{:error, :not_found}`.
   """
-  @spec summarize_session(pid()) :: {:ok, session_summary()} | {:error, term()}
-  defdelegate summarize_session(session_or_id), to: :beam_agent_session_store
+  @spec summarize_session(binary()) :: {:ok, session_summary()} | {:error, :not_found}
+  defdelegate summarize_session(session_id), to: :beam_agent_session_store
 
   @doc """
   Generate and store a summary for a session with options.
@@ -343,8 +354,8 @@ defmodule BeamAgent.SessionStore do
 
   Returns `{:ok, summary}` or `{:error, :not_found}`.
   """
-  @spec summarize_session(pid(), map()) :: {:ok, session_summary()} | {:error, term()}
-  defdelegate summarize_session(session_or_id, opts), to: :beam_agent_session_store
+  @spec summarize_session(binary(), map()) :: {:ok, session_summary()} | {:error, :not_found}
+  defdelegate summarize_session(session_id, opts), to: :beam_agent_session_store
 
   @doc """
   Get all messages for a session in recording order.

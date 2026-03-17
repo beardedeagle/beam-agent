@@ -4,7 +4,8 @@ defmodule BeamAgent do
   agentic coder backends: Claude, Codex, Gemini, OpenCode, and Copilot.
 
   `BeamAgent` is the primary entry point for session lifecycle, queries,
-  streaming, threads, and session history. Domain-specific features --
+  streaming, threads, session history, durable runs, long-term memory, journal-backed
+  domain events, and policy-driven backend routing. Domain-specific features --
   skills, apps, files, MCP, accounts, search, configuration, and more --
   live in focused submodules (see Submodules below) and work identically
   across all five backends thanks to native-first routing with universal
@@ -14,7 +15,11 @@ defmodule BeamAgent do
 
   Start a session, send a query, and process the response:
 
-      {:ok, session} = BeamAgent.start_session(%{backend: :claude})
+      {:ok, session} =
+        BeamAgent.start_session(%{
+          backend: :auto,
+          routing: %{policy: :preferred_then_fallback, preferred_backends: [:claude, :codex]}
+        })
       {:ok, messages} = BeamAgent.query(session, "What is the BEAM?")
 
       for %{content: content} <- messages do
@@ -119,6 +124,8 @@ defmodule BeamAgent do
   `BeamAgent` retains session lifecycle, streaming, and convenience wrappers.
 
   - `BeamAgent.Account` -- authentication, login/logout, rate limits
+  - `BeamAgent.Artifacts` -- typed artifact and context storage
+  - `BeamAgent.Audit` -- durable audit records layered on the journal
   - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Capabilities` -- backend capability matrix and checks
   - `BeamAgent.Catalog` -- tools, skills, plugins, agents, models, commands
@@ -126,12 +133,20 @@ defmodule BeamAgent do
   - `BeamAgent.Command` -- shell commands, session messages, async prompts
   - `BeamAgent.Config` -- session configuration read/write
   - `BeamAgent.Control` -- turn steering, realtime, reviews, server management
+  - `BeamAgent.Context` -- context pressure, summaries, and policy-driven compaction
   - `BeamAgent.File` -- file search, read, list, and status
   - `BeamAgent.Hooks` -- SDK lifecycle hook definitions and dispatch
+  - `BeamAgent.Journal` -- durable canonical domain-event journal
+  - `BeamAgent.Memory` -- long-term memory and lexical recall
   - `BeamAgent.MCP` -- MCP server/tool registration and management
+  - `BeamAgent.Orchestrator` -- parent-child orchestration and delegation lineage
+  - `BeamAgent.Policy` -- reusable allow/deny policy profiles
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
+  - `BeamAgent.Routing` -- backend routing and policy-driven selection
+  - `BeamAgent.Routines` -- durable routines and caller-driven scheduled execution
   - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
+  - `BeamAgent.Runs` -- canonical run and step lifecycle
   - `BeamAgent.Search` -- fuzzy file search sessions
   - `BeamAgent.SessionStore` -- session history storage and retrieval
   - `BeamAgent.Skills` -- skill listing, remote export, configuration
@@ -142,8 +157,8 @@ defmodule BeamAgent do
   - **Sessions**: A session is a connection to one AI backend. You start one,
     send queries, and stop it when done. Think of it like a phone call to an AI.
   - **The five backends**: BeamAgent wraps Claude, Codex, Gemini, OpenCode, and
-    Copilot. You pick one when starting a session, but the API is the same for
-    all of them.
+    Copilot. You can pick one directly or ask BeamAgent routing to select one
+    with `backend: :auto`, and the API is the same for all of them.
   - **Queries**: `query/2` sends a prompt and waits for the complete response.
     `event_subscribe/1` + `receive_event/2` gives you streaming responses piece
     by piece.
@@ -189,14 +204,14 @@ defmodule BeamAgent do
   The normalized message type tag.
 
   Values: `:text`, `:assistant`, `:tool_use`, `:tool_result`, `:system`,
-  `:result`, `:error`, `:user`, `:control`, `:control_request`,
+  `:result`, `:error`, `:user`, `:control_request`,
   `:control_response`, `:stream_event`, `:rate_limit_event`,
   `:tool_progress`, `:tool_use_summary`, `:thinking`, `:auth_status`,
   `:prompt_suggestion`, `:raw`.
 
   The `:result` type signals query completion. The `:error` type signals
   a backend error. The `:raw` type preserves unrecognized wire messages
-  for forward compatibility.
+  verbatim so normalization stays lossless.
   """
   @type message_type :: :beam_agent.message_type()
 
@@ -294,6 +309,16 @@ defmodule BeamAgent do
           :share_id => binary(),
           :status => :active | :revoked,
           :revoked_at => integer()
+        }
+
+  @typedoc """
+  Active share metadata returned by `share_session/1` and `share_session/2`.
+  """
+  @type active_share_info_map :: %{
+          :created_at => integer(),
+          :session_id => binary(),
+          :share_id => binary(),
+          :status => :active
         }
 
   @typedoc """
@@ -1044,7 +1069,7 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of the source session.
+  - `session_id` -- binary id of the source session.
   - `opts` -- fork options map. Optional keys:
     - `:session_id` -- explicit id for the fork (auto-generated if omitted)
     - `:include_hidden` -- include reverted messages (default `true`)
@@ -1054,9 +1079,9 @@ defmodule BeamAgent do
 
   - `{:ok, fork_meta}` or `{:error, :not_found}`.
   """
-  @spec fork_session(pid(), map()) :: {:ok, session_info_map()} | {:error, term()}
-  def fork_session(session_or_id, opts),
-    do: BeamAgent.SessionStore.fork_session(session_or_id, opts)
+  @spec fork_session(binary(), map()) :: {:ok, session_info_map()} | {:error, :not_found}
+  def fork_session(session_id, opts),
+    do: BeamAgent.SessionStore.fork_session(session_id, opts)
 
   @doc """
   Revert a session's visible conversation state to a prior boundary.
@@ -1066,7 +1091,7 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
   - `selector` -- boundary selector map. Accepts one of:
     - `%{visible_message_count: n}` -- set boundary to N messages
     - `%{message_id: id}` -- set boundary to the message with this id
@@ -1076,9 +1101,10 @@ defmodule BeamAgent do
 
   - `{:ok, updated_meta}` or `{:error, :not_found | :invalid_selector}`.
   """
-  @spec revert_session(pid(), map()) :: {:ok, session_info_map()} | {:error, term()}
-  def revert_session(session_or_id, selector),
-    do: BeamAgent.SessionStore.revert_session(session_or_id, selector)
+  @spec revert_session(binary(), map()) ::
+          {:ok, session_info_map()} | {:error, :invalid_selector | :not_found}
+  def revert_session(session_id, selector),
+    do: BeamAgent.SessionStore.revert_session(session_id, selector)
 
   @doc """
   Clear any revert state and restore the full visible message history.
@@ -1087,14 +1113,14 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
 
   ## Returns
 
   - `{:ok, updated_meta}` or `{:error, :not_found}`.
   """
-  @spec unrevert_session(pid()) :: {:ok, session_info_map()} | {:error, term()}
-  def unrevert_session(session_or_id), do: BeamAgent.SessionStore.unrevert_session(session_or_id)
+  @spec unrevert_session(binary()) :: {:ok, session_info_map()} | {:error, :not_found}
+  def unrevert_session(session_id), do: BeamAgent.SessionStore.unrevert_session(session_id)
 
   @doc """
   Generate a shareable link/state for a session.
@@ -1103,7 +1129,7 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
 
   ## Returns
 
@@ -1111,15 +1137,15 @@ defmodule BeamAgent do
     `:status` fields.
   - `{:error, :not_found}`.
   """
-  @spec share_session(pid()) :: {:ok, share_info_map()} | {:error, term()}
-  def share_session(session_or_id), do: BeamAgent.SessionStore.share_session(session_or_id)
+  @spec share_session(binary()) :: {:ok, active_share_info_map()} | {:error, :not_found}
+  def share_session(session_id), do: BeamAgent.SessionStore.share_session(session_id)
 
   @doc """
   Generate a shareable link/state for a session with options.
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
   - `opts` -- options map. Optional keys:
     - `:share_id` -- explicit share identifier (auto-generated if omitted)
 
@@ -1127,9 +1153,9 @@ defmodule BeamAgent do
 
   - `{:ok, share_info}` or `{:error, :not_found}`.
   """
-  @spec share_session(pid(), map()) :: {:ok, share_info_map()} | {:error, term()}
-  def share_session(session_or_id, opts),
-    do: BeamAgent.SessionStore.share_session(session_or_id, opts)
+  @spec share_session(binary(), map()) :: {:ok, active_share_info_map()} | {:error, :not_found}
+  def share_session(session_id, opts),
+    do: BeamAgent.SessionStore.share_session(session_id, opts)
 
   @doc """
   Revoke the current share state for a session.
@@ -1139,14 +1165,14 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
 
   ## Returns
 
   - `:ok` or `{:error, :not_found}`.
   """
-  @spec unshare_session(pid()) :: :ok | {:error, term()}
-  def unshare_session(session_or_id), do: BeamAgent.SessionStore.unshare_session(session_or_id)
+  @spec unshare_session(binary()) :: :ok | {:error, :not_found}
+  def unshare_session(session_id), do: BeamAgent.SessionStore.unshare_session(session_id)
 
   @doc """
   Generate and store a summary for a session's conversation history.
@@ -1156,7 +1182,7 @@ defmodule BeamAgent do
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
 
   ## Returns
 
@@ -1164,16 +1190,16 @@ defmodule BeamAgent do
     and `:generated_by` fields.
   - `{:error, :not_found}`.
   """
-  @spec summarize_session(pid()) :: {:ok, summary_info_map()} | {:error, term()}
-  def summarize_session(session_or_id),
-    do: BeamAgent.SessionStore.summarize_session(session_or_id)
+  @spec summarize_session(binary()) :: {:ok, summary_info_map()} | {:error, :not_found}
+  def summarize_session(session_id),
+    do: BeamAgent.SessionStore.summarize_session(session_id)
 
   @doc """
   Generate and store a session summary with options.
 
   ## Parameters
 
-  - `session_or_id` -- pid of a running session.
+  - `session_id` -- binary id of the source session.
   - `opts` -- options map. Optional keys:
     - `:content` / `:summary` -- explicit summary text (skips auto-generation)
     - `:generated_by` -- attribution string (default `"beam_agent_core"`)
@@ -1182,9 +1208,10 @@ defmodule BeamAgent do
 
   - `{:ok, summary_map}` or `{:error, :not_found}`.
   """
-  @spec summarize_session(pid(), map()) :: {:ok, summary_info_map()} | {:error, term()}
-  def summarize_session(session_or_id, opts),
-    do: BeamAgent.SessionStore.summarize_session(session_or_id, opts)
+  @spec summarize_session(binary(), map()) ::
+          {:ok, summary_info_map()} | {:error, :not_found}
+  def summarize_session(session_id, opts),
+    do: BeamAgent.SessionStore.summarize_session(session_id, opts)
 
   # ---------------------------------------------------------------------------
   # Threads

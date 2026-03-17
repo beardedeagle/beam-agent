@@ -146,7 +146,6 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
                       | result
                       | error
                       | user
-                      | control
                       | control_request
                       | control_response
                       | stream_event
@@ -231,7 +230,6 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 %%                     permission_denials, fast_mode_state
 %%   error:            content
 %%   user:             content, parent_tool_use_id, is_replay
-%%   control:          raw (legacy)
 %%   control_request:  request_id, request
 %%   control_response: request_id, response
 %%   stream_event:     subtype, content, parent_tool_use_id
@@ -244,7 +242,7 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 %%                     utilization, overage_status, overage_resets_at,
 %%                     overage_disabled_reason, is_using_overage,
 %%                     surpassed_threshold, raw
-%%   raw:              raw (unrecognized, preserved for forward compat)
+%%   raw:              raw (unrecognized wire message, preserved verbatim)
 -type message() :: #{
     type := message_type(),
     content => binary(),
@@ -341,7 +339,8 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 
 %% Options for establishing an agent session.
 -type session_opts() :: #{
-    backend => backend(),
+    backend => backend() | auto,
+    routing => beam_agent_routing_core:route_request(),
     cli_path => file:filename_all(),
     work_dir => file:filename_all(),
     env => [{string(), string()}],
@@ -874,7 +873,8 @@ make_request_id() ->
 
 -doc """
 Parse a binary stop reason into a typed atom.
-Unknown values map to `unknown_stop` for forward compatibility.
+Unknown values map to `unknown_stop` so callers can pattern match on a
+closed atom set without losing the original wire value.
 """.
 -spec parse_stop_reason(binary() | term()) -> stop_reason().
 parse_stop_reason(<<"end_turn">>)      -> end_turn;
@@ -998,7 +998,6 @@ parse_type(<<"system">>)           -> system;
 parse_type(<<"result">>)           -> result;
 parse_type(<<"error">>)            -> error;
 parse_type(<<"user">>)             -> user;
-parse_type(<<"control">>)          -> control;
 parse_type(<<"control_request">>)  -> control_request;
 parse_type(<<"control_response">>) -> control_response;
 parse_type(<<"stream_event">>)     -> stream_event;
@@ -1019,9 +1018,9 @@ add_fields(text, Raw, Base) ->
     Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw};
 
 add_fields(assistant, Raw, Base) ->
-    %% TS SDK: SDKAssistantMessage wraps content in a `message` object
-    %% (BetaMessage). Handle both formats: top-level content array
-    %% and nested message.content for protocol compatibility.
+    %% Accept both observed assistant wire shapes: a top-level content array
+    %% and the nested `message.content` structure emitted by the TS SDK's
+    %% BetaMessage wrapper.
     %%
     %% SAFETY: JSON null decodes to atom `null` in OTP 27. Guard against
     %% non-map values to prevent badmap crashes on maps:get/3.
@@ -1082,11 +1081,10 @@ add_fields(system, Raw, Base) ->
     end;
 
 add_fields(result, Raw, Base) ->
-    %% CRITICAL FIX: TS SDK SDKResultSuccess uses "result" field (not "content")
-    %% for the answer text. SDKResultError uses "errors" (string[]).
-    %% We check "result" first, fall back to "content" for backward compat.
-    Content = maps:get(<<"result">>, Raw,
-                  maps:get(<<"content">>, Raw, <<>>)),
+    %% The normalized result contract reads from the dedicated `result` field.
+    %% Raw payloads remain available under `raw`, but BeamAgent no longer
+    %% synthesizes normalized result text from unrelated keys.
+    Content = maps:get(<<"result">>, Raw, <<>>),
     M0 = Base#{content => Content, raw => Raw},
     enrich_result(M0, Raw);
 

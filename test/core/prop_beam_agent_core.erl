@@ -126,7 +126,7 @@ gen_raw_message() ->
     ?LET(Type, oneof([
         <<"text">>, <<"assistant">>, <<"tool_use">>, <<"tool_result">>,
         <<"system">>, <<"result">>, <<"error">>, <<"user">>,
-        <<"control">>, <<"control_request">>, <<"control_response">>,
+        <<"control_request">>, <<"control_response">>,
         <<"stream_event">>, <<"thinking">>, <<"rate_limit_event">>,
         <<"tool_progress">>, <<"tool_use_summary">>,
         <<"prompt_suggestion">>, <<"auth_status">>,

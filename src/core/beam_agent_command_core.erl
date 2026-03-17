@@ -178,20 +178,47 @@ Options:
 run(Command, Opts) when is_map(Opts) ->
     CmdStruct = beam_agent_command_parser:parse(Command),
     EvalOpts = build_eval_opts(Opts),
-    case security_check(CmdStruct, EvalOpts) of
+    case policy_check(Command, CmdStruct, Opts) of
         allow ->
-            Result = do_run(Command, Opts),
-            record_execution(CmdStruct, EvalOpts, Result),
-            Result;
+            case security_check(CmdStruct, EvalOpts) of
+                allow ->
+                    Result = do_run(Command, Opts),
+                    ok = audit_command_result(Command, Opts, Result, allow, undefined),
+                    record_execution(CmdStruct, EvalOpts, Result),
+                    Result;
+                {deny, Reason} ->
+                    ok = audit_command_result(Command, Opts,
+                        {error, {security, {deny, Reason}}}, deny, Reason),
+                    {error, {security, {deny, Reason}}};
+                {throttle, RetryMs} ->
+                    ok = audit_command_result(Command, Opts,
+                        {error, {security, {throttle, RetryMs}}}, deny,
+                        <<"throttled">>),
+                    {error, {security, {throttle, RetryMs}}}
+            end;
         {deny, Reason} ->
-            {error, {security, {deny, Reason}}};
-        {throttle, RetryMs} ->
-            {error, {security, {throttle, RetryMs}}}
+            ok = audit_command_result(Command, Opts,
+                {error, {security, {deny, Reason}}}, deny, Reason),
+            {error, {security, {deny, Reason}}}
     end.
 
 %%--------------------------------------------------------------------
 %% Internal: Security Integration
 %%--------------------------------------------------------------------
+
+-spec policy_check(binary() | string() | [binary() | string()],
+                   beam_agent_command_parser:command_struct(),
+                   command_opts()) ->
+    allow | {deny, binary()}.
+policy_check(Command, CmdStruct, Opts) ->
+    ProfileId = command_policy_profile_id(Opts),
+    Context = #{
+        command => unicode:characters_to_binary(display_command(Command)),
+        parsed => CmdStruct,
+        cwd => maps:get(cwd, Opts, undefined),
+        metadata => maps:get(metadata, Opts, #{})
+    },
+    beam_agent_policy_core:evaluate(ProfileId, command, Context).
 
 %% Check the security guard if it is running. When not running,
 %% fall back to the default stateless deny-policy baseline.
@@ -225,6 +252,67 @@ build_eval_opts(Opts) ->
         opts => Opts,
         metadata => maps:get(metadata, Opts, #{})
     }.
+
+-spec audit_command_result(binary() | string() | [binary() | string()],
+                           command_opts(),
+                           {ok, command_result()} | {error, command_error()},
+                           allow | deny,
+                           binary() | undefined) -> ok.
+audit_command_result(Command, Opts, Result, Decision, Reason) ->
+    Scope = audit_scope_from_opts(Opts),
+    Details0 = #{
+        decision => Decision,
+        command => unicode:characters_to_binary(display_command(Command))
+    },
+    Details1 = case Reason of
+        undefined -> Details0;
+        _ -> Details0#{reason => Reason}
+    end,
+    Details = case Result of
+        {ok, #{exit_code := ExitCode}} ->
+            Details1#{outcome => success, exit_code => ExitCode};
+        {error, Error} ->
+            Details1#{outcome => error, error => Error}
+    end,
+    case beam_agent_audit_core:record(command, run, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec command_policy_profile_id(command_opts()) -> binary() | undefined.
+command_policy_profile_id(Opts) ->
+    Raw = case maps:get(policy_profile_id, Opts, undefined) of
+        undefined ->
+            maps:get(policy_profile_id, maps:get(metadata, Opts, #{}), undefined);
+        ProfileId ->
+            ProfileId
+    end,
+    case Raw of
+        ProfileId0 when is_binary(ProfileId0), byte_size(ProfileId0) > 0 ->
+            ProfileId0;
+        _ ->
+            undefined
+    end.
+
+-spec audit_scope_from_opts(command_opts()) -> map().
+audit_scope_from_opts(Opts) ->
+    Metadata = maps:get(metadata, Opts, #{}),
+    Scope0 = case maps:get(session_id, Metadata, undefined) of
+        undefined -> #{};
+        SessionId -> #{session_id => SessionId}
+    end,
+    Scope1 = case maps:get(thread_id, Metadata, undefined) of
+        undefined -> Scope0;
+        ThreadId -> Scope0#{thread_id => ThreadId}
+    end,
+    Scope2 = case maps:get(run_id, Metadata, undefined) of
+        undefined -> Scope1;
+        RunId -> Scope1#{run_id => RunId}
+    end,
+    case command_policy_profile_id(Opts) of
+        undefined -> Scope2;
+        ProfileId -> Scope2#{profile_id => ProfileId}
+    end.
 
 %%--------------------------------------------------------------------
 %% Internal: Command Execution

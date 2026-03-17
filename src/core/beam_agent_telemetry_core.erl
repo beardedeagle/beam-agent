@@ -8,6 +8,7 @@
     span_exception/3,
     span_exception/4,
     state_change/3,
+    state_change/4,
     buffer_overflow/2
 ]).
 
@@ -71,6 +72,19 @@ state_change(Agent, FromState, ToState) ->
         [beam_agent, session, state_change],
         #{system_time => erlang:system_time()},
         #{agent => Agent, from_state => FromState, to_state => ToState}
+    ).
+
+-doc "Emit a state change event for a non-session BeamAgent domain.".
+-spec state_change(atom(), atom(), atom(), map()) -> ok.
+state_change(Domain, FromState, ToState, Metadata) when is_map(Metadata) ->
+    maybe_execute(
+        [beam_agent, Domain, state_change],
+        #{system_time => erlang:system_time()},
+        Metadata#{
+            agent => Domain,
+            from_state => FromState,
+            to_state => ToState
+        }
     ).
 
 -doc "Emit a buffer overflow warning.".

@@ -4,18 +4,28 @@ defmodule BeamAgentTest do
   @domain_modules [
     BeamAgent,
     BeamAgent.Capabilities,
+    BeamAgent.Context,
     BeamAgent.Runtime,
     BeamAgent.Catalog,
     BeamAgent.Control,
     BeamAgent.Command,
+    BeamAgent.Audit,
     BeamAgent.MCP,
     BeamAgent.Skills,
     BeamAgent.Apps,
     BeamAgent.Config,
     BeamAgent.File,
+    BeamAgent.Journal,
+    BeamAgent.Memory,
+    BeamAgent.Policy,
+    BeamAgent.Orchestrator,
     BeamAgent.Provider,
+    BeamAgent.Routines,
+    BeamAgent.Routing,
     BeamAgent.Account,
+    BeamAgent.Artifacts,
     BeamAgent.Search,
+    BeamAgent.Runs,
     BeamAgent.Checkpoint,
     BeamAgent.SessionStore,
     BeamAgent.Threads
@@ -49,6 +59,67 @@ defmodule BeamAgentTest do
     assert {:ok, "openai"} = BeamAgent.Runtime.current_provider(session)
     assert :ok = BeamAgent.Runtime.clear_provider(session)
     assert {:error, :not_set} = BeamAgent.Runtime.current_provider(session)
+  end
+
+  test "context wrapper exports budget estimation" do
+    assert function_exported?(BeamAgent.Context, :context_status, 1)
+    assert function_exported?(BeamAgent.Context, :budget_estimate, 1)
+    assert function_exported?(BeamAgent.Context, :compact_now, 2)
+    assert function_exported?(BeamAgent.Context, :maybe_compact, 2)
+  end
+
+  test "audit wrapper exports canonical journal-backed audit accessors" do
+    assert function_exported?(BeamAgent.Audit, :list_events, 0)
+    assert function_exported?(BeamAgent.Audit, :list_events, 1)
+    assert function_exported?(BeamAgent.Audit, :get_event, 1)
+  end
+
+  test "policy wrapper exports canonical profile evaluation" do
+    assert function_exported?(BeamAgent.Policy, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Policy, :clear, 0)
+    assert function_exported?(BeamAgent.Policy, :put_profile, 2)
+    assert function_exported?(BeamAgent.Policy, :get_profile, 1)
+    assert function_exported?(BeamAgent.Policy, :list_profiles, 0)
+    assert function_exported?(BeamAgent.Policy, :evaluate, 3)
+  end
+
+  test "routines wrapper exports durable scheduled execution" do
+    assert function_exported?(BeamAgent.Routines, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Routines, :clear, 0)
+    assert function_exported?(BeamAgent.Routines, :create, 1)
+    assert function_exported?(BeamAgent.Routines, :update, 2)
+    assert function_exported?(BeamAgent.Routines, :cancel, 1)
+    assert function_exported?(BeamAgent.Routines, :get, 1)
+    assert function_exported?(BeamAgent.Routines, :list, 0)
+    assert function_exported?(BeamAgent.Routines, :list, 1)
+    assert function_exported?(BeamAgent.Routines, :due, 0)
+    assert function_exported?(BeamAgent.Routines, :due, 1)
+    assert function_exported?(BeamAgent.Routines, :next_due_at, 0)
+    assert function_exported?(BeamAgent.Routines, :run_now, 1)
+    assert function_exported?(BeamAgent.Routines, :run_due, 0)
+    assert function_exported?(BeamAgent.Routines, :run_due, 1)
+  end
+
+  test "orchestrator wrapper exports canonical lineage and delegation primitives" do
+    assert function_exported?(BeamAgent.Orchestrator, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Orchestrator, :clear, 0)
+    assert function_exported?(BeamAgent.Orchestrator, :spawn, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :delegate, 3)
+    assert function_exported?(BeamAgent.Orchestrator, :await, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :collect, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :cancel, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :status, 1)
+    assert function_exported?(BeamAgent.Orchestrator, :list_children, 1)
+  end
+
+  test "routing wrapper chooses the preferred backend" do
+    assert {:ok, decision} =
+             BeamAgent.Routing.select_backend(%{
+               policy: :preferred_then_fallback,
+               preferred_backends: [:gemini, :codex]
+             })
+
+    assert decision.backend == :gemini
   end
 
   test "provider wrapper accepts session identity binaries for universal flows" do
@@ -239,6 +310,68 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Catalog, :model_list, 1)
     assert function_exported?(BeamAgent.Catalog, :model_list, 2)
     assert function_exported?(BeamAgent.Catalog, :list_commands, 1)
+  end
+
+  test "Runs module exposes run and step lifecycle functions" do
+    assert function_exported?(BeamAgent.Runs, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Runs, :clear, 0)
+    assert function_exported?(BeamAgent.Runs, :start_run, 2)
+    assert function_exported?(BeamAgent.Runs, :get_run, 1)
+    assert function_exported?(BeamAgent.Runs, :list_runs, 0)
+    assert function_exported?(BeamAgent.Runs, :list_runs, 1)
+    assert function_exported?(BeamAgent.Runs, :complete_run, 2)
+    assert function_exported?(BeamAgent.Runs, :fail_run, 2)
+    assert function_exported?(BeamAgent.Runs, :cancel_run, 2)
+    assert function_exported?(BeamAgent.Runs, :start_step, 2)
+    assert function_exported?(BeamAgent.Runs, :get_step, 2)
+    assert function_exported?(BeamAgent.Runs, :list_steps, 1)
+    assert function_exported?(BeamAgent.Runs, :complete_step, 3)
+    assert function_exported?(BeamAgent.Runs, :fail_step, 3)
+    assert function_exported?(BeamAgent.Runs, :cancel_step, 3)
+  end
+
+  test "Artifacts module exposes typed artifact storage functions" do
+    assert function_exported?(BeamAgent.Artifacts, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Artifacts, :clear, 0)
+    assert function_exported?(BeamAgent.Artifacts, :put, 1)
+    assert function_exported?(BeamAgent.Artifacts, :put, 2)
+    assert function_exported?(BeamAgent.Artifacts, :get, 1)
+    assert function_exported?(BeamAgent.Artifacts, :list, 0)
+    assert function_exported?(BeamAgent.Artifacts, :list, 1)
+    assert function_exported?(BeamAgent.Artifacts, :search, 1)
+    assert function_exported?(BeamAgent.Artifacts, :search, 2)
+    assert function_exported?(BeamAgent.Artifacts, :attach, 3)
+    assert function_exported?(BeamAgent.Artifacts, :delete, 1)
+  end
+
+  test "Journal module exposes durable journal functions" do
+    assert function_exported?(BeamAgent.Journal, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Journal, :clear, 0)
+    assert function_exported?(BeamAgent.Journal, :append, 2)
+    assert function_exported?(BeamAgent.Journal, :list, 0)
+    assert function_exported?(BeamAgent.Journal, :list, 1)
+    assert function_exported?(BeamAgent.Journal, :stream_from, 1)
+    assert function_exported?(BeamAgent.Journal, :stream_from, 2)
+    assert function_exported?(BeamAgent.Journal, :get, 1)
+    assert function_exported?(BeamAgent.Journal, :ack, 2)
+  end
+
+  test "Memory module exposes long-term memory functions" do
+    assert function_exported?(BeamAgent.Memory, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Memory, :clear, 0)
+    assert function_exported?(BeamAgent.Memory, :remember, 2)
+    assert function_exported?(BeamAgent.Memory, :remember, 3)
+    assert function_exported?(BeamAgent.Memory, :get, 1)
+    assert function_exported?(BeamAgent.Memory, :list, 0)
+    assert function_exported?(BeamAgent.Memory, :list, 1)
+    assert function_exported?(BeamAgent.Memory, :recall, 2)
+    assert function_exported?(BeamAgent.Memory, :search, 1)
+    assert function_exported?(BeamAgent.Memory, :search, 2)
+    assert function_exported?(BeamAgent.Memory, :forget, 1)
+    assert function_exported?(BeamAgent.Memory, :pin, 1)
+    assert function_exported?(BeamAgent.Memory, :unpin, 1)
+    assert function_exported?(BeamAgent.Memory, :expire, 0)
+    assert function_exported?(BeamAgent.Memory, :expire, 1)
   end
 
   test "Control module exports turn steering and collaboration functions" do

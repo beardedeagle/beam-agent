@@ -1,0 +1,282 @@
+-module(beam_agent_store).
+-moduledoc """
+Internal store adapter boundary for canonical BeamAgent domains.
+
+This module keeps store selection and persistence mechanics separate from
+domain lifecycle logic. Canonical domains such as runs, artifacts, and the
+journal still own their record shapes, filtering, and validation rules, while
+`beam_agent_store` resolves which persistence adapter should back each domain.
+
+The default adapter is `beam_agent_store_ets`, which preserves the existing
+process-free ETS plus `beam_agent_table_owner` hardened-mode behavior. Future
+durable adapters can be introduced behind the same boundary without forcing a
+big-bang rewrite of every canonical domain.
+""".
+
+-export([
+    ensure_tables/0,
+    clear/0,
+    configure_domain/2,
+    domain_config/1,
+    adapter_module/1,
+    reset_domain/1,
+    ensure_table/3,
+    insert/3,
+    insert_new/3,
+    delete/3,
+    delete_object/3,
+    delete_all_objects/2,
+    update_counter/4,
+    update_counter/5,
+    lookup/3,
+    foldl/4,
+    first/2,
+    next/3
+]).
+
+-export_type([
+    domain/0,
+    adapter_module/0,
+    store_options/0,
+    store_config/0
+]).
+
+-callback ensure_table(atom(), [term()], store_options()) -> ok.
+-callback insert(atom(), tuple() | [tuple()], store_options()) -> true.
+-callback insert_new(atom(), tuple() | [tuple()], store_options()) -> boolean().
+-callback delete(atom(), term(), store_options()) -> true.
+-callback delete_object(atom(), term(), store_options()) -> true.
+-callback delete_all_objects(atom(), store_options()) -> true.
+-callback update_counter(atom(), term(), term(), store_options()) -> integer().
+-callback update_counter(atom(), term(), term(), tuple(), store_options()) -> integer().
+-callback lookup(atom(), term(), store_options()) -> [tuple()].
+-callback foldl(fun((tuple(), term()) -> term()), term(), atom(), store_options()) -> term().
+-callback first(atom(), store_options()) -> term() | '$end_of_table'.
+-callback next(atom(), term(), store_options()) -> term() | '$end_of_table'.
+
+-type domain() :: atom().
+-type adapter_module() :: module().
+-type store_options() :: map().
+-type store_config() :: #{
+    adapter := adapter_module(),
+    options => store_options()
+}.
+
+-define(CONFIG_TABLE, beam_agent_store_config).
+
+-doc "Ensure the store configuration table exists. Idempotent.".
+-spec ensure_tables() -> ok.
+ensure_tables() ->
+    beam_agent_ets:ensure_table(?CONFIG_TABLE, [set, named_table,
+        {read_concurrency, true}]).
+
+-doc "Clear all domain store configuration and revert every domain to defaults.".
+-spec clear() -> ok.
+clear() ->
+    ensure_tables(),
+    beam_agent_ets:delete_all_objects(?CONFIG_TABLE),
+    ok.
+
+-doc """
+Configure a persistence adapter for a canonical domain.
+
+Domains default to `beam_agent_store_ets`; callers only need this when a test
+or future durable adapter wants to override that default.
+""".
+-spec configure_domain(domain(), store_config()) ->
+    ok | {error, invalid_options | {invalid_adapter, atom()}}.
+configure_domain(Domain, Config) when is_atom(Domain), is_map(Config) ->
+    ensure_tables(),
+    case normalize_config(Config) of
+        {ok, Normalized} ->
+            true = beam_agent_ets:insert(?CONFIG_TABLE, {Domain, Normalized}),
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc "Return the normalized store config for a domain, including defaults.".
+-spec domain_config(domain()) -> store_config().
+domain_config(Domain) when is_atom(Domain) ->
+    ensure_tables(),
+    case ets:lookup(?CONFIG_TABLE, Domain) of
+        [{_, Config}] when is_map(Config) ->
+            Config;
+        [] ->
+            default_config()
+    end.
+
+-doc "Return the adapter module backing a domain.".
+-spec adapter_module(domain()) -> adapter_module().
+adapter_module(Domain) when is_atom(Domain) ->
+    maps:get(adapter, domain_config(Domain)).
+
+-doc "Remove any custom store config for a domain and restore defaults.".
+-spec reset_domain(domain()) -> ok.
+reset_domain(Domain) when is_atom(Domain) ->
+    ensure_tables(),
+    beam_agent_ets:delete(?CONFIG_TABLE, Domain),
+    ok.
+
+-doc "Ensure a named table or equivalent backing store exists for a domain.".
+-spec ensure_table(domain(), atom(), [term()]) -> ok.
+ensure_table(Domain, Table, Opts)
+  when is_atom(Domain), is_atom(Table), is_list(Opts) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:ensure_table(Table, Opts, AdapterOpts)
+    end).
+
+-doc "Insert a record through the configured domain store.".
+-spec insert(domain(), atom(), tuple() | [tuple()]) -> true.
+insert(Domain, Table, Record) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:insert(Table, Record, AdapterOpts)
+    end).
+
+-doc "Insert a record only if its key does not yet exist.".
+-spec insert_new(domain(), atom(), tuple() | [tuple()]) -> boolean().
+insert_new(Domain, Table, Record) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:insert_new(Table, Record, AdapterOpts)
+    end).
+
+-doc "Delete a key through the configured domain store.".
+-spec delete(domain(), atom(), term()) -> true.
+delete(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:delete(Table, Key, AdapterOpts)
+    end).
+
+-doc "Delete a specific object from a bag-like store.".
+-spec delete_object(domain(), atom(), term()) -> true.
+delete_object(Domain, Table, ObjOrKey) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:delete_object(Table, ObjOrKey, AdapterOpts)
+    end).
+
+-doc "Delete every object from a domain store table.".
+-spec delete_all_objects(domain(), atom()) -> true.
+delete_all_objects(Domain, Table) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:delete_all_objects(Table, AdapterOpts)
+    end).
+
+-doc "Update a counter through the configured domain store.".
+-spec update_counter(domain(), atom(), term(), term()) -> integer().
+update_counter(Domain, Table, Key, UpdateOp)
+  when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:update_counter(Table, Key, UpdateOp, AdapterOpts)
+    end).
+
+-doc "Update a counter with a default record through the configured domain store.".
+-spec update_counter(domain(), atom(), term(), term(), tuple()) -> integer().
+update_counter(Domain, Table, Key, UpdateOp, Default)
+  when is_atom(Domain), is_atom(Table), is_tuple(Default) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:update_counter(Table, Key, UpdateOp, Default, AdapterOpts)
+    end).
+
+-doc "Look up records by key through the configured domain store.".
+-spec lookup(domain(), atom(), term()) -> [tuple()].
+lookup(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:lookup(Table, Key, AdapterOpts)
+    end).
+
+-doc "Fold over a domain store table.".
+-spec foldl(domain(), fun((tuple(), Acc) -> Acc), Acc, atom()) -> Acc when Acc :: term().
+foldl(Domain, Fun, Acc, Table)
+  when is_atom(Domain), is_function(Fun, 2), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:foldl(Fun, Acc, Table, AdapterOpts)
+    end).
+
+-doc "Return the first key in an ordered domain store table.".
+-spec first(domain(), atom()) -> term() | '$end_of_table'.
+first(Domain, Table) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:first(Table, AdapterOpts)
+    end).
+
+-doc "Return the next key in an ordered domain store table.".
+-spec next(domain(), atom(), term()) -> term() | '$end_of_table'.
+next(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
+    with_adapter(Domain, fun(Adapter, AdapterOpts) ->
+        Adapter:next(Table, Key, AdapterOpts)
+    end).
+
+%%--------------------------------------------------------------------
+%% Internal helpers
+%%--------------------------------------------------------------------
+
+-spec with_adapter(domain(), fun((adapter_module(), store_options()) -> Result)) -> Result.
+with_adapter(Domain, Fun) when is_atom(Domain), is_function(Fun, 2) ->
+    #{adapter := Adapter, options := AdapterOpts} = domain_config(Domain),
+    Fun(Adapter, AdapterOpts).
+
+-spec normalize_config(store_config()) ->
+    {ok, store_config()} | {error, invalid_options | {invalid_adapter, term()}}.
+normalize_config(#{adapter := Adapter} = Config) when is_atom(Adapter) ->
+    case validate_adapter(Adapter) of
+        ok ->
+            case maps:get(options, Config, #{}) of
+                Options when is_map(Options) ->
+                    {ok, #{
+                        adapter => Adapter,
+                        options => Options
+                    }};
+                _ ->
+                    {error, invalid_options}
+            end;
+        {error, _} = Error ->
+            Error
+    end;
+normalize_config(_) ->
+    {error, invalid_options}.
+
+-spec validate_adapter(adapter_module()) -> ok | {error, {invalid_adapter, atom()}}.
+validate_adapter(Adapter) ->
+    case code:ensure_loaded(Adapter) of
+        {module, Adapter} ->
+            case lists:all(fun({Fun, Arity}) ->
+                erlang:function_exported(Adapter, Fun, Arity)
+            end, required_callbacks()) of
+                true ->
+                    ok;
+                false ->
+                    {error, {invalid_adapter, Adapter}}
+            end;
+        _ ->
+            {error, {invalid_adapter, Adapter}}
+    end.
+
+-type required_callback() ::
+    {ensure_table | insert | insert_new | delete | delete_object | lookup | next, 3}
+  | {delete_all_objects | first, 2}
+  | {update_counter, 4 | 5}
+  | {foldl, 4}.
+
+-spec required_callbacks() -> [required_callback(), ...].
+required_callbacks() ->
+    [
+        {ensure_table, 3},
+        {insert, 3},
+        {insert_new, 3},
+        {delete, 3},
+        {delete_object, 3},
+        {delete_all_objects, 2},
+        {update_counter, 4},
+        {update_counter, 5},
+        {lookup, 3},
+        {foldl, 4},
+        {first, 2},
+        {next, 3}
+    ].
+
+-spec default_config() -> #{adapter := beam_agent_store_ets, options := #{}}.
+default_config() ->
+    #{
+        adapter => beam_agent_store_ets,
+        options => #{}
+    }.

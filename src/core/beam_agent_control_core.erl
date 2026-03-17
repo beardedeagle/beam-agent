@@ -7,6 +7,10 @@ feedback management, and turn response handling. Implements a
 virtual control protocol for adapters without native control
 message support.
 
+Task registration is bridged into beam_agent_runs_core so live control
+entries have a durable run history even after the task table entry is
+removed.
+
 Uses ETS for per-session state. All state is keyed by session_id
 and persists for the node lifetime or until explicitly cleared.
 
@@ -82,7 +86,9 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
     session_id := binary(),
     pid := pid(),
     started_at := integer(),
-    status := running | stopped
+    status := running | stopped,
+    run_id => binary(),
+    stopped_at => integer()
 }.
 
 -type pending_request() :: #{
@@ -94,6 +100,43 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
     created_at := integer(),
     resolved_at => integer()
 }.
+-type task_run_attempt() :: 0 | 1 | 2 | 3 | 4 | 5.
+-type control_scope_map() :: #{
+    session_id := binary(),
+    profile_id => binary()
+}.
+-type task_event_map() :: #{
+    session_id := binary(),
+    tags := [control | task, ...],
+    payload := #{task := map(), replaced => boolean()},
+    run_id => binary()
+}.
+-type control_put_map() :: control_scope_map() | task_event_map().
+-type control_journal_reason() :: awaiting_external_response | handler_failed.
+-type feedback_entry() :: #{
+    seq := integer(),
+    session_id := binary(),
+    submitted_at := integer(),
+    _ => term()
+}.
+-type control_journal_payload() :: #{
+    feedback => feedback_entry(),
+    max_thinking_tokens => pos_integer(),
+    model => term(),
+    permission_mode => atom() | binary(),
+    reason => control_journal_reason(),
+    request => map(),
+    request_id => binary(),
+    response => map(),
+    source => universal,
+    status => pending,
+    task_id => binary()
+}.
+-type journal_error() ::
+    already_exists
+  | session_id_required_for_thread
+  | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+  | {invalid_event_type, binary()}.
 
 -dialyzer({no_underspecs, [{pending_user_input_result, 4},
                            {normalize_pending_request, 2}]}).
@@ -289,15 +332,28 @@ get_max_thinking_tokens(SessionId) when is_binary(SessionId) ->
 register_task(SessionId, TaskId, Pid)
   when is_binary(SessionId), is_binary(TaskId), is_pid(Pid) ->
     ensure_tables(),
+    Key = {SessionId, TaskId},
+    Replaced = case ets:lookup(?TASKS_TABLE, Key) of
+        [{_, ExistingTask}] ->
+            ok = reconcile_replaced_task(ExistingTask),
+            true;
+        [] ->
+            false
+    end,
     Now = erlang:system_time(millisecond),
+    RunId = create_task_run(SessionId, TaskId),
     Task = #{
         task_id => TaskId,
         session_id => SessionId,
         pid => Pid,
         started_at => Now,
-        status => running
+        status => running,
+        run_id => RunId
     },
-    beam_agent_ets:insert(?TASKS_TABLE, {{SessionId, TaskId}, Task}),
+    beam_agent_ets:insert(?TASKS_TABLE, {Key, Task}),
+    {ok, _Entry} = journal_task_event(<<"task_registered">>, SessionId, Task, #{
+        replaced => Replaced
+    }),
     ok.
 
 -doc "Unregister a task (mark as complete).".
@@ -305,8 +361,16 @@ register_task(SessionId, TaskId, Pid)
 unregister_task(SessionId, TaskId)
   when is_binary(SessionId), is_binary(TaskId) ->
     ensure_tables(),
-    beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
-    ok.
+    Key = {SessionId, TaskId},
+    case ets:lookup(?TASKS_TABLE, Key) of
+        [{_, Task}] ->
+            ok = reconcile_unregistered_task(Task),
+            beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
+            {ok, _Entry} = journal_task_event(<<"task_unregistered">>, SessionId, Task, #{}),
+            ok;
+        [] ->
+            ok
+    end.
 
 -doc """
 Stop a running task by sending an interrupt to its process.
@@ -319,6 +383,7 @@ stop_task(SessionId, TaskId)
     Key = {SessionId, TaskId},
     case ets:lookup(?TASKS_TABLE, Key) of
         [{_, #{pid := Pid, status := running} = Task}] ->
+            Now = erlang:system_time(millisecond),
             %% Signal the process to stop
             case is_process_alive(Pid) of
                 true ->
@@ -332,8 +397,13 @@ stop_task(SessionId, TaskId)
                 false ->
                     ok
             end,
-            Updated = Task#{status => stopped},
+            ok = reconcile_stopped_task(Task),
+            Updated = Task#{
+                status => stopped,
+                stopped_at => Now
+            },
             beam_agent_ets:insert(?TASKS_TABLE, {Key, Updated}),
+            {ok, _Entry} = journal_task_event(<<"task_stopped">>, SessionId, Updated, #{}),
             ok;
         [{_, #{status := stopped}}] ->
             ok;
@@ -379,6 +449,9 @@ submit_feedback(SessionId, Feedback)
         event_class => control,
         feedback => Entry,
         timestamp => Now
+    }),
+    {ok, _Entry} = journal_control_event(<<"feedback_submitted">>, SessionId, #{
+        feedback => Entry
     }),
     ok.
 
@@ -448,19 +521,29 @@ clear_session_callbacks(SessionId) when is_binary(SessionId) ->
 request_permission(SessionId, Method, Params, Context)
   when is_binary(SessionId), is_binary(Method), is_map(Params), is_map(Context) ->
     ensure_tables(),
-    case lookup_callbacks(SessionId) of
-        #{permission_handler := Handler} when is_function(Handler) ->
-            safe_permission_handler(Handler, Method, Params, Context,
-                maps:get(permission_default, lookup_callbacks(SessionId), deny));
-        #{approval_handler := Handler} when is_function(Handler) ->
-            approval_decision_to_permission(
-                safe_approval_handler(Handler, Method, Params, Context),
-                Params,
-                maps:get(permission_default, lookup_callbacks(SessionId), deny));
-        #{permission_default := Default} ->
-            default_permission(Default, Params);
-        #{} ->
-            default_permission(deny, Params)
+    case evaluate_control_policy(SessionId, approval, Method, Params, Context) of
+        allow ->
+            Callbacks = lookup_callbacks(SessionId),
+            Decision = case Callbacks of
+                #{permission_handler := Handler} when is_function(Handler) ->
+                    safe_permission_handler(Handler, Method, Params, Context,
+                        maps:get(permission_default, Callbacks, deny));
+                #{approval_handler := Handler} when is_function(Handler) ->
+                    approval_decision_to_permission(
+                        safe_approval_handler(Handler, Method, Params, Context),
+                        Params,
+                        maps:get(permission_default, Callbacks, deny));
+                #{permission_default := Default} ->
+                    default_permission(Default, Params);
+                #{} ->
+                    default_permission(deny, Params)
+            end,
+            ok = audit_permission_decision(SessionId, Method, Decision, Params, Context),
+            Decision;
+        {deny, Reason} ->
+            Decision = {deny, Reason},
+            ok = audit_permission_decision(SessionId, Method, Decision, Params, Context),
+            Decision
     end.
 
 -doc "Request canonical approval handling for a session.".
@@ -469,26 +552,36 @@ request_permission(SessionId, Method, Params, Context)
 request_approval(SessionId, Method, Params, Context)
   when is_binary(SessionId), is_binary(Method), is_map(Params), is_map(Context) ->
     ensure_tables(),
-    case lookup_callbacks(SessionId) of
-        #{approval_handler := Handler} when is_function(Handler) ->
-            safe_approval_handler(Handler, Method, Params, Context);
-        #{permission_handler := Handler} when is_function(Handler) ->
-            case safe_permission_handler(Handler, Method, Params, Context,
-                     maps:get(permission_default, lookup_callbacks(SessionId), deny)) of
-                {allow, _} ->
+    case evaluate_control_policy(SessionId, approval, Method, Params, Context) of
+        allow ->
+            Callbacks = lookup_callbacks(SessionId),
+            Decision = case Callbacks of
+                #{approval_handler := Handler} when is_function(Handler) ->
+                    safe_approval_handler(Handler, Method, Params, Context);
+                #{permission_handler := Handler} when is_function(Handler) ->
+                    case safe_permission_handler(Handler, Method, Params, Context,
+                             maps:get(permission_default, Callbacks, deny)) of
+                        {allow, _} ->
+                            accept;
+                        {allow, _, _Other} ->
+                            accept;
+                        {deny, _} ->
+                            decline;
+                        {deny, _, true} ->
+                            cancel;
+                        {deny, _, _} ->
+                            decline
+                    end;
+                #{permission_default := allow} ->
                     accept;
-                {allow, _, _Other} ->
-                    accept;
-                {deny, _} ->
-                    decline;
-                {deny, _, true} ->
-                    cancel;
-                {deny, _, _} ->
+                _ ->
                     decline
-            end;
-        #{permission_default := allow} ->
-            accept;
-        _ ->
+            end,
+            ok = audit_approval_decision(SessionId, Method, Decision, Params, Context),
+            Decision;
+        {deny, Reason} ->
+            ok = audit_approval_decision(SessionId, Method, decline, Params,
+                Context#{policy_reason => Reason}),
             decline
     end.
 
@@ -560,6 +653,10 @@ store_pending_request(SessionId, RequestId, Request)
         request => PublicRequest,
         timestamp => Now
     }),
+    {ok, _Entry} = journal_control_event(<<"pending_request_stored">>, SessionId, #{
+        request_id => RequestId,
+        request => PublicRequest
+    }),
     ok.
 
 -doc "Resolve a pending request with a response.".
@@ -587,6 +684,10 @@ resolve_pending_request(SessionId, RequestId, Response)
                 request_id => RequestId,
                 response => beam_agent_redaction:map(Response),
                 timestamp => Now
+            }),
+            {ok, _Entry} = journal_control_event(<<"pending_request_resolved">>, SessionId, #{
+                request_id => RequestId,
+                response => beam_agent_redaction:map(Response)
             }),
             ok;
         [{_, #{status := resolved}}] ->
@@ -710,6 +811,7 @@ pending_user_input_result(SessionId, RequestId, Request, Reason) ->
         event_class => control,
         timestamp => Now
     }),
+    {ok, _Entry} = journal_control_event(<<"user_input_requested">>, SessionId, Pending),
     {ok, Pending}.
 
 -spec normalize_pending_request(binary(), map()) -> map().
@@ -743,12 +845,242 @@ default_permission(allow, Params) ->
 default_permission(_, _Params) ->
     {deny, <<"denied">>}.
 
+-spec evaluate_control_policy(binary(), approval, binary(), map(), map()) ->
+    allow | {deny, binary()}.
+evaluate_control_policy(SessionId, Action, Method, Params, Context) ->
+    ProfileId = session_policy_profile(SessionId),
+    beam_agent_policy_core:evaluate(ProfileId, Action, #{
+        session_id => SessionId,
+        method => Method,
+        params => Params,
+        context => Context
+    }).
+
+-spec session_policy_profile(binary()) -> binary() | undefined.
+session_policy_profile(SessionId) ->
+    case get_config(SessionId, policy_profile_id) of
+        {ok, ProfileId} when is_binary(ProfileId) ->
+            ProfileId;
+        _ ->
+            undefined
+    end.
+
+-spec audit_permission_decision(binary(), binary(),
+    beam_agent_core:permission_result(), map(), map()) -> ok.
+audit_permission_decision(SessionId, Method, Decision, Params, Context) ->
+    Scope = control_audit_scope(SessionId),
+    Details = #{
+        decision => permission_decision_name(Decision),
+        method => Method,
+        params => beam_agent_redaction:map(Params),
+        context => beam_agent_redaction:map(Context),
+        profile_id => session_policy_profile(SessionId)
+    },
+    case beam_agent_audit_core:record(control, permission, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec audit_approval_decision(binary(), binary(),
+    accept | accept_for_session | decline | cancel, map(), map()) -> ok.
+audit_approval_decision(SessionId, Method, Decision, Params, Context) ->
+    Scope = control_audit_scope(SessionId),
+    Details = #{
+        decision => Decision,
+        method => Method,
+        params => beam_agent_redaction:map(Params),
+        context => beam_agent_redaction:map(Context),
+        profile_id => session_policy_profile(SessionId)
+    },
+    case beam_agent_audit_core:record(control, approval, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec control_audit_scope(binary()) -> control_scope_map().
+control_audit_scope(SessionId) ->
+    maybe_put(profile_id, session_policy_profile(SessionId), #{
+        session_id => SessionId
+    }).
+
+-spec permission_decision_name(
+    {allow, map()} |
+    {deny, binary()} |
+    {deny, binary(), boolean()} |
+    {allow, map(), map() | [map()]}
+) -> allow | deny | cancel.
+permission_decision_name({allow, _}) ->
+    allow;
+permission_decision_name({allow, _, _}) ->
+    allow;
+permission_decision_name({deny, _, true}) ->
+    cancel;
+permission_decision_name({deny, _, _}) ->
+    deny;
+permission_decision_name({deny, _}) ->
+    deny.
+
 publish_control_event(SessionId, Subtype, Payload) ->
-    beam_agent_events:publish(SessionId, Payload#{
+    Event = Payload#{
         type => system,
         subtype => Subtype,
         session_id => SessionId,
         source => universal,
         event_class => control,
         timestamp => erlang:system_time(millisecond)
+    },
+    beam_agent_events:publish(SessionId, Event),
+    {ok, _Entry} = journal_control_event(Subtype, SessionId, Payload),
+    _ = beam_agent_audit_core:record(control, event, #{session_id => SessionId}, #{
+        subtype => Subtype,
+        payload => beam_agent_redaction:map(Payload)
+    }),
+    ok.
+
+-spec create_task_run(binary(), binary()) -> binary().
+create_task_run(SessionId, TaskId) ->
+    create_task_run(SessionId, TaskId, 0).
+
+-spec create_task_run(binary(), binary(), task_run_attempt()) -> binary().
+create_task_run(SessionId, TaskId, Attempts) when Attempts < 5 ->
+    case beam_agent_runs_core:start_run(SessionId, #{
+        kind => task,
+        metadata => #{
+            task_id => TaskId,
+            source => control_task
+        }
+    }) of
+        {ok, #{run_id := RunId}} ->
+            RunId;
+        {error, already_exists} ->
+            create_task_run(SessionId, TaskId, Attempts + 1)
+    end;
+create_task_run(SessionId, TaskId, Attempts) ->
+    FallbackRunId = task_run_id(TaskId, Attempts),
+    {ok, #{run_id := RunId}} = beam_agent_runs_core:start_run(SessionId, #{
+        run_id => FallbackRunId,
+        kind => task,
+        metadata => #{
+            task_id => TaskId,
+            source => control_task
+        }
+    }),
+    RunId.
+
+-spec reconcile_replaced_task(task_meta()) -> ok.
+reconcile_replaced_task(Task) ->
+    cancel_task_run(Task, #{
+        reason => task_re_registered,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
     }).
+
+-spec reconcile_unregistered_task(task_meta()) -> ok.
+reconcile_unregistered_task(#{status := running} = Task) ->
+    complete_task_run(Task, #{
+        source => control_task,
+        task_id => maps:get(task_id, Task),
+        terminal_status => completed
+    });
+reconcile_unregistered_task(#{status := stopped} = Task) ->
+    cancel_task_run(Task, #{
+        reason => task_unregistered_after_stop,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
+    }).
+
+-spec reconcile_stopped_task(#{
+    task_id := binary(),
+    session_id := binary(),
+    pid := pid(),
+    started_at := integer(),
+    status := running,
+    run_id => binary(),
+    stopped_at => integer()
+}) -> ok.
+reconcile_stopped_task(Task) ->
+    cancel_task_run(Task, #{
+        reason => task_stopped,
+        source => control_task,
+        task_id => maps:get(task_id, Task)
+    }).
+
+-spec complete_task_run(task_meta(), map()) -> ok.
+complete_task_run(Task, Result) ->
+    case maps:find(run_id, Task) of
+        {ok, RunId} ->
+            case beam_agent_runs_core:complete_run(RunId, Result) of
+                {ok, _Run} ->
+                    ok;
+                {error, active_steps} ->
+                    cancel_task_run(Task, #{
+                        reason => task_unregistered_with_active_steps,
+                        source => control_task,
+                        task_id => maps:get(task_id, Task)
+                    });
+                {error, {invalid_status_transition, _, _}} ->
+                    ok;
+                {error, not_found} ->
+                    ok
+            end;
+        error ->
+            ok
+    end.
+
+-spec cancel_task_run(task_meta(), map()) -> ok.
+cancel_task_run(Task, Reason) ->
+    case maps:find(run_id, Task) of
+        {ok, RunId} ->
+            case beam_agent_runs_core:cancel_run(RunId, Reason) of
+                {ok, _Run} ->
+                    ok;
+                {error, {invalid_status_transition, _, _}} ->
+                    ok;
+                {error, not_found} ->
+                    ok
+            end;
+        error ->
+            ok
+    end.
+
+-spec task_run_id(binary(), task_run_attempt()) -> <<_:64, _:_*8>>.
+task_run_id(TaskId, Attempt) ->
+    Hex = binary:encode_hex(crypto:strong_rand_bytes(6), lowercase),
+    <<SafeTaskId/binary>> = sanitize_task_id(TaskId),
+    <<"run_task_", SafeTaskId/binary, "_", (integer_to_binary(Attempt))/binary,
+      "_", Hex/binary>>.
+
+-spec sanitize_task_id(binary()) -> binary().
+sanitize_task_id(TaskId) ->
+    binary:replace(TaskId, <<"/">>, <<"_">>, [global]).
+
+-spec journal_control_event(<<_:64, _:_*8>>, binary(), control_journal_payload()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
+journal_control_event(EventType, SessionId, Payload) ->
+    beam_agent_journal_core:append(EventType, #{
+        session_id => SessionId,
+        tags => [control],
+        payload => Payload
+    }).
+
+-spec journal_task_event(<<_:64, _:_*8>>, binary(), task_meta(),
+    #{} | #{replaced => boolean()}) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
+journal_task_event(EventType, SessionId, Task, ExtraPayload) ->
+    Event0 = #{
+        session_id => SessionId,
+        tags => [control, task],
+        payload => maps:merge(#{task => task_journal_view(Task)}, ExtraPayload)
+    },
+    Event1 = maybe_put(run_id, maps:get(run_id, Task, undefined), Event0),
+    beam_agent_journal_core:append(EventType, Event1).
+
+-spec task_journal_view(task_meta()) -> map().
+task_journal_view(Task) ->
+    maps:without([pid], Task).
+
+-spec maybe_put(profile_id | run_id, term(), control_put_map()) -> control_put_map().
+maybe_put(_Key, undefined, Map) ->
+    Map;
+maybe_put(Key, Value, Map) ->
+    Map#{Key => Value}.

@@ -7,6 +7,8 @@ and event streaming. Domain-specific operations live in dedicated
 public modules:
 
 - beam_agent_account: login, logout, rate limits
+- beam_agent_artifacts: typed artifact and context storage
+- beam_agent_audit: durable audit records layered on the journal
 - beam_agent_apps: app/project management
 - beam_agent_capabilities: feature introspection
 - beam_agent_catalog: tools, skills, plugins, agents, models
@@ -14,10 +16,18 @@ public modules:
 - beam_agent_command: command execution, stdin, shell, async prompts
 - beam_agent_config: session configuration read/write
 - beam_agent_control: collaboration, review, realtime, server admin
+- beam_agent_context: context pressure, summaries, and policy-driven compaction
 - beam_agent_file: text search, file search, directory listing
+- beam_agent_journal: durable canonical domain-event journal
+- beam_agent_memory: long-term memory and recall
 - beam_agent_mcp: MCP server management
+- beam_agent_policy: reusable allow/deny policy profiles
+- beam_agent_orchestrator: parent-child orchestration and delegation lineage
 - beam_agent_provider: provider and agent selection, OAuth
+- beam_agent_routing: backend routing and policy-driven selection
+- beam_agent_routines: durable routines and caller-driven scheduled execution
 - beam_agent_runtime: model, permissions, status, interrupts
+- beam_agent_runs: canonical run and step lifecycle
 - beam_agent_search: fuzzy file search
 - beam_agent_session_store: session history and thread storage
 - beam_agent_skills: skill listing and configuration
@@ -89,13 +99,13 @@ field reference per message type.
 The normalized message type tag.
 
 Values: text, assistant, tool_use, tool_result, system, result, error,
-user, control, control_request, control_response, stream_event,
+user, control_request, control_response, stream_event,
 rate_limit_event, tool_progress, tool_use_summary, thinking,
 auth_status, prompt_suggestion, raw.
 
 The `result` type signals query completion. The `error` type signals
 a backend error. The `raw` type preserves unrecognized wire messages
-for forward compatibility.
+verbatim so normalization stays lossless.
 """.
 -type message_type() :: beam_agent_core:message_type().
 
@@ -121,8 +131,9 @@ Key fields:
 -doc """
 Options map for establishing a session via start_session/1.
 
-Required:
-  - backend: one of claude, codex, gemini, opencode, or copilot
+Routing:
+  - backend: one of claude, codex, gemini, opencode, copilot, or auto
+  - routing: optional backend-routing policy request map
 
 Common options:
   - cli_path: path to the backend CLI executable
@@ -265,7 +276,11 @@ Returns {ok, Pid} on success where Pid is the session process, or
 
 ```erlang
 {ok, Session} = beam_agent:start_session(#{
-    backend => claude,
+    backend => auto,
+    routing => #{
+        policy => preferred_then_fallback,
+        preferred_backends => [claude, codex]
+    },
     model => <<"claude-sonnet-4-20250514">>,
     system_prompt => <<"You are a helpful assistant.">>,
     permission_mode => default

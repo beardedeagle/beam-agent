@@ -46,26 +46,46 @@ defmodule BeamAgentEx.MixProject do
       extras: [
         "README.md",
         "../docs/guides/backend_integration_guide.md",
+        "../docs/guides/canonical_domain_guide.md",
         "../CONTRIBUTING.md",
         "LICENSE"
       ],
       groups_for_modules: [
         "Public API": [
           BeamAgent,
+          BeamAgent.Account,
+          BeamAgent.Apps,
+          BeamAgent.Config,
+          BeamAgent.Provider,
           BeamAgent.Capabilities,
           BeamAgent.Catalog,
           BeamAgent.Checkpoint,
           BeamAgent.Command,
           BeamAgent.Content,
           BeamAgent.Control,
+          BeamAgent.File,
           BeamAgent.Hooks,
           BeamAgent.MCP,
           BeamAgent.Raw,
           BeamAgent.Runtime,
+          BeamAgent.Search,
           BeamAgent.SessionStore,
+          BeamAgent.Skills,
           BeamAgent.Telemetry,
           BeamAgent.Threads,
           BeamAgent.Todo
+        ],
+        "Canonical Domains": [
+          BeamAgent.Artifacts,
+          BeamAgent.Audit,
+          BeamAgent.Context,
+          BeamAgent.Journal,
+          BeamAgent.Memory,
+          BeamAgent.Orchestrator,
+          BeamAgent.Policy,
+          BeamAgent.Routing,
+          BeamAgent.Routines,
+          BeamAgent.Runs
         ],
         "Backend Wrappers": [
           ClaudeEx,

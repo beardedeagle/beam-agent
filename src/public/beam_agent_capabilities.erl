@@ -364,9 +364,9 @@ When given a `pid()`, resolves the backend from the live session and
 delegates to `for_session/1`. When given a backend atom or binary,
 delegates to `for_backend/1`.
 
-This mirrors the `beam_agent:capabilities/1` surface so callers can
-reach the same data directly from this module without going through the
-public API facade.
+This is the direct capability-registry lookup for callers that want the
+projected capability list without going through the broader `beam_agent`
+facade.
 
 Returns `{error, backend_not_present}` or
 `{error, {session_backend_lookup_failed, Reason}}` when the session

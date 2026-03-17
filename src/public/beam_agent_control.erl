@@ -44,7 +44,9 @@ beam_agent_control:stop_task(SessionId, TaskId).
 
   - Task Registration: Long-running background tasks can be registered with
     a session so that they can be listed, monitored, and stopped via the
-    control dispatch protocol.
+    control dispatch protocol. Each task registration also creates a linked
+    canonical run so task history survives after the live control entry is
+    removed.
 
   - Callback Broker: Sessions can register callback functions for permission
     handling, approval decisions, and user input prompts. The broker invokes
@@ -72,7 +74,9 @@ beam_agent_control_core (ETS state, dispatch logic, callback broker)
 The control plane lets you manage a session without sending queries.
 You can change settings (like permission mode or thinking token budget),
 register callbacks for approval decisions and user input prompts,
-submit feedback, and track background tasks.
+submit feedback, and track background tasks. Task registrations are
+also mirrored into beam_agent_runs so the control table can stay
+ephemeral without losing history.
 
 Approval callbacks are functions the SDK calls when the agent wants to
 do something that needs permission (like editing a file). User input
@@ -334,6 +338,9 @@ Associates a task ID and owning process with the session. The task
 is initially marked as running. Use stop_task/2 to signal the task
 to stop, and unregister_task/2 to remove it after completion.
 
+Each registered task also creates a linked run in beam_agent_runs.
+list_tasks/1 exposes that linkage through an optional run_id field.
+
 Example:
 
 ```erlang
@@ -361,7 +368,8 @@ Stop a running task by sending an interrupt to its process.
 Attempts a gen_statem interrupt call first, falling back to
 exit(Pid, shutdown) if the call fails. Returns ok if the task was
 found and signaled, or {error, not_found} if no such task exists.
-Already-stopped tasks return ok without sending a signal.
+Already-stopped tasks return ok without sending a signal. Stopping a
+task also cancels its linked run in beam_agent_runs.
 """.
 -spec stop_task(binary(), binary()) -> ok | {error, not_found}.
 stop_task(SessionId, TaskId) -> beam_agent_control_core:stop_task(SessionId, TaskId).
@@ -370,8 +378,9 @@ stop_task(SessionId, TaskId) -> beam_agent_control_core:stop_task(SessionId, Tas
 List all tasks registered for a session.
 
 Returns a list of task metadata maps, each containing task_id,
-session_id, pid, started_at (millisecond timestamp), and status
-(running or stopped).
+session_id, pid, started_at (millisecond timestamp), status
+(running or stopped), and an optional run_id. Stopped tasks also
+include stopped_at.
 """.
 -spec list_tasks(binary()) -> {ok, [beam_agent_control_core:task_meta()]}.
 list_tasks(SessionId) -> beam_agent_control_core:list_tasks(SessionId).

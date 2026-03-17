@@ -33,6 +33,7 @@ reset_state() ->
     ok = beam_agent_backend:clear(),
     ok = beam_agent_runtime_core:clear(),
     ok = beam_agent_control_core:clear(),
+    ok = beam_agent_orchestrator_core:clear(),
     ok = beam_agent_session_store_core:clear(),
     ok = beam_agent_threads_core:clear(),
     ok = beam_agent_collaboration:clear(),

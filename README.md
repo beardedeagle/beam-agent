@@ -82,9 +82,13 @@ Add the canonical SDK to your `rebar.config` deps:
 ```
 
 ```erlang
-%% Start a Claude Code session through the canonical SDK
+%% Start a routed session through the canonical SDK
 {ok, Session} = beam_agent:start_session(#{
-    backend => claude,
+    backend => auto,
+    routing => #{
+        policy => preferred_then_fallback,
+        preferred_backends => [claude, codex]
+    },
     cli_path => "/usr/local/bin/claude",
     permission_mode => <<"bypassPermissions">>
 }),
@@ -109,7 +113,12 @@ end
 ```
 
 ```elixir
-{:ok, session} = BeamAgent.start_session(backend: :claude, cli_path: "claude")
+{:ok, session} =
+  BeamAgent.start_session(
+    backend: :auto,
+    routing: %{policy: :preferred_then_fallback, preferred_backends: [:claude, :codex]},
+    cli_path: "claude"
+  )
 
 # Streaming query — lazy enumerable
 session
@@ -154,6 +163,20 @@ session_info(Pid)      -> {ok, Map} | {error, Reason}
 child_spec(Opts)       -> supervisor:child_spec()
 ```
 
+`start_session/1` accepts either an explicit backend or `backend => auto`
+plus a `routing` request map. The canonical routing domain is exposed through
+`beam_agent_routing` / `BeamAgent.Routing`.
+
+Scheduled execution is exposed through `beam_agent_routines` /
+`BeamAgent.Routines`. The routines layer stores durable job records and
+provides explicit `run_due/1` entrypoints for caller-owned schedulers; it
+does not start a hidden BeamAgent scheduler process.
+
+Parent-child orchestration is exposed through `beam_agent_orchestrator` /
+`BeamAgent.Orchestrator`. The orchestrator layer records delegation lineage,
+cross-session child relationships, and collection/cancellation status without
+starting a worker pool or resident BeamAgent process.
+
 Elixir adds `stream!/3` and `stream/3` (lazy `Stream.resource/3`-based
 enumerables) on top of the same canonical surface.
 
@@ -163,13 +186,29 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_provider`, `beam_agent_catalog`, `beam_agent_capabilities`,
 `beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
-`beam_agent_account`, `beam_agent_apps`, `beam_agent_checkpoint`). Their
-status and route shape for each backend/capability pair are tracked via
+`beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
+`beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
+`beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
+`beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`). Their status and route shape for each
+backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
 All families have universal fallback coverage:
 
 - shared session history/state
 - shared/native thread management
+- canonical run and step lifecycle
+- typed artifact and context storage
+- context pressure estimation and policy-driven compaction
+- durable canonical domain-event journal
+- durable audit records layered on the journal
+- long-term memory with lexical recall and expiry
+- internal store abstraction with ETS as the default canonical adapter
+- reusable policy profiles for approvals, commands, backends, routines,
+  memory writes, compaction, and orchestration
+- policy-driven backend routing with explicit, sticky, round-robin, failover,
+  capability-first, and preferred-then-fallback selection
+- durable routines and caller-driven scheduled execution
+- parent-child orchestration, delegation lineage, and run collection
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
@@ -204,12 +243,94 @@ beam_agent_threads:thread_archive(SessionPid, ThreadId)   -> {ok, map()} | {erro
 beam_agent_threads:thread_unarchive(SessionPid, ThreadId) -> {ok, map()} | {error, not_found}
 beam_agent_threads:thread_rollback(SessionPid, ThreadId, Selector) ->
     {ok, map()} | {error, Reason}
+
+%% Canonical runs/steps -- beam_agent_runs
+beam_agent_runs:start_run(Scope, Opts)                   -> {ok, Run} | {error, Reason}
+beam_agent_runs:start_step(RunId, Opts)                  -> {ok, Step} | {error, Reason}
+beam_agent_runs:complete_step(RunId, StepId, Result)     -> {ok, Step} | {error, Reason}
+beam_agent_runs:complete_run(RunId, Result)              -> {ok, Run} | {error, Reason}
+beam_agent_runs:list_runs(Filter)                        -> {ok, [Run]} | {error, Reason}
+beam_agent_runs:list_steps(RunId)                        -> {ok, [Step]} | {error, not_found}
+
+%% Canonical artifacts -- beam_agent_artifacts
+beam_agent_artifacts:put(Artifact)                       -> {ok, ArtifactRecord} | {error, Reason}
+beam_agent_artifacts:get(ArtifactId)                     -> {ok, ArtifactRecord} | {error, not_found}
+beam_agent_artifacts:list(Filter)                        -> {ok, [ArtifactRecord]} | {error, Reason}
+beam_agent_artifacts:search(Query, Filter)               -> {ok, [ArtifactRecord]} | {error, Reason}
+beam_agent_artifacts:attach(ArtifactId, RefType, RefId)  -> ok | {error, Reason}
+beam_agent_artifacts:delete(ArtifactId)                  -> ok | {error, not_found}
+
+%% Durable canonical journal -- beam_agent_journal
+beam_agent_journal:append(EventType, Event)              -> {ok, Entry} | {error, Reason}
+beam_agent_journal:list(Filter)                          -> {ok, [Entry]} | {error, Reason}
+beam_agent_journal:stream_from(Cursor, Filter)           -> {ok, [Entry]} | {error, Reason}
+beam_agent_journal:get(EventId)                          -> {ok, Entry} | {error, not_found}
+beam_agent_journal:ack(ConsumerId, EventId)              -> ok | {error, not_found}
+
+%% Canonical audit -- beam_agent_audit
+beam_agent_audit:list_events(Filter)                     -> {ok, [Entry]} | {error, Reason}
+beam_agent_audit:get_event(EventId)                      -> {ok, Entry} | {error, not_found}
+
+%% Long-term memory -- beam_agent_memory
+beam_agent_memory:remember(Scope, MemoryInput)           -> {ok, Memory} | {error, Reason}
+beam_agent_memory:remember(Scope, Kind, MemoryInput)     -> {ok, Memory} | {error, Reason}
+beam_agent_memory:get(MemoryId)                          -> {ok, Memory} | {error, not_found}
+beam_agent_memory:list(Filter)                           -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:recall(Scope, Query)                   -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:search(Query, Filter)                  -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:forget(MemoryId)                       -> ok | {error, not_found}
+beam_agent_memory:pin(MemoryId)                          -> ok | {error, not_found}
+beam_agent_memory:unpin(MemoryId)                        -> ok | {error, not_found}
+beam_agent_memory:expire(Filter)                         -> {ok, Count} | {error, Reason}
+
+%% Canonical backend routing -- beam_agent_routing
+beam_agent_routing:select_backend(RouteRequest)          -> {ok, Decision} | {error, Reason}
+beam_agent_routing:select_backend(SessionOrOpts, RouteRequest) ->
+    {ok, Decision} | {error, Reason}
+
+%% Canonical policy profiles -- beam_agent_policy
+beam_agent_policy:put_profile(ProfileId, Profile)        -> ok | {error, Reason}
+beam_agent_policy:get_profile(ProfileId)                 -> {ok, Profile} | {error, not_found}
+beam_agent_policy:list_profiles()                        -> {ok, [Profile]}
+beam_agent_policy:evaluate(ProfileId, Action, Context)   -> allow | {deny, Reason}
+
+%% Canonical routines -- beam_agent_routines
+beam_agent_routines:create(Job)                          -> {ok, JobRecord} | {error, Reason}
+beam_agent_routines:update(JobId, Patch)                -> {ok, JobRecord} | {error, Reason}
+beam_agent_routines:due(Filter)                         -> {ok, [JobRecord]} | {error, Reason}
+beam_agent_routines:run_due(Opts)                       -> {ok, [map()]} | {error, Reason}
+beam_agent_routines:run_now(JobId)                      -> {ok, Run} | {error, Reason}
+beam_agent_routines:next_due_at()                       -> {ok, DueAt} | {error, none}
+
+%% Canonical orchestration -- beam_agent_orchestrator
+beam_agent_orchestrator:spawn(Parent, Opts)             -> {ok, Child} | {error, Reason}
+beam_agent_orchestrator:delegate(Parent, Task, Opts)    -> {ok, Run} | {error, Reason}
+beam_agent_orchestrator:await(RunId, Timeout)           -> {ok, Result} | {error, Reason}
+beam_agent_orchestrator:collect(RunId, Opts)            -> {ok, map()} | {error, Reason}
+beam_agent_orchestrator:cancel(RunId, Reason)           -> ok | {error, Reason}
+beam_agent_orchestrator:status(RunId)                   -> {ok, map()} | {error, not_found}
+beam_agent_orchestrator:list_children(Parent)           -> {ok, [map()]} | {error, Reason}
+
+%% Canonical context management -- beam_agent_context
+beam_agent_context:context_status(SessionOrThread)       -> {ok, Status} | {error, Reason}
+beam_agent_context:budget_estimate(SessionOrThread)      -> {ok, Budget} | {error, Reason}
+beam_agent_context:compact_now(SessionOrThread, Opts)    -> {ok, Result} | {error, Reason}
+beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {error, Reason}
 ```
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
-`BeamAgent.SessionStore` and `BeamAgent.Threads`, and the runtime/catalog
-layers through `BeamAgent.Runtime`, `BeamAgent.Catalog`,
-`BeamAgent.Capabilities`, and `BeamAgent.Raw`.
+`BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
+`BeamAgent.Artifacts`, `BeamAgent.Audit`, `BeamAgent.Context`,
+`BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`,
+`BeamAgent.Routing`, `BeamAgent.Routines`, and
+the runtime/catalog layers through `BeamAgent.Runtime`,
+`BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.
+Internally, the newer canonical stores route through `beam_agent_store` with
+`beam_agent_store_ets` as the default adapter, preserving the existing
+process-free ETS plus hardened table-owner behavior.
+
+For a domain-by-domain explanation of ownership, storage, and process
+boundaries, see [docs/guides/canonical_domain_guide.md](docs/guides/canonical_domain_guide.md).
 
 ## Unified Message Format
 
@@ -374,8 +495,11 @@ Hook events: `pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `stop`,
 
 ### Telemetry
 
-All adapters emit telemetry events at key points (query lifecycle, command
-execution, state transitions, buffer overflow). The `telemetry` library is an
+BeamAgent emits telemetry at key points across both backend session handling and
+the canonical runtime domains added in this repo: query lifecycle, command
+execution, run and step lifecycle, routing decisions, artifact and memory
+operations, journal replay, routines, orchestration, policy evaluation, audit,
+context compaction, and buffer overflow. The `telemetry` library is an
 **optional** dependency — when present, events are emitted via
 `telemetry:execute/3`; when absent, emission is a silent no-op with zero
 overhead.
@@ -384,12 +508,24 @@ To opt in, add `{telemetry, "~> 1.3"}` to your application's `deps` and
 `applications` list, then attach handlers:
 
 ```erlang
-telemetry:attach(my_handler, [beam_agent, query, stop], fun handle/4, #{}).
+telemetry:attach(my_handler, [beam_agent, command, run, stop], fun handle/4, #{}).
 ```
 
-Events: `[beam_agent, query, start|stop|exception]`,
-`[beam_agent, command, run, start|stop|exception]`,
-`[beam_agent, message, received]`, `[beam_agent, session, start|stop]`.
+Representative events:
+- `[beam_agent, claude, query, start|stop|exception]`
+- `[beam_agent, command, run, start|stop|exception]`
+- `[beam_agent, run, state_change]`
+- `[beam_agent, artifact, put|search, start|stop|exception]`
+- `[beam_agent, journal, append|stream_from, start|stop|exception]`
+- `[beam_agent, memory, remember|search, start|stop|exception]`
+- `[beam_agent, routing, select_backend, start|stop|exception]`
+- `[beam_agent, context, maybe_compact, start|stop|exception]`
+- `[beam_agent, context, state_change]`
+- `[beam_agent, routine, create|run_due, start|stop|exception]`
+- `[beam_agent, orchestrator, delegate|collect, start|stop|exception]`
+- `[beam_agent, policy, evaluate, start|stop|exception]`
+- `[beam_agent, audit, record|list_events, start|stop|exception]`
+- `[beam_agent, buffer, overflow]`
 
 ### ETS Initialization
 

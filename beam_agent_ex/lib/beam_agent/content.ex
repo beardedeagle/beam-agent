@@ -41,7 +41,7 @@ defmodule BeamAgent.Content do
   - **Content Blocks**: structured representations of message fragments. Each
     block has a `:type` (`:text`, `:thinking`, `:tool_use`, `:tool_result`,
     `:raw`) and type-specific fields. Unknown block types are preserved as
-    `:raw` blocks for forward compatibility.
+    `:raw` blocks so the original payload is still available.
 
   - **Normalisation**: the primary parity function. `normalize_messages/1` takes
     messages from any adapter and produces a uniform flat stream where each
@@ -68,8 +68,7 @@ defmodule BeamAgent.Content do
   - `%{type: :thinking, thinking: binary()}`
   - `%{type: :tool_use, id: binary(), name: binary(), input: map()}`
   - `%{type: :tool_result, tool_use_id: binary(), content: binary()}`
-  - `%{type: :raw, raw: map()}` — unknown block type, preserved for forward
-    compatibility
+  - `%{type: :raw, raw: map()}` — unknown block type, preserved verbatim
   """
   @type content_block() :: %{
           required(:type) => :text | :thinking | :tool_use | :tool_result | :raw,

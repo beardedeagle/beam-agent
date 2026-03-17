@@ -297,6 +297,12 @@ defmodule BeamAgent.Capabilities do
       {:ok, caps} = BeamAgent.Capabilities.capabilities(:claude)
       {:ok, caps} = BeamAgent.Capabilities.capabilities(session)
   """
-  @spec capabilities(pid() | atom() | binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec capabilities(pid() | atom() | binary()) ::
+          {:ok, [map()]}
+          | {:error,
+             :backend_not_present
+             | {:invalid_session_info, term()}
+             | {:session_backend_lookup_failed, term()}
+             | {:unknown_backend, term()}}
   defdelegate capabilities(value), to: :beam_agent_capabilities
 end
