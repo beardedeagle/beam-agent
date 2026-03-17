@@ -1,14 +1,14 @@
 -module(beam_agent_journal_store).
 -moduledoc """
-Internal ETS storage for the BeamAgent durable event journal.
+Internal store-backed persistence for the BeamAgent durable event journal.
 
 The journal is append-only domain event storage. This module owns the raw
 persistence tables and ordered replay mechanics; it intentionally does not
 normalize inputs or decide which domains should emit which events. Those
 concerns live in `beam_agent_journal_core` and the calling domain modules.
 
-The store remains process-free and uses `beam_agent_ets` so the same code
-works in both public and hardened table-access modes.
+The default adapter remains process-free ETS via `beam_agent_store_ets`, so
+the same code works in both public and hardened table-access modes.
 """.
 
 -export([
@@ -57,15 +57,18 @@ works in both public and hardened table-access modes.
 -define(EVENTS_TABLE, beam_agent_journal_events).
 -define(SEQUENCE_TABLE, beam_agent_journal_sequence).
 -define(ACKS_TABLE, beam_agent_journal_acks).
+-define(STORE_DOMAIN, journal).
 
 -doc "Ensure the journal ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?EVENTS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?EVENTS_TABLE, [set,
+        named_table,
         {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?SEQUENCE_TABLE, [ordered_set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?SEQUENCE_TABLE, [ordered_set,
+        named_table,
         {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?ACKS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?ACKS_TABLE, [set, named_table,
         {read_concurrency, true}]),
     ok.
 
@@ -73,9 +76,9 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?EVENTS_TABLE),
-    beam_agent_ets:delete_all_objects(?SEQUENCE_TABLE),
-    beam_agent_ets:delete_all_objects(?ACKS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?EVENTS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?SEQUENCE_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?ACKS_TABLE),
     ok.
 
 -doc "Insert a new journal event. Returns false when the event_id already exists.".
@@ -83,9 +86,11 @@ clear() ->
 insert_event(#{event_id := EventId, sequence := Sequence} = Entry)
   when is_binary(EventId), is_integer(Sequence), Sequence > 0 ->
     ensure_tables(),
-    case beam_agent_ets:insert_new(?EVENTS_TABLE, {EventId, Entry}) of
+    case beam_agent_store:insert_new(?STORE_DOMAIN, ?EVENTS_TABLE,
+        {EventId, Entry}) of
         true ->
-            true = beam_agent_ets:insert_new(?SEQUENCE_TABLE, {Sequence, EventId}),
+            true = beam_agent_store:insert_new(?STORE_DOMAIN, ?SEQUENCE_TABLE,
+                {Sequence, EventId}),
             true;
         false ->
             false
@@ -95,7 +100,7 @@ insert_event(#{event_id := EventId, sequence := Sequence} = Entry)
 -spec get_event(binary()) -> {ok, event_record()} | {error, not_found}.
 get_event(EventId) when is_binary(EventId) ->
     ensure_tables(),
-    case ets:lookup(?EVENTS_TABLE, EventId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?EVENTS_TABLE, EventId) of
         [{_, Entry}] -> {ok, Entry};
         [] -> {error, not_found}
     end.
@@ -122,7 +127,8 @@ ack_event(ConsumerId, EventId, AcknowledgedAt)
                 event_id => EventId,
                 acknowledged_at => AcknowledgedAt
             },
-            _ = beam_agent_ets:insert_new(?ACKS_TABLE, {{ConsumerId, EventId}, Ack}),
+            _ = beam_agent_store:insert_new(?STORE_DOMAIN, ?ACKS_TABLE,
+                {{ConsumerId, EventId}, Ack}),
             ok;
         {error, not_found} ->
             {error, not_found}
@@ -132,11 +138,11 @@ ack_event(ConsumerId, EventId, AcknowledgedAt)
 start_key(Filter) ->
     case maps:get(after_sequence, Filter, undefined) of
         undefined ->
-            ets:first(?SEQUENCE_TABLE);
+            beam_agent_store:first(?STORE_DOMAIN, ?SEQUENCE_TABLE);
         0 ->
-            ets:first(?SEQUENCE_TABLE);
+            beam_agent_store:first(?STORE_DOMAIN, ?SEQUENCE_TABLE);
         After when is_integer(After), After >= 0 ->
-            ets:next(?SEQUENCE_TABLE, After)
+            beam_agent_store:next(?STORE_DOMAIN, ?SEQUENCE_TABLE, After)
     end.
 
 -spec collect_events('$end_of_table' | pos_integer(), event_filter(),
@@ -146,7 +152,7 @@ collect_events('$end_of_table', _Filter, _Limit, Acc) ->
 collect_events(_Key, _Filter, 0, Acc) ->
     Acc;
 collect_events(Sequence, Filter, Limit, Acc) when is_integer(Sequence), Sequence > 0 ->
-    NextKey = ets:next(?SEQUENCE_TABLE, Sequence),
+    NextKey = beam_agent_store:next(?STORE_DOMAIN, ?SEQUENCE_TABLE, Sequence),
     {NextAcc, Matched} = case lookup_sequence_event(Sequence) of
         {ok, Entry} ->
             case matches_filters(Entry, Filter) of
@@ -161,7 +167,7 @@ collect_events(Sequence, Filter, Limit, Acc) when is_integer(Sequence), Sequence
 
 -spec lookup_sequence_event(pos_integer()) -> {ok, event_record()} | {error, not_found}.
 lookup_sequence_event(Sequence) ->
-    case ets:lookup(?SEQUENCE_TABLE, Sequence) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SEQUENCE_TABLE, Sequence) of
         [{_, EventId}] ->
             get_event(EventId);
         [] ->

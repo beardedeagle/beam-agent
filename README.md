@@ -82,9 +82,13 @@ Add the canonical SDK to your `rebar.config` deps:
 ```
 
 ```erlang
-%% Start a Claude Code session through the canonical SDK
+%% Start a routed session through the canonical SDK
 {ok, Session} = beam_agent:start_session(#{
-    backend => claude,
+    backend => auto,
+    routing => #{
+        policy => preferred_then_fallback,
+        preferred_backends => [claude, codex]
+    },
     cli_path => "/usr/local/bin/claude",
     permission_mode => <<"bypassPermissions">>
 }),
@@ -109,7 +113,12 @@ end
 ```
 
 ```elixir
-{:ok, session} = BeamAgent.start_session(backend: :claude, cli_path: "claude")
+{:ok, session} =
+  BeamAgent.start_session(
+    backend: :auto,
+    routing: %{policy: :preferred_then_fallback, preferred_backends: [:claude, :codex]},
+    cli_path: "claude"
+  )
 
 # Streaming query — lazy enumerable
 session
@@ -154,6 +163,10 @@ session_info(Pid)      -> {ok, Map} | {error, Reason}
 child_spec(Opts)       -> supervisor:child_spec()
 ```
 
+`start_session/1` accepts either an explicit backend or `backend => auto`
+plus a `routing` request map. The canonical routing domain is exposed through
+`beam_agent_routing` / `BeamAgent.Routing`.
+
 Elixir adds `stream!/3` and `stream/3` (lazy `Stream.resource/3`-based
 enumerables) on top of the same canonical surface.
 
@@ -164,7 +177,7 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
-`beam_agent_journal`,
+`beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`, `beam_agent_routing`,
 `beam_agent_checkpoint`, `beam_agent_runs`). Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
@@ -174,7 +187,12 @@ All families have universal fallback coverage:
 - shared/native thread management
 - canonical run and step lifecycle
 - typed artifact and context storage
+- context pressure estimation and policy-driven compaction
 - durable canonical domain-event journal
+- long-term memory with lexical recall and expiry
+- internal store abstraction with ETS as the default canonical adapter
+- policy-driven backend routing with explicit, sticky, round-robin, failover,
+  capability-first, and preferred-then-fallback selection
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
@@ -232,13 +250,40 @@ beam_agent_journal:list(Filter)                          -> {ok, [Entry]} | {err
 beam_agent_journal:stream_from(Cursor, Filter)           -> {ok, [Entry]} | {error, Reason}
 beam_agent_journal:get(EventId)                          -> {ok, Entry} | {error, not_found}
 beam_agent_journal:ack(ConsumerId, EventId)              -> ok | {error, not_found}
+
+%% Long-term memory -- beam_agent_memory
+beam_agent_memory:remember(Scope, MemoryInput)           -> {ok, Memory} | {error, Reason}
+beam_agent_memory:remember(Scope, Kind, MemoryInput)     -> {ok, Memory} | {error, Reason}
+beam_agent_memory:get(MemoryId)                          -> {ok, Memory} | {error, not_found}
+beam_agent_memory:list(Filter)                           -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:recall(Scope, Query)                   -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:search(Query, Filter)                  -> {ok, [Memory]} | {error, Reason}
+beam_agent_memory:forget(MemoryId)                       -> ok | {error, not_found}
+beam_agent_memory:pin(MemoryId)                          -> ok | {error, not_found}
+beam_agent_memory:unpin(MemoryId)                        -> ok | {error, not_found}
+beam_agent_memory:expire(Filter)                         -> {ok, Count} | {error, Reason}
+
+%% Canonical backend routing -- beam_agent_routing
+beam_agent_routing:select_backend(RouteRequest)          -> {ok, Decision} | {error, Reason}
+beam_agent_routing:select_backend(SessionOrOpts, RouteRequest) ->
+    {ok, Decision} | {error, Reason}
+
+%% Canonical context management -- beam_agent_context
+beam_agent_context:context_status(SessionOrThread)       -> {ok, Status} | {error, Reason}
+beam_agent_context:budget_estimate(SessionOrThread)      -> {ok, Budget} | {error, Reason}
+beam_agent_context:compact_now(SessionOrThread, Opts)    -> {ok, Result} | {error, Reason}
+beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {error, Reason}
 ```
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
-`BeamAgent.Artifacts`, and
+`BeamAgent.Artifacts`, `BeamAgent.Context`, `BeamAgent.Memory`,
+`BeamAgent.Routing`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,
 `BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.
+Internally, the newer canonical stores route through `beam_agent_store` with
+`beam_agent_store_ets` as the default adapter, preserving the existing
+process-free ETS plus hardened table-owner behavior.
 
 ## Unified Message Format
 

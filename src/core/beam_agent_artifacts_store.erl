@@ -1,10 +1,11 @@
 -module(beam_agent_artifacts_store).
 -moduledoc """
-Internal ETS storage for BeamAgent artifacts.
+Internal store-backed persistence for BeamAgent artifacts.
 
 This module owns the raw persistence shape for canonical artifact records.
 It does not validate scope consistency or search semantics. Those concerns
-belong in beam_agent_artifacts_core.
+belong in beam_agent_artifacts_core. The default adapter is ETS via
+`beam_agent_store_ets`.
 """.
 
 -export([
@@ -61,32 +62,35 @@ belong in beam_agent_artifacts_core.
 }.
 
 -define(ARTIFACTS_TABLE, beam_agent_artifact_records).
+-define(STORE_DOMAIN, artifacts).
 
 -doc "Ensure the artifacts ETS table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?ARTIFACTS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?ARTIFACTS_TABLE, [set,
+        named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all artifact records.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?ARTIFACTS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?ARTIFACTS_TABLE),
     ok.
 
 -doc "Insert or overwrite an artifact record.".
 -spec put_artifact(artifact_record()) -> ok.
 put_artifact(#{artifact_id := ArtifactId} = Artifact) when is_binary(ArtifactId) ->
     ensure_tables(),
-    true = beam_agent_ets:insert(?ARTIFACTS_TABLE, {ArtifactId, Artifact}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?ARTIFACTS_TABLE,
+        {ArtifactId, Artifact}),
     ok.
 
 -doc "Fetch an artifact by id.".
 -spec get_artifact(binary()) -> {ok, artifact_record()} | {error, not_found}.
 get_artifact(ArtifactId) when is_binary(ArtifactId) ->
     ensure_tables(),
-    case ets:lookup(?ARTIFACTS_TABLE, ArtifactId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId) of
         [{_, Artifact}] -> {ok, Artifact};
         [] -> {error, not_found}
     end.
@@ -95,9 +99,9 @@ get_artifact(ArtifactId) when is_binary(ArtifactId) ->
 -spec delete_artifact(binary()) -> ok | {error, not_found}.
 delete_artifact(ArtifactId) when is_binary(ArtifactId) ->
     ensure_tables(),
-    case ets:lookup(?ARTIFACTS_TABLE, ArtifactId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId) of
         [{_, _Artifact}] ->
-            beam_agent_ets:delete(?ARTIFACTS_TABLE, ArtifactId),
+            beam_agent_store:delete(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId),
             ok;
         [] ->
             {error, not_found}
@@ -107,7 +111,7 @@ delete_artifact(ArtifactId) when is_binary(ArtifactId) ->
 -spec list_artifacts(artifact_filter()) -> {ok, [artifact_record()]}.
 list_artifacts(Filter) when is_map(Filter) ->
     ensure_tables(),
-    Artifacts = ets:foldl(fun
+    Artifacts = beam_agent_store:foldl(?STORE_DOMAIN, fun
         ({_, Artifact}, Acc) ->
             case matches_filters(Artifact, Filter) of
                 true -> [Artifact | Acc];

@@ -1,6 +1,6 @@
 -module(beam_agent_runs_store).
 -moduledoc """
-Internal ETS storage for BeamAgent runs and steps.
+Internal store-backed persistence for BeamAgent runs and steps.
 
 This module owns the raw persistence shape for durable run and step
 records. It intentionally contains no lifecycle validation or transition
@@ -8,8 +8,8 @@ logic. Higher-level invariants such as parent scope inheritance,
 terminal-state enforcement, and step cascading live in
 beam_agent_runs_core.
 
-The store is ETS-backed and uses beam_agent_ets so the same code works in
-both public and hardened table-access modes. Reads stay direct. Writes are
+The default adapter is ETS via `beam_agent_store_ets`, so the same code works
+in both public and hardened table-access modes. Reads stay direct. Writes are
 proxied through the table owner in hardened mode.
 """.
 
@@ -83,6 +83,7 @@ proxied through the table owner in hardened mode.
 
 -define(RUNS_TABLE, beam_agent_run_records).
 -define(STEPS_TABLE, beam_agent_run_steps).
+-define(STORE_DOMAIN, runs).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -91,9 +92,9 @@ proxied through the table owner in hardened mode.
 -doc "Ensure the runs ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?RUNS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?RUNS_TABLE, [set, named_table,
         {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?STEPS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?STEPS_TABLE, [set, named_table,
         {read_concurrency, true}]),
     ok.
 
@@ -101,8 +102,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?RUNS_TABLE),
-    beam_agent_ets:delete_all_objects(?STEPS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?RUNS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?STEPS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -113,20 +114,20 @@ clear() ->
 -spec insert_run(run_record()) -> boolean().
 insert_run(#{run_id := RunId} = Run) when is_binary(RunId) ->
     ensure_tables(),
-    beam_agent_ets:insert_new(?RUNS_TABLE, {RunId, Run}).
+    beam_agent_store:insert_new(?STORE_DOMAIN, ?RUNS_TABLE, {RunId, Run}).
 
 -doc "Overwrite or insert a run record.".
 -spec put_run(run_record()) -> ok.
 put_run(#{run_id := RunId} = Run) when is_binary(RunId) ->
     ensure_tables(),
-    true = beam_agent_ets:insert(?RUNS_TABLE, {RunId, Run}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?RUNS_TABLE, {RunId, Run}),
     ok.
 
 -doc "Fetch a run by id.".
 -spec get_run(binary()) -> {ok, run_record()} | {error, not_found}.
 get_run(RunId) when is_binary(RunId) ->
     ensure_tables(),
-    case ets:lookup(?RUNS_TABLE, RunId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?RUNS_TABLE, RunId) of
         [{_, Run}] -> {ok, Run};
         [] -> {error, not_found}
     end.
@@ -135,7 +136,7 @@ get_run(RunId) when is_binary(RunId) ->
 -spec list_runs(run_filter()) -> {ok, [run_record()]}.
 list_runs(Filter) when is_map(Filter) ->
     ensure_tables(),
-    Runs = ets:foldl(fun
+    Runs = beam_agent_store:foldl(?STORE_DOMAIN, fun
         ({_, Run}, Acc) ->
             case matches_filters(Run, Filter) of
                 true -> [Run | Acc];
@@ -155,7 +156,7 @@ insert_step(#{run_id := RunId, step_id := StepId} = Step)
   when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
     Key = {RunId, StepId},
-    beam_agent_ets:insert_new(?STEPS_TABLE, {Key, Step}).
+    beam_agent_store:insert_new(?STORE_DOMAIN, ?STEPS_TABLE, {Key, Step}).
 
 -doc "Overwrite or insert a step record.".
 -spec put_step(step_record()) -> ok.
@@ -163,7 +164,7 @@ put_step(#{run_id := RunId, step_id := StepId} = Step)
   when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
     Key = {RunId, StepId},
-    true = beam_agent_ets:insert(?STEPS_TABLE, {Key, Step}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?STEPS_TABLE, {Key, Step}),
     ok.
 
 -doc "Fetch a step by run id and step id.".
@@ -171,7 +172,7 @@ put_step(#{run_id := RunId, step_id := StepId} = Step)
 get_step(RunId, StepId) when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
     Key = {RunId, StepId},
-    case ets:lookup(?STEPS_TABLE, Key) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?STEPS_TABLE, Key) of
         [{_, Step}] -> {ok, Step};
         [] -> {error, not_found}
     end.
@@ -180,7 +181,7 @@ get_step(RunId, StepId) when is_binary(RunId), is_binary(StepId) ->
 -spec list_steps(binary()) -> {ok, [step_record()]}.
 list_steps(RunId) when is_binary(RunId) ->
     ensure_tables(),
-    Steps = ets:foldl(fun
+    Steps = beam_agent_store:foldl(?STORE_DOMAIN, fun
         ({{StepRunId, _}, Step}, Acc) when StepRunId =:= RunId ->
             [Step | Acc];
         (_, Acc) ->

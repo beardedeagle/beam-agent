@@ -4,6 +4,7 @@ defmodule BeamAgentTest do
   @domain_modules [
     BeamAgent,
     BeamAgent.Capabilities,
+    BeamAgent.Context,
     BeamAgent.Runtime,
     BeamAgent.Catalog,
     BeamAgent.Control,
@@ -14,7 +15,9 @@ defmodule BeamAgentTest do
     BeamAgent.Config,
     BeamAgent.File,
     BeamAgent.Journal,
+    BeamAgent.Memory,
     BeamAgent.Provider,
+    BeamAgent.Routing,
     BeamAgent.Account,
     BeamAgent.Artifacts,
     BeamAgent.Search,
@@ -52,6 +55,23 @@ defmodule BeamAgentTest do
     assert {:ok, "openai"} = BeamAgent.Runtime.current_provider(session)
     assert :ok = BeamAgent.Runtime.clear_provider(session)
     assert {:error, :not_set} = BeamAgent.Runtime.current_provider(session)
+  end
+
+  test "context wrapper exports budget estimation" do
+    assert function_exported?(BeamAgent.Context, :context_status, 1)
+    assert function_exported?(BeamAgent.Context, :budget_estimate, 1)
+    assert function_exported?(BeamAgent.Context, :compact_now, 2)
+    assert function_exported?(BeamAgent.Context, :maybe_compact, 2)
+  end
+
+  test "routing wrapper chooses the preferred backend" do
+    assert {:ok, decision} =
+             BeamAgent.Routing.select_backend(%{
+               policy: :preferred_then_fallback,
+               preferred_backends: [:gemini, :codex]
+             })
+
+    assert decision.backend == :gemini
   end
 
   test "provider wrapper accepts session identity binaries for universal flows" do
@@ -286,6 +306,24 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Journal, :stream_from, 2)
     assert function_exported?(BeamAgent.Journal, :get, 1)
     assert function_exported?(BeamAgent.Journal, :ack, 2)
+  end
+
+  test "Memory module exposes long-term memory functions" do
+    assert function_exported?(BeamAgent.Memory, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Memory, :clear, 0)
+    assert function_exported?(BeamAgent.Memory, :remember, 2)
+    assert function_exported?(BeamAgent.Memory, :remember, 3)
+    assert function_exported?(BeamAgent.Memory, :get, 1)
+    assert function_exported?(BeamAgent.Memory, :list, 0)
+    assert function_exported?(BeamAgent.Memory, :list, 1)
+    assert function_exported?(BeamAgent.Memory, :recall, 2)
+    assert function_exported?(BeamAgent.Memory, :search, 1)
+    assert function_exported?(BeamAgent.Memory, :search, 2)
+    assert function_exported?(BeamAgent.Memory, :forget, 1)
+    assert function_exported?(BeamAgent.Memory, :pin, 1)
+    assert function_exported?(BeamAgent.Memory, :unpin, 1)
+    assert function_exported?(BeamAgent.Memory, :expire, 0)
+    assert function_exported?(BeamAgent.Memory, :expire, 1)
   end
 
   test "Control module exports turn steering and collaboration functions" do

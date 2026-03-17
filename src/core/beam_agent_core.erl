@@ -341,7 +341,8 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 
 %% Options for establishing an agent session.
 -type session_opts() :: #{
-    backend => backend(),
+    backend => backend() | auto,
+    routing => beam_agent_routing_core:route_request(),
     cli_path => file:filename_all(),
     work_dir => file:filename_all(),
     env => [{string(), string()}],

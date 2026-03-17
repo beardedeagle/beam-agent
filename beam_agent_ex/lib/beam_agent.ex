@@ -4,8 +4,8 @@ defmodule BeamAgent do
   agentic coder backends: Claude, Codex, Gemini, OpenCode, and Copilot.
 
   `BeamAgent` is the primary entry point for session lifecycle, queries,
-  streaming, threads, session history, durable runs, and journal-backed
-  domain events. Domain-specific features --
+  streaming, threads, session history, durable runs, long-term memory, journal-backed
+  domain events, and policy-driven backend routing. Domain-specific features --
   skills, apps, files, MCP, accounts, search, configuration, and more --
   live in focused submodules (see Submodules below) and work identically
   across all five backends thanks to native-first routing with universal
@@ -15,7 +15,11 @@ defmodule BeamAgent do
 
   Start a session, send a query, and process the response:
 
-      {:ok, session} = BeamAgent.start_session(%{backend: :claude})
+      {:ok, session} =
+        BeamAgent.start_session(%{
+          backend: :auto,
+          routing: %{policy: :preferred_then_fallback, preferred_backends: [:claude, :codex]}
+        })
       {:ok, messages} = BeamAgent.query(session, "What is the BEAM?")
 
       for %{content: content} <- messages do
@@ -128,12 +132,15 @@ defmodule BeamAgent do
   - `BeamAgent.Command` -- shell commands, session messages, async prompts
   - `BeamAgent.Config` -- session configuration read/write
   - `BeamAgent.Control` -- turn steering, realtime, reviews, server management
+  - `BeamAgent.Context` -- context pressure, summaries, and policy-driven compaction
   - `BeamAgent.File` -- file search, read, list, and status
   - `BeamAgent.Hooks` -- SDK lifecycle hook definitions and dispatch
   - `BeamAgent.Journal` -- durable canonical domain-event journal
+  - `BeamAgent.Memory` -- long-term memory and lexical recall
   - `BeamAgent.MCP` -- MCP server/tool registration and management
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
+  - `BeamAgent.Routing` -- backend routing and policy-driven selection
   - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
   - `BeamAgent.Runs` -- canonical run and step lifecycle
   - `BeamAgent.Search` -- fuzzy file search sessions
@@ -146,8 +153,8 @@ defmodule BeamAgent do
   - **Sessions**: A session is a connection to one AI backend. You start one,
     send queries, and stop it when done. Think of it like a phone call to an AI.
   - **The five backends**: BeamAgent wraps Claude, Codex, Gemini, OpenCode, and
-    Copilot. You pick one when starting a session, but the API is the same for
-    all of them.
+    Copilot. You can pick one directly or ask BeamAgent routing to select one
+    with `backend: :auto`, and the API is the same for all of them.
   - **Queries**: `query/2` sends a prompt and waits for the complete response.
     `event_subscribe/1` + `receive_event/2` gives you streaming responses piece
     by piece.

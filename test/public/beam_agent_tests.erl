@@ -116,6 +116,70 @@ exports_journal_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_journal, get, 1)),
     ?assert(erlang:function_exported(beam_agent_journal, ack, 2)).
 
+exports_memory_domain_surface_test() ->
+    ensure_loaded(beam_agent_memory),
+    ?assert(erlang:function_exported(beam_agent_memory, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_memory, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_memory, remember, 2)),
+    ?assert(erlang:function_exported(beam_agent_memory, remember, 3)),
+    ?assert(erlang:function_exported(beam_agent_memory, get, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, list, 0)),
+    ?assert(erlang:function_exported(beam_agent_memory, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, recall, 2)),
+    ?assert(erlang:function_exported(beam_agent_memory, search, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, search, 2)),
+    ?assert(erlang:function_exported(beam_agent_memory, forget, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, pin, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, unpin, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, expire, 0)),
+    ?assert(erlang:function_exported(beam_agent_memory, expire, 1)).
+
+exports_context_domain_surface_test() ->
+    ensure_loaded(beam_agent_context),
+    ?assert(erlang:function_exported(beam_agent_context, context_status, 1)),
+    ?assert(erlang:function_exported(beam_agent_context, budget_estimate, 1)),
+    ?assert(erlang:function_exported(beam_agent_context, compact_now, 2)),
+    ?assert(erlang:function_exported(beam_agent_context, maybe_compact, 2)).
+
+exports_routing_domain_surface_test() ->
+    ensure_loaded(beam_agent_routing),
+    ?assert(erlang:function_exported(beam_agent_routing, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_routing, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_routing, select_backend, 1)),
+    ?assert(erlang:function_exported(beam_agent_routing, select_backend, 2)).
+
+child_spec_auto_routing_matches_explicit_backend_test() ->
+    Auto = beam_agent:child_spec(#{
+        backend => auto,
+        routing => #{
+            policy => preferred_then_fallback,
+            preferred_backends => [gemini]
+        }
+    }),
+    Direct = beam_agent:child_spec(#{backend => gemini}),
+    ?assertEqual(Direct, Auto).
+
+start_session_auto_routing_matches_explicit_backend_test() ->
+    PreviousTrapExit = process_flag(trap_exit, true),
+    try
+        DirectResult = beam_agent:start_session(#{
+            backend => gemini,
+            cli_path => <<"/definitely/not/a/real-gemini-binary">>
+        }),
+        AutoResult = beam_agent:start_session(#{
+            backend => auto,
+            routing => #{
+                policy => preferred_then_fallback,
+                preferred_backends => [gemini]
+            },
+            cli_path => <<"/definitely/not/a/real-gemini-binary">>
+        }),
+        assert_start_results_match(DirectResult, AutoResult)
+    after
+        process_flag(trap_exit, PreviousTrapExit),
+        flush_exit_messages()
+    end.
+
 exports_claude_native_controls_test() ->
     lists:foreach(fun ensure_loaded/1, [beam_agent_checkpoint, beam_agent_runtime,
                                          beam_agent_mcp, beam_agent_session_store]),
@@ -204,3 +268,37 @@ exports_copilot_native_admin_surface_test() ->
 ensure_loaded(Mod) ->
     {module, Mod} = code:ensure_loaded(Mod),
     ok.
+
+assert_start_results_match({ok, DirectSession}, {ok, AutoSession}) ->
+    try
+        ?assertEqual({ok, gemini}, beam_agent:backend(DirectSession)),
+        ?assertEqual({ok, gemini}, beam_agent:backend(AutoSession))
+    after
+        maybe_stop_session(DirectSession),
+        maybe_stop_session(AutoSession)
+    end;
+assert_start_results_match({error, DirectReason}, {error, AutoReason}) ->
+    ?assertEqual(DirectReason, AutoReason);
+assert_start_results_match({'EXIT', DirectReason}, {'EXIT', AutoReason}) ->
+    ?assertEqual(DirectReason, AutoReason);
+assert_start_results_match(DirectResult, AutoResult) ->
+    maybe_stop_start_result(DirectResult),
+    maybe_stop_start_result(AutoResult),
+    ?assertEqual(DirectResult, AutoResult).
+
+maybe_stop_start_result({ok, Session}) when is_pid(Session) ->
+    maybe_stop_session(Session);
+maybe_stop_start_result(_) ->
+    ok.
+
+maybe_stop_session(Session) when is_pid(Session) ->
+    catch beam_agent:stop(Session),
+    ok.
+
+flush_exit_messages() ->
+    receive
+        {'EXIT', _Pid, _Reason} ->
+            flush_exit_messages()
+    after 0 ->
+        ok
+    end.

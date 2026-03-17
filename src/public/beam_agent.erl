@@ -15,10 +15,13 @@ public modules:
 - beam_agent_command: command execution, stdin, shell, async prompts
 - beam_agent_config: session configuration read/write
 - beam_agent_control: collaboration, review, realtime, server admin
+- beam_agent_context: context pressure, summaries, and policy-driven compaction
 - beam_agent_file: text search, file search, directory listing
 - beam_agent_journal: durable canonical domain-event journal
+- beam_agent_memory: long-term memory and recall
 - beam_agent_mcp: MCP server management
 - beam_agent_provider: provider and agent selection, OAuth
+- beam_agent_routing: backend routing and policy-driven selection
 - beam_agent_runtime: model, permissions, status, interrupts
 - beam_agent_runs: canonical run and step lifecycle
 - beam_agent_search: fuzzy file search
@@ -124,8 +127,9 @@ Key fields:
 -doc """
 Options map for establishing a session via start_session/1.
 
-Required:
-  - backend: one of claude, codex, gemini, opencode, or copilot
+Routing:
+  - backend: one of claude, codex, gemini, opencode, copilot, or auto
+  - routing: optional backend-routing policy request map
 
 Common options:
   - cli_path: path to the backend CLI executable
@@ -268,7 +272,11 @@ Returns {ok, Pid} on success where Pid is the session process, or
 
 ```erlang
 {ok, Session} = beam_agent:start_session(#{
-    backend => claude,
+    backend => auto,
+    routing => #{
+        policy => preferred_then_fallback,
+        preferred_backends => [claude, codex]
+    },
     model => <<"claude-sonnet-4-20250514">>,
     system_prompt => <<"You are a helpful assistant.">>,
     permission_mode => default
