@@ -132,7 +132,8 @@ pin_unpin_forget_and_journal_events_test() ->
     ok = beam_agent_memory_core:forget(MemoryId),
     ?assertEqual({error, not_found}, beam_agent_memory_core:get(MemoryId)),
     {ok, Entries} = beam_agent_journal_core:list(#{tag => memory}),
-    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries],
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries,
+        maps:get(event_type, Entry) =/= <<"audit">>],
     ?assertEqual([
         <<"memory_remembered">>,
         <<"memory_pinned">>,

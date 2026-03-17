@@ -125,6 +125,7 @@ defmodule BeamAgent do
 
   - `BeamAgent.Account` -- authentication, login/logout, rate limits
   - `BeamAgent.Artifacts` -- typed artifact and context storage
+  - `BeamAgent.Audit` -- durable audit records layered on the journal
   - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Capabilities` -- backend capability matrix and checks
   - `BeamAgent.Catalog` -- tools, skills, plugins, agents, models, commands
@@ -138,6 +139,8 @@ defmodule BeamAgent do
   - `BeamAgent.Journal` -- durable canonical domain-event journal
   - `BeamAgent.Memory` -- long-term memory and lexical recall
   - `BeamAgent.MCP` -- MCP server/tool registration and management
+  - `BeamAgent.Orchestrator` -- parent-child orchestration and delegation lineage
+  - `BeamAgent.Policy` -- reusable allow/deny policy profiles
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
   - `BeamAgent.Routing` -- backend routing and policy-driven selection

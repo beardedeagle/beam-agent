@@ -8,6 +8,7 @@ public modules:
 
 - beam_agent_account: login, logout, rate limits
 - beam_agent_artifacts: typed artifact and context storage
+- beam_agent_audit: durable audit records layered on the journal
 - beam_agent_apps: app/project management
 - beam_agent_capabilities: feature introspection
 - beam_agent_catalog: tools, skills, plugins, agents, models
@@ -20,6 +21,8 @@ public modules:
 - beam_agent_journal: durable canonical domain-event journal
 - beam_agent_memory: long-term memory and recall
 - beam_agent_mcp: MCP server management
+- beam_agent_policy: reusable allow/deny policy profiles
+- beam_agent_orchestrator: parent-child orchestration and delegation lineage
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_routing: backend routing and policy-driven selection
 - beam_agent_routines: durable routines and caller-driven scheduled execution

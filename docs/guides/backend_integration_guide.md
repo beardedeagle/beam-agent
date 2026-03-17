@@ -1250,6 +1250,9 @@ query(Session, Prompt, Params) ->
 %%   beam_agent_runs_core (runs and steps)
 %%   beam_agent_memory_core (long-term memory)
 %%   beam_agent_journal_core (durable canonical domain events)
+%%   beam_agent_audit_core (journal-backed canonical audit records)
+%%   beam_agent_orchestrator_core (parent-child orchestration lineage)
+%%   beam_agent_policy_core (deterministic allow/deny policy evaluation)
 %%   beam_agent_control_core (permission mode, thinking budget, tasks)
 %%   beam_agent_checkpoint_core (file checkpointing)
 %%   beam_agent_events (event streaming)
@@ -1421,8 +1424,11 @@ fallback path:
 | `beam_agent_threads_core` | Thread lifecycle, fork, archive, rollback |
 | `beam_agent_runs_core` | Run lifecycle, step lifecycle, parent-child scope |
 | `beam_agent_artifacts_core` | Typed artifact storage, linkage, and search |
+| `beam_agent_audit_core` | Journal-backed audit records and filtering |
 | `beam_agent_memory_core` | Long-term memory, lexical recall, TTL expiry |
 | `beam_agent_journal_core` | Durable canonical domain-event journal and replay |
+| `beam_agent_orchestrator_core` | Cross-session orchestration lineage, delegation, await/collect |
+| `beam_agent_policy_core` | Deterministic allow/deny policy profiles |
 | `beam_agent_store` | Internal store adapter selection for canonical domains |
 | `beam_agent_store_ets` | Default ETS-backed adapter for canonical domain stores |
 | `beam_agent_file_core` | File search, find text, find symbols |

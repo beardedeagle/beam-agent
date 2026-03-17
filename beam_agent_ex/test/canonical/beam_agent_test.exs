@@ -9,6 +9,7 @@ defmodule BeamAgentTest do
     BeamAgent.Catalog,
     BeamAgent.Control,
     BeamAgent.Command,
+    BeamAgent.Audit,
     BeamAgent.MCP,
     BeamAgent.Skills,
     BeamAgent.Apps,
@@ -16,6 +17,8 @@ defmodule BeamAgentTest do
     BeamAgent.File,
     BeamAgent.Journal,
     BeamAgent.Memory,
+    BeamAgent.Policy,
+    BeamAgent.Orchestrator,
     BeamAgent.Provider,
     BeamAgent.Routines,
     BeamAgent.Routing,
@@ -65,6 +68,21 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Context, :maybe_compact, 2)
   end
 
+  test "audit wrapper exports canonical journal-backed audit accessors" do
+    assert function_exported?(BeamAgent.Audit, :list_events, 0)
+    assert function_exported?(BeamAgent.Audit, :list_events, 1)
+    assert function_exported?(BeamAgent.Audit, :get_event, 1)
+  end
+
+  test "policy wrapper exports canonical profile evaluation" do
+    assert function_exported?(BeamAgent.Policy, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Policy, :clear, 0)
+    assert function_exported?(BeamAgent.Policy, :put_profile, 2)
+    assert function_exported?(BeamAgent.Policy, :get_profile, 1)
+    assert function_exported?(BeamAgent.Policy, :list_profiles, 0)
+    assert function_exported?(BeamAgent.Policy, :evaluate, 3)
+  end
+
   test "routines wrapper exports durable scheduled execution" do
     assert function_exported?(BeamAgent.Routines, :ensure_tables, 0)
     assert function_exported?(BeamAgent.Routines, :clear, 0)
@@ -80,6 +98,18 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Routines, :run_now, 1)
     assert function_exported?(BeamAgent.Routines, :run_due, 0)
     assert function_exported?(BeamAgent.Routines, :run_due, 1)
+  end
+
+  test "orchestrator wrapper exports canonical lineage and delegation primitives" do
+    assert function_exported?(BeamAgent.Orchestrator, :ensure_tables, 0)
+    assert function_exported?(BeamAgent.Orchestrator, :clear, 0)
+    assert function_exported?(BeamAgent.Orchestrator, :spawn, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :delegate, 3)
+    assert function_exported?(BeamAgent.Orchestrator, :await, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :collect, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :cancel, 2)
+    assert function_exported?(BeamAgent.Orchestrator, :status, 1)
+    assert function_exported?(BeamAgent.Orchestrator, :list_children, 1)
   end
 
   test "routing wrapper chooses the preferred backend" do

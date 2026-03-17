@@ -455,7 +455,8 @@ journal_records_control_domain_events_test() ->
     }),
     ok = beam_agent_control_core:submit_feedback(SId, #{rating => great}),
     {ok, Entries} = beam_agent_journal_core:list(#{session_id => SId, tag => control}),
-    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries],
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries,
+        maps:get(event_type, Entry) =/= <<"audit">>],
     ?assertEqual([
         <<"task_registered">>,
         <<"model_updated">>,

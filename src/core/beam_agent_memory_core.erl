@@ -169,6 +169,7 @@ forget(MemoryId) when is_binary(MemoryId) ->
         {ok, Memory} ->
             ok = beam_agent_memory_store:delete_memory(MemoryId),
             {ok, _Entry} = append_memory_event(<<"memory_forgotten">>, Memory, #{}),
+            ok = audit_memory_event(forgotten, Memory, #{}),
             ok;
         {error, not_found} ->
             {error, not_found}
@@ -203,7 +204,8 @@ expire(FilterInput) when is_map(FilterInput) ->
                 ok = beam_agent_memory_store:delete_memory(maps:get(memory_id, Memory)),
                 {ok, _Entry} = append_memory_event(<<"memory_expired">>, Memory, #{
                     before => Now
-                })
+                }),
+                ok = audit_memory_event(expired, Memory, #{before => Now})
             end, Expirable),
             {ok, length(Expirable)};
         {error, _} = Error ->
@@ -224,25 +226,33 @@ remember_normalized(ScopeInput, EmbeddedScope, Input) ->
                     SourceRefs = maps:get(source_refs, Input, []),
                     case resolve_scope(Scope0, SourceRefs) of
                         {ok, Scope} ->
-                            Now = current_time_ms(),
-                            Memory = #{
-                                memory_id => maps:get(memory_id, Input, generate_memory_id()),
-                                kind => maps:get(kind, Input),
-                                content => maps:get(content, Input),
-                                attributes => maps:get(attributes, Input, #{}),
-                                source_refs => SourceRefs,
-                                scope => Scope,
-                                pinned => maps:get(pinned, Input, false),
-                                salience => maps:get(salience, Input, 0),
-                                ttl => maps:get(ttl, Input, infinity),
-                                created_at => Now,
-                                updated_at => Now
-                            },
-                            Memory2 = maybe_put(expires_at, expires_at(Memory, Now), Memory),
-                            ok = beam_agent_memory_store:put_memory(Memory2),
-                            {ok, _Entry} = append_memory_event(<<"memory_remembered">>,
-                                Memory2, #{}),
-                            {ok, Memory2};
+                            case evaluate_memory_policy(Input, Scope, SourceRefs) of
+                                allow ->
+                                    Now = current_time_ms(),
+                                    Memory = #{
+                                        memory_id => maps:get(memory_id, Input,
+                                            generate_memory_id()),
+                                        kind => maps:get(kind, Input),
+                                        content => maps:get(content, Input),
+                                        attributes => maps:get(attributes, Input, #{}),
+                                        source_refs => SourceRefs,
+                                        scope => Scope,
+                                        pinned => maps:get(pinned, Input, false),
+                                        salience => maps:get(salience, Input, 0),
+                                        ttl => maps:get(ttl, Input, infinity),
+                                        created_at => Now,
+                                        updated_at => Now
+                                    },
+                                    Memory2 = maybe_put(expires_at, expires_at(Memory, Now),
+                                        Memory),
+                                    ok = beam_agent_memory_store:put_memory(Memory2),
+                                    {ok, _Entry} = append_memory_event(
+                                        <<"memory_remembered">>, Memory2, #{}),
+                                    ok = audit_memory_event(remembered, Memory2, #{}),
+                                    {ok, Memory2};
+                                {deny, Reason} ->
+                                    {error, {policy_denied, Reason}}
+                            end;
                         {error, _} = Error ->
                             Error
                     end;
@@ -298,6 +308,12 @@ update_pinned(MemoryId, DesiredPinned, EventType) ->
                     },
                     ok = beam_agent_memory_store:put_memory(Updated),
                     {ok, _Entry} = append_memory_event(EventType, Updated, #{}),
+                    ok = audit_memory_event(
+                        case DesiredPinned of
+                            true -> pinned;
+                            false -> unpinned
+                        end,
+                        Updated, #{}),
                     ok
             end;
         {error, not_found} ->
@@ -999,6 +1015,49 @@ pin_sort_key(Memory) ->
         true -> 0;
         false -> 1
     end.
+
+-spec evaluate_memory_policy(map(), scope(), [source_ref()]) -> allow | {deny, binary()}.
+evaluate_memory_policy(Input, Scope, SourceRefs) ->
+    Attributes = maps:get(attributes, Input, #{}),
+    ProfileId = maps:get(policy_profile_id, Attributes, undefined),
+    Context = #{
+        kind => maps:get(kind, Input),
+        content => maps:get(content, Input),
+        attributes => Attributes,
+        source_refs => SourceRefs,
+        scope => Scope
+    },
+    case beam_agent_policy_core:evaluate(ProfileId, memory_write, Context) of
+        allow ->
+            allow;
+        {deny, Reason} ->
+            _ = beam_agent_audit_core:record(memory, write, memory_audit_scope(Scope, ProfileId), #{
+                decision => deny,
+                reason => Reason,
+                kind => maps:get(kind, Input)
+            }),
+            {deny, Reason}
+    end.
+
+-spec audit_memory_event(atom(), memory_record(), map()) -> ok.
+audit_memory_event(Action, Memory, ExtraDetails) ->
+    Scope = maps:get(scope, Memory, #{}),
+    Attributes = maps:get(attributes, Memory, #{}),
+    ProfileId = maps:get(policy_profile_id, Attributes, undefined),
+    Details = maps:merge(#{
+        decision => allow,
+        memory_id => maps:get(memory_id, Memory),
+        kind => maps:get(kind, Memory)
+    }, ExtraDetails),
+    case beam_agent_audit_core:record(memory, Action, memory_audit_scope(Scope, ProfileId),
+             Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec memory_audit_scope(scope(), binary() | undefined) -> map().
+memory_audit_scope(Scope, ProfileId) ->
+    maybe_put(profile_id, ProfileId, maps:with([session_id, thread_id, run_id], Scope)).
 
 -spec append_memory_event(binary(), memory_record(), map()) ->
     {ok, beam_agent_journal_core:entry()} | {error, term()}.

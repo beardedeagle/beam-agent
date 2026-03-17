@@ -46,6 +46,7 @@ events into the BeamAgent journal.
     capabilities => [beam_agent_capabilities:capability()],
     policy => route_policy(),
     affinity_key => binary(),
+    policy_profile_id => binary(),
     last_backend => beam_agent_backend:backend() | binary() | atom(),
     fallback_policy => fallback_policy(),
     health => #{beam_agent_backend:backend() | binary() | atom() => health_status()}
@@ -57,7 +58,8 @@ events into the BeamAgent journal.
     policy := route_policy(),
     reasons := [binary()],
     fallback_chain := [beam_agent_backend:backend()],
-    affinity_key => binary()
+    affinity_key => binary(),
+    policy_profile_id => binary()
 }.
 
 -type normalized_request() :: #{
@@ -68,6 +70,7 @@ events into the BeamAgent journal.
     capabilities := [beam_agent_capabilities:capability()],
     policy := route_policy(),
     affinity_key => binary(),
+    policy_profile_id => binary(),
     last_backend => beam_agent_backend:backend(),
     fallback_policy := fallback_policy(),
     health := #{beam_agent_backend:backend() => health_status()}
@@ -86,7 +89,8 @@ events into the BeamAgent journal.
 -define(STORE_DOMAIN, routing).
 -define(SUPPORTED_KEYS,
     [backend, preferred_backends, excluded_backends, fallback_backends,
-     capabilities, policy, affinity_key, last_backend, fallback_policy, health]).
+     capabilities, policy, affinity_key, policy_profile_id, last_backend,
+     fallback_policy, health]).
 
 -doc "Ensure routing state tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
@@ -131,10 +135,19 @@ select_backend(RouteRequest) when is_map(RouteRequest) ->
     case normalize_request(RouteRequest) of
         {ok, Normalized} ->
             case choose_backend(Normalized) of
-                {ok, Decision} ->
-                    ok = persist_decision(Normalized, Decision),
-                    _ = append_routing_event(Normalized, Decision),
-                    {ok, Decision};
+                {ok, Decision0} ->
+                    Decision = maybe_put(policy_profile_id,
+                        maps:get(policy_profile_id, Normalized, undefined), Decision0),
+                    case enforce_route_policy(Normalized, Decision) of
+                        allow ->
+                            ok = persist_decision(Normalized, Decision),
+                            _ = append_routing_event(Normalized, Decision),
+                            ok = audit_routing_decision(Normalized, Decision, allow, undefined),
+                            {ok, Decision};
+                        {deny, Reason} ->
+                            ok = audit_routing_decision(Normalized, Decision, deny, Reason),
+                            {error, {policy_denied, Reason}}
+                    end;
                 {error, _} = Error ->
                     Error
             end;
@@ -410,24 +423,32 @@ with_normalized_request(Request) ->
                                             with_affinity(
                                                 maps:get(affinity_key, Request, undefined),
                                                 fun(AffinityKey) ->
-                                                    with_health(
-                                                        maps:get(health, Request, #{}),
-                                                        fun(Health) ->
-                                                            {ok, maybe_put(last_backend,
-                                                                LastBackend,
-                                                                maybe_put(backend,
-                                                                    Backend,
-                                                                    maybe_put(affinity_key,
-                                                                        AffinityKey,
-                                                                        #{
-                                                                            preferred_backends => Preferred,
-                                                                            excluded_backends => Excluded,
-                                                                            fallback_backends => Fallback,
-                                                                            capabilities => Caps,
-                                                                            policy => Policy,
-                                                                            fallback_policy => FallbackPolicy,
-                                                                            health => Health
-                                                                        })))}
+                                                    with_optional_binary(
+                                                        policy_profile_id, Request,
+                                                        fun(ProfileId) ->
+                                                            with_health(
+                                                                maps:get(health, Request, #{}),
+                                                                fun(Health) ->
+                                                                    Base = #{
+                                                                        preferred_backends => Preferred,
+                                                                        excluded_backends => Excluded,
+                                                                        fallback_backends => Fallback,
+                                                                        capabilities => Caps,
+                                                                        policy => Policy,
+                                                                        fallback_policy => FallbackPolicy,
+                                                                        health => Health
+                                                                    },
+                                                                    {ok, maybe_put(last_backend,
+                                                                        LastBackend,
+                                                                        maybe_put(backend,
+                                                                            Backend,
+                                                                            maybe_put(affinity_key,
+                                                                                AffinityKey,
+                                                                                maybe_put(
+                                                                                    policy_profile_id,
+                                                                                    ProfileId,
+                                                                                    Base))))}
+                                                                end)
                                                         end)
                                                 end)
                                         end)
@@ -469,6 +490,49 @@ with_policy(failover, Fun) -> Fun(failover);
 with_policy(capability_first, Fun) -> Fun(capability_first);
 with_policy(preferred_then_fallback, Fun) -> Fun(preferred_then_fallback);
 with_policy(Value, _Fun) -> {error, {invalid_policy, Value}}.
+
+-spec with_optional_binary(atom(), map(), fun((binary() | undefined) -> Result)) ->
+    Result | {error, {invalid_route_request, atom()}}.
+with_optional_binary(Key, Request, Fun) ->
+    case maps:get(Key, Request, undefined) of
+        undefined ->
+            Fun(undefined);
+        Value when is_binary(Value), byte_size(Value) > 0 ->
+            Fun(Value);
+        _ ->
+            {error, {invalid_route_request, Key}}
+    end.
+
+-spec enforce_route_policy(normalized_request(), route_decision()) ->
+    allow | {deny, binary()}.
+enforce_route_policy(Request, Decision) ->
+    beam_agent_policy_core:evaluate(
+        maps:get(policy_profile_id, Request, undefined),
+        backend,
+        #{
+            backend => maps:get(backend, Decision),
+            decision => Decision,
+            request => maps:remove(health, Request)
+        }
+    ).
+
+-spec audit_routing_decision(normalized_request(), route_decision(),
+    allow | deny, binary() | undefined) -> ok.
+audit_routing_decision(Request, Decision, DecisionResult, Reason) ->
+    Scope = maybe_put(profile_id, maps:get(policy_profile_id, Request, undefined), #{}),
+    Details0 = #{
+        decision => DecisionResult,
+        backend => maps:get(backend, Decision),
+        policy => maps:get(policy, Decision),
+        candidates => maps:get(candidates, Decision),
+        fallback_chain => maps:get(fallback_chain, Decision)
+    },
+    Details1 = maybe_put(reasons, maps:get(reasons, Decision, undefined), Details0),
+    Details = maybe_put(reason, Reason, Details1),
+    case beam_agent_audit_core:record(routing, decision, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
 
 -spec with_fallback_policy(term(), fun((fallback_policy()) -> Result)) ->
     Result | {error, {invalid_fallback_policy, term()}}.

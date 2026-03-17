@@ -172,6 +172,11 @@ Scheduled execution is exposed through `beam_agent_routines` /
 provides explicit `run_due/1` entrypoints for caller-owned schedulers; it
 does not start a hidden BeamAgent scheduler process.
 
+Parent-child orchestration is exposed through `beam_agent_orchestrator` /
+`BeamAgent.Orchestrator`. The orchestrator layer records delegation lineage,
+cross-session child relationships, and collection/cancellation status without
+starting a worker pool or resident BeamAgent process.
+
 Elixir adds `stream!/3` and `stream/3` (lazy `Stream.resource/3`-based
 enumerables) on top of the same canonical surface.
 
@@ -182,9 +187,9 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
-`beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`, `beam_agent_routing`,
-`beam_agent_routines`,
-`beam_agent_checkpoint`, `beam_agent_runs`). Their status and route shape for each
+`beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
+`beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
+`beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`). Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
 All families have universal fallback coverage:
@@ -195,11 +200,15 @@ All families have universal fallback coverage:
 - typed artifact and context storage
 - context pressure estimation and policy-driven compaction
 - durable canonical domain-event journal
+- durable audit records layered on the journal
 - long-term memory with lexical recall and expiry
 - internal store abstraction with ETS as the default canonical adapter
+- reusable policy profiles for approvals, commands, backends, routines,
+  memory writes, compaction, and orchestration
 - policy-driven backend routing with explicit, sticky, round-robin, failover,
   capability-first, and preferred-then-fallback selection
 - durable routines and caller-driven scheduled execution
+- parent-child orchestration, delegation lineage, and run collection
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
@@ -258,6 +267,10 @@ beam_agent_journal:stream_from(Cursor, Filter)           -> {ok, [Entry]} | {err
 beam_agent_journal:get(EventId)                          -> {ok, Entry} | {error, not_found}
 beam_agent_journal:ack(ConsumerId, EventId)              -> ok | {error, not_found}
 
+%% Canonical audit -- beam_agent_audit
+beam_agent_audit:list_events(Filter)                     -> {ok, [Entry]} | {error, Reason}
+beam_agent_audit:get_event(EventId)                      -> {ok, Entry} | {error, not_found}
+
 %% Long-term memory -- beam_agent_memory
 beam_agent_memory:remember(Scope, MemoryInput)           -> {ok, Memory} | {error, Reason}
 beam_agent_memory:remember(Scope, Kind, MemoryInput)     -> {ok, Memory} | {error, Reason}
@@ -275,6 +288,12 @@ beam_agent_routing:select_backend(RouteRequest)          -> {ok, Decision} | {er
 beam_agent_routing:select_backend(SessionOrOpts, RouteRequest) ->
     {ok, Decision} | {error, Reason}
 
+%% Canonical policy profiles -- beam_agent_policy
+beam_agent_policy:put_profile(ProfileId, Profile)        -> ok | {error, Reason}
+beam_agent_policy:get_profile(ProfileId)                 -> {ok, Profile} | {error, not_found}
+beam_agent_policy:list_profiles()                        -> {ok, [Profile]}
+beam_agent_policy:evaluate(ProfileId, Action, Context)   -> allow | {deny, Reason}
+
 %% Canonical routines -- beam_agent_routines
 beam_agent_routines:create(Job)                          -> {ok, JobRecord} | {error, Reason}
 beam_agent_routines:update(JobId, Patch)                -> {ok, JobRecord} | {error, Reason}
@@ -282,6 +301,15 @@ beam_agent_routines:due(Filter)                         -> {ok, [JobRecord]} | {
 beam_agent_routines:run_due(Opts)                       -> {ok, [map()]} | {error, Reason}
 beam_agent_routines:run_now(JobId)                      -> {ok, Run} | {error, Reason}
 beam_agent_routines:next_due_at()                       -> {ok, DueAt} | {error, none}
+
+%% Canonical orchestration -- beam_agent_orchestrator
+beam_agent_orchestrator:spawn(Parent, Opts)             -> {ok, Child} | {error, Reason}
+beam_agent_orchestrator:delegate(Parent, Task, Opts)    -> {ok, Run} | {error, Reason}
+beam_agent_orchestrator:await(RunId, Timeout)           -> {ok, Result} | {error, Reason}
+beam_agent_orchestrator:collect(RunId, Opts)            -> {ok, map()} | {error, Reason}
+beam_agent_orchestrator:cancel(RunId, Reason)           -> ok | {error, Reason}
+beam_agent_orchestrator:status(RunId)                   -> {ok, map()} | {error, not_found}
+beam_agent_orchestrator:list_children(Parent)           -> {ok, [map()]} | {error, Reason}
 
 %% Canonical context management -- beam_agent_context
 beam_agent_context:context_status(SessionOrThread)       -> {ok, Status} | {error, Reason}
@@ -292,7 +320,8 @@ beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {erro
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
-`BeamAgent.Artifacts`, `BeamAgent.Context`, `BeamAgent.Memory`,
+`BeamAgent.Artifacts`, `BeamAgent.Audit`, `BeamAgent.Context`,
+`BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`,
 `BeamAgent.Routing`, `BeamAgent.Routines`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,
 `BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.

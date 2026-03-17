@@ -104,6 +104,12 @@ exports_artifacts_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_artifacts, attach, 3)),
     ?assert(erlang:function_exported(beam_agent_artifacts, delete, 1)).
 
+exports_audit_domain_surface_test() ->
+    ensure_loaded(beam_agent_audit),
+    ?assert(erlang:function_exported(beam_agent_audit, list_events, 0)),
+    ?assert(erlang:function_exported(beam_agent_audit, list_events, 1)),
+    ?assert(erlang:function_exported(beam_agent_audit, get_event, 1)).
+
 exports_journal_domain_surface_test() ->
     ensure_loaded(beam_agent_journal),
     ?assert(erlang:function_exported(beam_agent_journal, ensure_tables, 0)),
@@ -134,6 +140,15 @@ exports_memory_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_memory, expire, 0)),
     ?assert(erlang:function_exported(beam_agent_memory, expire, 1)).
 
+exports_policy_domain_surface_test() ->
+    ensure_loaded(beam_agent_policy),
+    ?assert(erlang:function_exported(beam_agent_policy, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_policy, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_policy, put_profile, 2)),
+    ?assert(erlang:function_exported(beam_agent_policy, get_profile, 1)),
+    ?assert(erlang:function_exported(beam_agent_policy, list_profiles, 0)),
+    ?assert(erlang:function_exported(beam_agent_policy, evaluate, 3)).
+
 exports_context_domain_surface_test() ->
     ensure_loaded(beam_agent_context),
     ?assert(erlang:function_exported(beam_agent_context, context_status, 1)),
@@ -157,6 +172,18 @@ exports_routines_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_routines, run_now, 1)),
     ?assert(erlang:function_exported(beam_agent_routines, run_due, 0)),
     ?assert(erlang:function_exported(beam_agent_routines, run_due, 1)).
+
+exports_orchestrator_domain_surface_test() ->
+    ensure_loaded(beam_agent_orchestrator),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, spawn, 2)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, delegate, 3)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, await, 2)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, collect, 2)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, cancel, 2)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, status, 1)),
+    ?assert(erlang:function_exported(beam_agent_orchestrator, list_children, 1)).
 
 exports_routing_domain_surface_test() ->
     ensure_loaded(beam_agent_routing),

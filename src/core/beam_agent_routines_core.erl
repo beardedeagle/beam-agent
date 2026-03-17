@@ -215,6 +215,8 @@ create(JobInput) when is_map(JobInput) ->
     Now = erlang:system_time(millisecond),
     case normalize_job_input(JobInput, Now) of
         {ok, Normalized} ->
+            case evaluate_routine_policy(Normalized) of
+                allow ->
             JobId = maps:get(job_id, Normalized, generate_job_id()),
             NextRunAt = compute_initial_next_run_at(
                 maps:get(schedule, Normalized),
@@ -242,7 +244,11 @@ create(JobInput) when is_map(JobInput) ->
                 {error, not_found} ->
                     ok = beam_agent_routines_store:put_job(Job2),
                     {ok, _} = append_job_event(<<"routine_created">>, Job2, #{}),
+                    ok = audit_routine_event(created, Job2, #{decision => allow}),
                     {ok, Job2}
+            end;
+                {deny, Reason} ->
+                    {error, {policy_denied, Reason}}
             end;
         {error, _} = Error ->
             Error
@@ -268,6 +274,10 @@ update(JobId, Patch) when is_binary(JobId), is_map(Patch) ->
                             Updated = apply_patch(Job, Normalized, Now),
                             ok = beam_agent_routines_store:put_job(Updated),
                             {ok, _} = append_job_event(<<"routine_updated">>, Updated, #{
+                                patch => redacted_patch(Normalized)
+                            }),
+                            ok = audit_routine_event(updated, Updated, #{
+                                decision => allow,
                                 patch => redacted_patch(Normalized)
                             }),
                             {ok, Updated};
@@ -300,6 +310,7 @@ cancel(JobId) when is_binary(JobId) ->
             ok = beam_agent_routines_store:put_job(Cancelled2),
             ok = beam_agent_routines_store:release_claim(JobId, any_runner()),
             {ok, _} = append_job_event(<<"routine_cancelled">>, Cancelled2, #{}),
+            ok = audit_routine_event(cancelled, Cancelled2, #{decision => allow}),
             ok;
         {error, not_found} ->
             {error, not_found}
@@ -1104,6 +1115,50 @@ append_job_event(EventType, Job, PayloadExtra) ->
     },
     Event = maybe_put(run_id, maps:get(last_run_id, Job, undefined), Event0),
     beam_agent_journal_core:append(EventType, Event).
+
+-spec evaluate_routine_policy(map()) -> allow | {deny, binary()}.
+evaluate_routine_policy(JobOrInput) ->
+    Metadata = maps:get(metadata, JobOrInput, #{}),
+    ProfileId = maps:get(policy_profile_id, Metadata, undefined),
+    Context = #{
+        schedule => maps:get(schedule, JobOrInput, undefined),
+        target => maps:get(target, JobOrInput, undefined),
+        payload => maps:get(payload, JobOrInput, undefined),
+        metadata => Metadata
+    },
+    case beam_agent_policy_core:evaluate(ProfileId, routine, Context) of
+        allow ->
+            allow;
+        {deny, Reason} ->
+            _ = beam_agent_audit_core:record(routine, policy_denied,
+                routine_audit_scope(JobOrInput, ProfileId), #{
+                    decision => deny,
+                    reason => Reason
+                }),
+            {deny, Reason}
+    end.
+
+-spec audit_routine_event(atom(), map(), map()) -> ok.
+audit_routine_event(Action, Job, ExtraDetails) ->
+    Metadata = maps:get(metadata, Job, #{}),
+    ProfileId = maps:get(policy_profile_id, Metadata, undefined),
+    Details = maps:merge(#{
+        decision => allow,
+        job_id => maps:get(job_id, Job),
+        state => maps:get(state, Job),
+        target_type => maps:get(type, maps:get(target, Job))
+    }, ExtraDetails),
+    case beam_agent_audit_core:record(routine, Action, routine_audit_scope(Job, ProfileId),
+             Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec routine_audit_scope(map(), binary() | undefined) -> map().
+routine_audit_scope(JobOrInput, ProfileId) ->
+    maybe_put(profile_id, ProfileId, #{
+        run_id => maps:get(last_run_id, JobOrInput, undefined)
+    }).
 
 -spec validate_allowed_keys(map(), [atom()], atom()) -> ok | {error, term()}.
 validate_allowed_keys(Map, Allowed, ErrorTag) ->

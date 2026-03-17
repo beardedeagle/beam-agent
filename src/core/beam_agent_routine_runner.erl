@@ -32,16 +32,19 @@ run_now(JobId) when is_binary(JobId) ->
                     {ok, _Updated} = beam_agent_routines_core:manual_execution_succeeded(
                         JobId, RunId, result_map(Payload), Now),
                     ok = append_execution_event(<<"routine_run_completed">>, JobId, RunId, Now),
+                    ok = audit_execution(Job, RunId, manual, completed, result_map(Payload)),
                     {ok, Run};
                 cancelled ->
                     {ok, _Updated} = beam_agent_routines_core:manual_execution_succeeded(
                         JobId, RunId, result_map(Payload), Now),
                     ok = append_execution_event(<<"routine_run_cancelled">>, JobId, RunId, Now),
+                    ok = audit_execution(Job, RunId, manual, cancelled, result_map(Payload)),
                     {ok, Run};
                 failed ->
                     {ok, _Updated} = beam_agent_routines_core:manual_execution_failed(
                         JobId, RunId, Payload, Now),
                     ok = append_execution_event(<<"routine_run_failed">>, JobId, RunId, Now),
+                    ok = audit_execution(Job, RunId, manual, failed, Payload),
                     {ok, Run}
             end;
         {error, not_found} ->
@@ -256,12 +259,14 @@ finish_scheduled(JobId, RunId, SlotAt, completed, Payload, Now) ->
     {ok, _Updated} = beam_agent_routines_core:scheduled_execution_succeeded(
         JobId, RunId, SlotAt, Result, Now),
     ok = append_execution_event(<<"routine_run_completed">>, JobId, RunId, Now),
+    ok = audit_execution(JobId, RunId, scheduled, completed, Result),
     ok;
 finish_scheduled(JobId, RunId, SlotAt, cancelled, Payload, Now) ->
     Result = result_map(Payload),
     {ok, _Updated} = beam_agent_routines_core:scheduled_execution_succeeded(
         JobId, RunId, SlotAt, Result, Now),
     ok = append_execution_event(<<"routine_run_cancelled">>, JobId, RunId, Now),
+    ok = audit_execution(JobId, RunId, scheduled, cancelled, Result),
     ok;
 finish_scheduled(JobId, RunId, SlotAt, failed, Payload, Now) ->
     {ok, State, _Updated} = beam_agent_routines_core:scheduled_execution_failed(
@@ -271,6 +276,7 @@ finish_scheduled(JobId, RunId, SlotAt, failed, Payload, Now) ->
         _ -> <<"routine_run_failed">>
     end,
     ok = append_execution_event(EventType, JobId, RunId, Now),
+    ok = audit_execution(JobId, RunId, scheduled, failed, Payload),
     ok.
 
 -spec merge_routing_policy(map(), map()) -> map().
@@ -339,3 +345,37 @@ append_execution_event(EventType, JobId, RunId, Now) ->
         payload => #{job_id => JobId}
     }),
     ok.
+
+-spec audit_execution(map() | binary(), binary(), manual | scheduled,
+    completed | failed | cancelled, term()) -> ok.
+audit_execution(#{job_id := JobId} = Job, RunId, Mode, Outcome, Payload) ->
+    Metadata = maps:get(metadata, Job, #{}),
+    ProfileId = maps:get(policy_profile_id, Metadata, undefined),
+    case beam_agent_audit_core:record(routine, run, #{
+        run_id => RunId,
+        profile_id => ProfileId
+    }, #{
+        job_id => JobId,
+        mode => Mode,
+        outcome => Outcome,
+        decision => allow,
+        payload => Payload
+    }) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end;
+audit_execution(JobId, RunId, Mode, Outcome, Payload) when is_binary(JobId) ->
+    case beam_agent_routines_core:get(JobId) of
+        {ok, Job} -> audit_execution(Job, RunId, Mode, Outcome, Payload);
+        {error, not_found} ->
+            case beam_agent_audit_core:record(routine, run, #{run_id => RunId}, #{
+                job_id => JobId,
+                mode => Mode,
+                outcome => Outcome,
+                decision => allow,
+                payload => Payload
+            }) of
+                {ok, _} -> ok;
+                {error, _} -> ok
+            end
+    end.

@@ -484,19 +484,29 @@ clear_session_callbacks(SessionId) when is_binary(SessionId) ->
 request_permission(SessionId, Method, Params, Context)
   when is_binary(SessionId), is_binary(Method), is_map(Params), is_map(Context) ->
     ensure_tables(),
-    case lookup_callbacks(SessionId) of
-        #{permission_handler := Handler} when is_function(Handler) ->
-            safe_permission_handler(Handler, Method, Params, Context,
-                maps:get(permission_default, lookup_callbacks(SessionId), deny));
-        #{approval_handler := Handler} when is_function(Handler) ->
-            approval_decision_to_permission(
-                safe_approval_handler(Handler, Method, Params, Context),
-                Params,
-                maps:get(permission_default, lookup_callbacks(SessionId), deny));
-        #{permission_default := Default} ->
-            default_permission(Default, Params);
-        #{} ->
-            default_permission(deny, Params)
+    case evaluate_control_policy(SessionId, approval, Method, Params, Context) of
+        allow ->
+            Callbacks = lookup_callbacks(SessionId),
+            Decision = case Callbacks of
+                #{permission_handler := Handler} when is_function(Handler) ->
+                    safe_permission_handler(Handler, Method, Params, Context,
+                        maps:get(permission_default, Callbacks, deny));
+                #{approval_handler := Handler} when is_function(Handler) ->
+                    approval_decision_to_permission(
+                        safe_approval_handler(Handler, Method, Params, Context),
+                        Params,
+                        maps:get(permission_default, Callbacks, deny));
+                #{permission_default := Default} ->
+                    default_permission(Default, Params);
+                #{} ->
+                    default_permission(deny, Params)
+            end,
+            ok = audit_permission_decision(SessionId, Method, Decision, Params, Context),
+            Decision;
+        {deny, Reason} ->
+            Decision = {deny, Reason},
+            ok = audit_permission_decision(SessionId, Method, Decision, Params, Context),
+            Decision
     end.
 
 -doc "Request canonical approval handling for a session.".
@@ -505,26 +515,36 @@ request_permission(SessionId, Method, Params, Context)
 request_approval(SessionId, Method, Params, Context)
   when is_binary(SessionId), is_binary(Method), is_map(Params), is_map(Context) ->
     ensure_tables(),
-    case lookup_callbacks(SessionId) of
-        #{approval_handler := Handler} when is_function(Handler) ->
-            safe_approval_handler(Handler, Method, Params, Context);
-        #{permission_handler := Handler} when is_function(Handler) ->
-            case safe_permission_handler(Handler, Method, Params, Context,
-                     maps:get(permission_default, lookup_callbacks(SessionId), deny)) of
-                {allow, _} ->
+    case evaluate_control_policy(SessionId, approval, Method, Params, Context) of
+        allow ->
+            Callbacks = lookup_callbacks(SessionId),
+            Decision = case Callbacks of
+                #{approval_handler := Handler} when is_function(Handler) ->
+                    safe_approval_handler(Handler, Method, Params, Context);
+                #{permission_handler := Handler} when is_function(Handler) ->
+                    case safe_permission_handler(Handler, Method, Params, Context,
+                             maps:get(permission_default, Callbacks, deny)) of
+                        {allow, _} ->
+                            accept;
+                        {allow, _, _Other} ->
+                            accept;
+                        {deny, _} ->
+                            decline;
+                        {deny, _, true} ->
+                            cancel;
+                        {deny, _, _} ->
+                            decline
+                    end;
+                #{permission_default := allow} ->
                     accept;
-                {allow, _, _Other} ->
-                    accept;
-                {deny, _} ->
-                    decline;
-                {deny, _, true} ->
-                    cancel;
-                {deny, _, _} ->
+                _ ->
                     decline
-            end;
-        #{permission_default := allow} ->
-            accept;
-        _ ->
+            end,
+            ok = audit_approval_decision(SessionId, Method, Decision, Params, Context),
+            Decision;
+        {deny, Reason} ->
+            ok = audit_approval_decision(SessionId, Method, decline, Params,
+                Context#{policy_reason => Reason}),
             decline
     end.
 
@@ -788,6 +808,81 @@ default_permission(allow, Params) ->
 default_permission(_, _Params) ->
     {deny, <<"denied">>}.
 
+-spec evaluate_control_policy(binary(), atom(), binary(), map(), map()) ->
+    allow | {deny, binary()}.
+evaluate_control_policy(SessionId, Action, Method, Params, Context) ->
+    ProfileId = session_policy_profile(SessionId),
+    beam_agent_policy_core:evaluate(ProfileId, Action, #{
+        session_id => SessionId,
+        method => Method,
+        params => Params,
+        context => Context
+    }).
+
+-spec session_policy_profile(binary()) -> binary() | undefined.
+session_policy_profile(SessionId) ->
+    case get_config(SessionId, policy_profile_id) of
+        {ok, ProfileId} when is_binary(ProfileId) ->
+            ProfileId;
+        _ ->
+            undefined
+    end.
+
+-spec audit_permission_decision(binary(), binary(),
+    beam_agent_core:permission_result(), map(), map()) -> ok.
+audit_permission_decision(SessionId, Method, Decision, Params, Context) ->
+    Scope = control_audit_scope(SessionId),
+    Details = #{
+        decision => permission_decision_name(Decision),
+        method => Method,
+        params => beam_agent_redaction:map(Params),
+        context => beam_agent_redaction:map(Context),
+        profile_id => session_policy_profile(SessionId)
+    },
+    case beam_agent_audit_core:record(control, permission, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec audit_approval_decision(binary(), binary(),
+    accept | accept_for_session | decline | cancel, map(), map()) -> ok.
+audit_approval_decision(SessionId, Method, Decision, Params, Context) ->
+    Scope = control_audit_scope(SessionId),
+    Details = #{
+        decision => Decision,
+        method => Method,
+        params => beam_agent_redaction:map(Params),
+        context => beam_agent_redaction:map(Context),
+        profile_id => session_policy_profile(SessionId)
+    },
+    case beam_agent_audit_core:record(control, approval, Scope, Details) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end.
+
+-spec control_audit_scope(binary()) -> map().
+control_audit_scope(SessionId) ->
+    maybe_put(profile_id, session_policy_profile(SessionId), #{
+        session_id => SessionId
+    }).
+
+-spec permission_decision_name(beam_agent_core:permission_result()) ->
+    allow | deny | cancel | allow_for_session.
+permission_decision_name({allow, _}) ->
+    allow;
+permission_decision_name({allow, _, allow}) ->
+    allow_for_session;
+permission_decision_name({allow, _, _}) ->
+    allow;
+permission_decision_name({deny, _, true}) ->
+    cancel;
+permission_decision_name({deny, _, _}) ->
+    deny;
+permission_decision_name({deny, _}) ->
+    deny;
+permission_decision_name(_) ->
+    deny.
+
 publish_control_event(SessionId, Subtype, Payload) ->
     Event = Payload#{
         type => system,
@@ -799,6 +894,10 @@ publish_control_event(SessionId, Subtype, Payload) ->
     },
     beam_agent_events:publish(SessionId, Event),
     {ok, _Entry} = journal_control_event(Subtype, SessionId, Payload),
+    _ = beam_agent_audit_core:record(control, event, #{session_id => SessionId}, #{
+        subtype => Subtype,
+        payload => beam_agent_redaction:map(Payload)
+    }),
     ok.
 
 -spec create_task_run(binary(), binary()) -> binary().
