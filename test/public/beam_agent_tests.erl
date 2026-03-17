@@ -141,6 +141,23 @@ exports_context_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_context, compact_now, 2)),
     ?assert(erlang:function_exported(beam_agent_context, maybe_compact, 2)).
 
+exports_routines_domain_surface_test() ->
+    ensure_loaded(beam_agent_routines),
+    ?assert(erlang:function_exported(beam_agent_routines, ensure_tables, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, clear, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, create, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, update, 2)),
+    ?assert(erlang:function_exported(beam_agent_routines, cancel, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, get, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, list, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, due, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, due, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, next_due_at, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, run_now, 1)),
+    ?assert(erlang:function_exported(beam_agent_routines, run_due, 0)),
+    ?assert(erlang:function_exported(beam_agent_routines, run_due, 1)).
+
 exports_routing_domain_surface_test() ->
     ensure_loaded(beam_agent_routing),
     ?assert(erlang:function_exported(beam_agent_routing, ensure_tables, 0)),

@@ -141,6 +141,7 @@ defmodule BeamAgent do
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
   - `BeamAgent.Routing` -- backend routing and policy-driven selection
+  - `BeamAgent.Routines` -- durable routines and caller-driven scheduled execution
   - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
   - `BeamAgent.Runs` -- canonical run and step lifecycle
   - `BeamAgent.Search` -- fuzzy file search sessions

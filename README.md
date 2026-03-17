@@ -167,6 +167,11 @@ child_spec(Opts)       -> supervisor:child_spec()
 plus a `routing` request map. The canonical routing domain is exposed through
 `beam_agent_routing` / `BeamAgent.Routing`.
 
+Scheduled execution is exposed through `beam_agent_routines` /
+`BeamAgent.Routines`. The routines layer stores durable job records and
+provides explicit `run_due/1` entrypoints for caller-owned schedulers; it
+does not start a hidden BeamAgent scheduler process.
+
 Elixir adds `stream!/3` and `stream/3` (lazy `Stream.resource/3`-based
 enumerables) on top of the same canonical surface.
 
@@ -178,6 +183,7 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
 `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`, `beam_agent_routing`,
+`beam_agent_routines`,
 `beam_agent_checkpoint`, `beam_agent_runs`). Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
@@ -193,6 +199,7 @@ All families have universal fallback coverage:
 - internal store abstraction with ETS as the default canonical adapter
 - policy-driven backend routing with explicit, sticky, round-robin, failover,
   capability-first, and preferred-then-fallback selection
+- durable routines and caller-driven scheduled execution
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
@@ -268,6 +275,14 @@ beam_agent_routing:select_backend(RouteRequest)          -> {ok, Decision} | {er
 beam_agent_routing:select_backend(SessionOrOpts, RouteRequest) ->
     {ok, Decision} | {error, Reason}
 
+%% Canonical routines -- beam_agent_routines
+beam_agent_routines:create(Job)                          -> {ok, JobRecord} | {error, Reason}
+beam_agent_routines:update(JobId, Patch)                -> {ok, JobRecord} | {error, Reason}
+beam_agent_routines:due(Filter)                         -> {ok, [JobRecord]} | {error, Reason}
+beam_agent_routines:run_due(Opts)                       -> {ok, [map()]} | {error, Reason}
+beam_agent_routines:run_now(JobId)                      -> {ok, Run} | {error, Reason}
+beam_agent_routines:next_due_at()                       -> {ok, DueAt} | {error, none}
+
 %% Canonical context management -- beam_agent_context
 beam_agent_context:context_status(SessionOrThread)       -> {ok, Status} | {error, Reason}
 beam_agent_context:budget_estimate(SessionOrThread)      -> {ok, Budget} | {error, Reason}
@@ -278,7 +293,7 @@ beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {erro
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
 `BeamAgent.Artifacts`, `BeamAgent.Context`, `BeamAgent.Memory`,
-`BeamAgent.Routing`, and
+`BeamAgent.Routing`, `BeamAgent.Routines`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,
 `BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.
 Internally, the newer canonical stores route through `beam_agent_store` with

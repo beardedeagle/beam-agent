@@ -22,6 +22,7 @@ public modules:
 - beam_agent_mcp: MCP server management
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_routing: backend routing and policy-driven selection
+- beam_agent_routines: durable routines and caller-driven scheduled execution
 - beam_agent_runtime: model, permissions, status, interrupts
 - beam_agent_runs: canonical run and step lifecycle
 - beam_agent_search: fuzzy file search
