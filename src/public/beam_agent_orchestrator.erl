@@ -10,6 +10,14 @@ functions from processes they already own.
 Child runs remain the durable source of execution truth. The orchestrator layer
 adds explicit cross-session lineage so a parent run can delegate or spawn work
 without weakening the existing same-scope constraints inside `beam_agent_runs`.
+
+Use this module when you need to:
+
+  - record parent-child delegation lineage across sessions or threads
+  - await terminal run state from caller-owned control flow
+  - collect a durable execution picture that includes descendants and journal
+    records
+  - cancel a run tree without creating a resident orchestration service
 """.
 
 -export([

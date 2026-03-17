@@ -100,6 +100,43 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
     created_at := integer(),
     resolved_at => integer()
 }.
+-type task_run_attempt() :: 0 | 1 | 2 | 3 | 4 | 5.
+-type control_scope_map() :: #{
+    session_id := binary(),
+    profile_id => binary()
+}.
+-type task_event_map() :: #{
+    session_id := binary(),
+    tags := [control | task, ...],
+    payload := #{task := map(), replaced => boolean()},
+    run_id => binary()
+}.
+-type control_put_map() :: control_scope_map() | task_event_map().
+-type control_journal_reason() :: awaiting_external_response | handler_failed.
+-type feedback_entry() :: #{
+    seq := integer(),
+    session_id := binary(),
+    submitted_at := integer(),
+    _ => term()
+}.
+-type control_journal_payload() :: #{
+    feedback => feedback_entry(),
+    max_thinking_tokens => pos_integer(),
+    model => term(),
+    permission_mode => atom() | binary(),
+    reason => control_journal_reason(),
+    request => map(),
+    request_id => binary(),
+    response => map(),
+    source => universal,
+    status => pending,
+    task_id => binary()
+}.
+-type journal_error() ::
+    already_exists
+  | session_id_required_for_thread
+  | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+  | {invalid_event_type, binary()}.
 
 -dialyzer({no_underspecs, [{pending_user_input_result, 4},
                            {normalize_pending_request, 2}]}).
@@ -808,7 +845,7 @@ default_permission(allow, Params) ->
 default_permission(_, _Params) ->
     {deny, <<"denied">>}.
 
--spec evaluate_control_policy(binary(), atom(), binary(), map(), map()) ->
+-spec evaluate_control_policy(binary(), approval, binary(), map(), map()) ->
     allow | {deny, binary()}.
 evaluate_control_policy(SessionId, Action, Method, Params, Context) ->
     ProfileId = session_policy_profile(SessionId),
@@ -860,18 +897,20 @@ audit_approval_decision(SessionId, Method, Decision, Params, Context) ->
         {error, _} -> ok
     end.
 
--spec control_audit_scope(binary()) -> map().
+-spec control_audit_scope(binary()) -> control_scope_map().
 control_audit_scope(SessionId) ->
     maybe_put(profile_id, session_policy_profile(SessionId), #{
         session_id => SessionId
     }).
 
--spec permission_decision_name(beam_agent_core:permission_result()) ->
-    allow | deny | cancel | allow_for_session.
+-spec permission_decision_name(
+    {allow, map()} |
+    {deny, binary()} |
+    {deny, binary(), boolean()} |
+    {allow, map(), map() | [map()]}
+) -> allow | deny | cancel.
 permission_decision_name({allow, _}) ->
     allow;
-permission_decision_name({allow, _, allow}) ->
-    allow_for_session;
 permission_decision_name({allow, _, _}) ->
     allow;
 permission_decision_name({deny, _, true}) ->
@@ -879,8 +918,6 @@ permission_decision_name({deny, _, true}) ->
 permission_decision_name({deny, _, _}) ->
     deny;
 permission_decision_name({deny, _}) ->
-    deny;
-permission_decision_name(_) ->
     deny.
 
 publish_control_event(SessionId, Subtype, Payload) ->
@@ -904,7 +941,7 @@ publish_control_event(SessionId, Subtype, Payload) ->
 create_task_run(SessionId, TaskId) ->
     create_task_run(SessionId, TaskId, 0).
 
--spec create_task_run(binary(), binary(), non_neg_integer()) -> binary().
+-spec create_task_run(binary(), binary(), task_run_attempt()) -> binary().
 create_task_run(SessionId, TaskId, Attempts) when Attempts < 5 ->
     case beam_agent_runs_core:start_run(SessionId, #{
         kind => task,
@@ -952,7 +989,15 @@ reconcile_unregistered_task(#{status := stopped} = Task) ->
         task_id => maps:get(task_id, Task)
     }).
 
--spec reconcile_stopped_task(task_meta()) -> ok.
+-spec reconcile_stopped_task(#{
+    task_id := binary(),
+    session_id := binary(),
+    pid := pid(),
+    started_at := integer(),
+    status := running,
+    run_id => binary(),
+    stopped_at => integer()
+}) -> ok.
 reconcile_stopped_task(Task) ->
     cancel_task_run(Task, #{
         reason => task_stopped,
@@ -998,7 +1043,7 @@ cancel_task_run(Task, Reason) ->
             ok
     end.
 
--spec task_run_id(binary(), non_neg_integer()) -> binary().
+-spec task_run_id(binary(), task_run_attempt()) -> <<_:64, _:_*8>>.
 task_run_id(TaskId, Attempt) ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(6), lowercase),
     <<SafeTaskId/binary>> = sanitize_task_id(TaskId),
@@ -1009,8 +1054,8 @@ task_run_id(TaskId, Attempt) ->
 sanitize_task_id(TaskId) ->
     binary:replace(TaskId, <<"/">>, <<"_">>, [global]).
 
--spec journal_control_event(binary(), binary(), map()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec journal_control_event(<<_:64, _:_*8>>, binary(), control_journal_payload()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 journal_control_event(EventType, SessionId, Payload) ->
     beam_agent_journal_core:append(EventType, #{
         session_id => SessionId,
@@ -1018,8 +1063,9 @@ journal_control_event(EventType, SessionId, Payload) ->
         payload => Payload
     }).
 
--spec journal_task_event(binary(), binary(), task_meta(), map()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec journal_task_event(<<_:64, _:_*8>>, binary(), task_meta(),
+    #{} | #{replaced => boolean()}) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 journal_task_event(EventType, SessionId, Task, ExtraPayload) ->
     Event0 = #{
         session_id => SessionId,
@@ -1033,7 +1079,7 @@ journal_task_event(EventType, SessionId, Task, ExtraPayload) ->
 task_journal_view(Task) ->
     maps:without([pid], Task).
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(profile_id | run_id, term(), control_put_map()) -> control_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->

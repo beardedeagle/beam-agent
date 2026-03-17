@@ -480,7 +480,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, modes}` or `{:error, reason}`.
   """
-  @spec collaboration_mode_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec collaboration_mode_list(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate collaboration_mode_list(session), to: :beam_agent_control
 
   @doc """

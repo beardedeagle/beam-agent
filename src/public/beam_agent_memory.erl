@@ -133,6 +133,11 @@ expire() ->
     beam_agent_memory_core:expire().
 
 -doc "Expire currently expired, unpinned memories matching a filter.".
--spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, term()}.
+-spec expire(memory_filter()) ->
+    {ok, non_neg_integer()} |
+    {error, {invalid_filter, before | include_expired | kind | limit | memory_id |
+        min_salience | pinned | run_id | session_id | since | source_ref_id |
+        source_ref_type | thread_id} |
+        {invalid_scope, memory_id | run_id | session_id | source_ref_id | thread_id}}.
 expire(Filter) ->
     beam_agent_memory_core:expire(Filter).

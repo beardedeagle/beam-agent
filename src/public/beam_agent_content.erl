@@ -39,7 +39,7 @@ Block2 = beam_agent_content:message_to_block(Msg).
   - Content Blocks: Structured representations of message fragments.
     Each block has a type (text, thinking, tool_use, tool_result, raw)
     and type-specific fields. Unknown block types are preserved as raw
-    blocks for forward compatibility.
+    blocks so unknown wire data is not discarded during normalization.
 
   - Normalization: The primary parity function. normalize_messages/1
     takes messages from any adapter and produces a uniform flat stream
@@ -74,7 +74,7 @@ and consistent field names.
 
 Round-tripping is safe: you can convert a message to a block and back
 without losing information. Unknown block types are preserved as raw
-blocks for forward compatibility.
+blocks so the original payload stays available.
 
 ## Architecture deep dive
 
@@ -136,7 +136,7 @@ Parse a list of raw JSON content block maps into typed blocks.
 Converts binary-keyed JSON maps (e.g., #{<<"type">> => <<"text">>,
 <<"text">> => <<"hello">>}) into atom-keyed content_block() maps.
 Non-map elements are silently dropped. Unknown block types are
-preserved as raw blocks for forward compatibility.
+preserved as raw blocks so the original payload remains accessible.
 
 Example:
 

@@ -18,6 +18,58 @@ or other existing owner process.
     slot_at := integer(),
     run := beam_agent_runs_core:run()
 }.
+-type terminal_run() :: #{
+    created_at := integer(),
+    kind := atom() | binary(),
+    metadata := map(),
+    run_id := binary(),
+    status := completed | failed | cancelled,
+    updated_at := integer(),
+    cancel_reason => term(),
+    completed_at => integer(),
+    error => term(),
+    input => term(),
+    output => term(),
+    parent_run_id => binary(),
+    session_id => binary(),
+    thread_id => binary()
+}.
+-type query_target() :: #{
+    type := query,
+    session := beam_agent_routines_core:session_target(),
+    prompt := binary(),
+    query_opts => beam_agent_core:query_opts(),
+    thread => beam_agent_routines_core:thread_target(),
+    stop_session => boolean()
+}.
+-type query_scope() :: #{
+    session_id := binary(),
+    thread_id => binary()
+}.
+-type thread_scope() :: #{} | #{thread_id := binary()}.
+-type context_policy_result() :: beam_agent_context_core:maybe_compact_result() | undefined.
+-type routine_runner_operation() :: run_due | run_now.
+-type routine_runner_telemetry_meta() :: #{
+    at => integer(),
+    claim_ttl_ms => pos_integer(),
+    due_count => non_neg_integer(),
+    executed_count => non_neg_integer(),
+    found => boolean(),
+    job_id => binary(),
+    kind => atom() | binary(),
+    limit => pos_integer(),
+    run_id => binary(),
+    runner_id => binary(),
+    session_id => binary(),
+    status => completed | failed | cancelled,
+    thread_id => binary()
+}.
+-type routine_result_meta() :: #{
+    job_id := term(),
+    manual := boolean(),
+    slot_at := integer(),
+    target_type := query | run
+}.
 
 -doc "Execute a routine immediately without advancing its schedule.".
 -spec run_now(binary()) -> {ok, beam_agent_runs_core:run()} | {error, term()}.
@@ -61,7 +113,7 @@ run_now(JobId) when is_binary(JobId) ->
     end.
 
 -doc "Execute every currently due routine with default runner options.".
--spec run_due() -> {ok, [run_result()]} | {error, term()}.
+-spec run_due() -> {ok, [run_result()]}.
 run_due() ->
     run_due(#{}).
 
@@ -74,7 +126,7 @@ Supported opts:
   - `runner_id`
   - `claim_ttl_ms`
 """.
--spec run_due(map()) -> {ok, [run_result()]} | {error, term()}.
+-spec run_due(map()) -> {ok, [run_result()]}.
 run_due(Opts) when is_map(Opts) ->
     Now = maps:get(now, Opts, erlang:system_time(millisecond)),
     RunnerId = maps:get(runner_id, Opts, default_runner_id()),
@@ -87,50 +139,45 @@ run_due(Opts) when is_map(Opts) ->
         limit => maps:get(limit, Opts, undefined)
     },
     StartTime = telemetry_start(run_due, TeleMeta),
-    case beam_agent_routines_core:list_due(DueFilter) of
-        {ok, Jobs} ->
-            Results = lists:foldl(fun(Job, Acc) ->
-                SlotAt = maps:get(next_run_at, Job),
-                JobId = maps:get(job_id, Job),
-                case beam_agent_routines_core:claim_due_job(
-                    JobId, RunnerId, SlotAt, ClaimTtlMs) of
-                    {ok, _Claim} ->
-                        try
-                            {Run, Outcome, Payload} = execute_job(Job, SlotAt, false),
-                            RunId = maps:get(run_id, Run),
-                            case beam_agent_routines_core:scheduled_execution_started(
-                                JobId, RunId, SlotAt, Now) of
-                                {ok, _Started} ->
-                                    ok = finish_scheduled(JobId, RunId, SlotAt,
-                                        Outcome, Payload, Now),
-                                    [#{
-                                        job_id => JobId,
-                                        status => executed,
-                                        outcome => Outcome,
-                                        slot_at => SlotAt,
-                                        run => Run
-                                    } | Acc];
-                                {error, _} ->
-                                    Acc
-                            end
-                        after
-                            ok = beam_agent_routines_core:release_due_job(JobId, RunnerId)
-                        end;
-                    {error, claimed} ->
-                        Acc;
-                    {error, not_found} ->
-                        Acc
-                end
-            end, [], Jobs),
-            telemetry_stop(run_due, StartTime, TeleMeta#{
-                due_count => length(Jobs),
-                executed_count => length(Results)
-            }),
-            {ok, lists:reverse(Results)};
-        {error, _} = Error ->
-            telemetry_exception(run_due, Error, TeleMeta),
-            Error
-    end.
+    {ok, Jobs} = beam_agent_routines_core:list_due(DueFilter),
+    Results = lists:foldl(fun(Job, Acc) ->
+        SlotAt = maps:get(next_run_at, Job),
+        JobId = maps:get(job_id, Job),
+        case beam_agent_routines_core:claim_due_job(
+            JobId, RunnerId, SlotAt, ClaimTtlMs) of
+            {ok, _Claim} ->
+                try
+                    {Run, Outcome, Payload} = execute_job(Job, SlotAt, false),
+                    RunId = maps:get(run_id, Run),
+                    case beam_agent_routines_core:scheduled_execution_started(
+                        JobId, RunId, SlotAt, Now) of
+                        {ok, _Started} ->
+                            ok = finish_scheduled(JobId, RunId, SlotAt,
+                                Outcome, Payload, Now),
+                            [#{
+                                job_id => JobId,
+                                status => executed,
+                                outcome => Outcome,
+                                slot_at => SlotAt,
+                                run => Run
+                            } | Acc];
+                        {error, _} ->
+                            Acc
+                    end
+                after
+                    ok = beam_agent_routines_core:release_due_job(JobId, RunnerId)
+                end;
+            {error, claimed} ->
+                Acc;
+            {error, not_found} ->
+                Acc
+        end
+    end, [], Jobs),
+    telemetry_stop(run_due, StartTime, TeleMeta#{
+        due_count => length(Jobs),
+        executed_count => length(Results)
+    }),
+    {ok, lists:reverse(Results)}.
 
 %%--------------------------------------------------------------------
 %% Internal helpers
@@ -174,8 +221,8 @@ execute_run_target(Job, Target, SlotAt, Manual) ->
             {Run, cancelled, Reason}
     end.
 
--spec execute_query_target(map(), map(), integer(), boolean()) ->
-    {beam_agent_runs_core:run(), completed | failed | cancelled, term()}.
+-spec execute_query_target(map(), query_target(), integer(), boolean()) ->
+    {terminal_run(), completed | failed, term()}.
 execute_query_target(Job, Target, SlotAt, Manual) ->
     case open_session(Target, maps:get(routing_policy, Job, #{})) of
         {ok, Session, StopSession} ->
@@ -198,8 +245,8 @@ execute_query_target(Job, Target, SlotAt, Manual) ->
             {Run, failed, Reason}
     end.
 
--spec run_query(pid(), map(), map(), map(), integer(), boolean()) ->
-    {beam_agent_runs_core:run(), completed | failed | cancelled, term()}.
+-spec run_query(pid(), query_scope(), map(), query_target(), integer(), boolean()) ->
+    {terminal_run(), completed | failed, term()}.
 run_query(Session, Scope, Job, Target, SlotAt, Manual) ->
     RunOpts = #{
         kind => routine,
@@ -244,7 +291,8 @@ open_session(#{session := #{kind := routed, opts := SessionOpts0}, stop_session 
         {error, _} = Error -> Error
     end.
 
--spec prepare_thread(pid(), map() | undefined) -> {ok, map()} | {error, term()}.
+-spec prepare_thread(pid(), beam_agent_routines_core:thread_target() | undefined) ->
+    {ok, thread_scope()} | {error, term()}.
 prepare_thread(_Session, undefined) ->
     {ok, #{}};
 prepare_thread(Session, #{thread_id := ThreadId}) ->
@@ -258,8 +306,8 @@ prepare_thread(Session, #{start := ThreadOpts}) ->
         {error, _} = Error -> Error
     end.
 
--spec bootstrap_failed_run(map(), map(), map(), integer(), boolean(), term()) ->
-    beam_agent_runs_core:run().
+-spec bootstrap_failed_run(map(), map(), query_target(), integer(), boolean(), term()) ->
+    terminal_run().
 bootstrap_failed_run(Scope, Job, _Target, SlotAt, Manual, Reason) ->
     RunOpts = #{
         kind => routine,
@@ -313,7 +361,7 @@ maybe_stop_session(Session, true) ->
 maybe_stop_session(_Session, false) ->
     ok.
 
--spec maybe_run_context_policy(map(), map()) -> map() | undefined.
+-spec maybe_run_context_policy(map(), query_scope()) -> context_policy_result().
 maybe_run_context_policy(Job, Scope) ->
     case maps:get(context_policy, maps:get(metadata, Job, #{}), undefined) of
         Policy when is_map(Policy) ->
@@ -325,7 +373,7 @@ maybe_run_context_policy(Job, Scope) ->
             undefined
     end.
 
--spec routine_metadata(map(), integer(), boolean(), atom()) -> map().
+-spec routine_metadata(map(), integer(), boolean(), query | run) -> routine_result_meta().
 routine_metadata(Job, SlotAt, Manual, TargetType) ->
     #{
         job_id => maps:get(job_id, Job),
@@ -334,7 +382,8 @@ routine_metadata(Job, SlotAt, Manual, TargetType) ->
         target_type => TargetType
     }.
 
--spec final_content([map()]) -> binary() | undefined.
+-spec final_content([beam_agent_core:message()]) ->
+    binary() | undefined.
 final_content(Messages) ->
     case lists:reverse(Messages) of
         [#{content := Content} | _] when is_binary(Content) -> Content;
@@ -357,7 +406,7 @@ maybe_put(Key, Value, Map) ->
 default_runner_id() ->
     unicode:characters_to_binary(erlang:pid_to_list(self())).
 
--spec append_execution_event(binary(), binary(), binary(), integer()) -> ok.
+-spec append_execution_event(<<_:64, _:_*8>>, binary(), binary(), integer()) -> ok.
 append_execution_event(EventType, JobId, RunId, Now) ->
     _ = beam_agent_journal_core:append(EventType, #{
         timestamp => Now,
@@ -367,7 +416,7 @@ append_execution_event(EventType, JobId, RunId, Now) ->
     }),
     ok.
 
--spec audit_execution(map() | binary(), binary(), manual | scheduled,
+-spec audit_execution(beam_agent_routines_core:job_record() | binary(), binary(), manual | scheduled,
     completed | failed | cancelled, term()) -> ok.
 audit_execution(#{job_id := JobId} = Job, RunId, Mode, Outcome, Payload) ->
     Metadata = maps:get(metadata, Job, #{}),
@@ -401,24 +450,21 @@ audit_execution(JobId, RunId, Mode, Outcome, Payload) when is_binary(JobId) ->
             end
     end.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(run_now, #{job_id := binary()}) -> integer();
+      (run_due, #{at := integer(), claim_ttl_ms := pos_integer(), limit => pos_integer(),
+          runner_id := binary()}) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(routine_runner_operation(), integer(), routine_runner_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
-telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(routine, Operation, Reason,
-        compact_telemetry(Metadata)).
-
--spec telemetry_run_meta(map()) -> map().
+-spec telemetry_run_meta(terminal_run()) -> routine_runner_telemetry_meta().
 telemetry_run_meta(Run) ->
     maps:with([run_id, session_id, thread_id, kind, status], Run).
 
--spec compact_telemetry(map()) -> map().
+-spec compact_telemetry(routine_runner_telemetry_meta()) -> map().
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

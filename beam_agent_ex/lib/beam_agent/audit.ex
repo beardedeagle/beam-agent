@@ -4,6 +4,10 @@ defmodule BeamAgent.Audit do
 
   Audit entries are persisted through the durable journal and can be listed or
   fetched independently from the live event bus.
+
+  Use this module when you need durable evidence of policy decisions or
+  higher-level actions taken by control, routing, routines, memory, and
+  orchestration flows.
   """
 
   @type category() :: atom() | binary()
@@ -22,12 +26,39 @@ defmodule BeamAgent.Audit do
           optional(:limit) => pos_integer()
         }
 
-  @type audit_event() :: map()
+  @type audit_event() :: %{
+          required(:event_id) => binary(),
+          required(:event_type) => atom() | binary(),
+          required(:payload) => map(),
+          required(:sequence) => pos_integer(),
+          required(:tags) => [atom() | binary()],
+          required(:timestamp) => integer(),
+          optional(:run_id) => binary(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary()
+        }
 
-  @spec list_events() :: {:ok, [audit_event()]}
+  @type listed_audit_event() :: %{
+          required(:event_id) => binary(),
+          required(:event_type) => atom() | binary(),
+          required(:payload) => map(),
+          required(:sequence) => pos_integer(),
+          required(:tags) => [term()],
+          required(:timestamp) => integer(),
+          optional(:run_id) => binary(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary()
+        }
+
+  @spec list_events() :: {:ok, [listed_audit_event()]}
   defdelegate list_events(), to: :beam_agent_audit
 
-  @spec list_events(audit_filter()) :: {:ok, [audit_event()]} | {:error, term()}
+  @spec list_events(audit_filter()) ::
+          {:ok, [listed_audit_event()]}
+          | {:error,
+             {:invalid_filter, :event_id | :event_type | :limit | :run_id | :session_id | :since | :tag | :thread_id}
+             | {:unsupported_audit_filter, atom()}
+             | {:unsupported_audit_scope_key, atom()}}
   defdelegate list_events(filter), to: :beam_agent_audit
 
   @spec get_event(binary()) :: {:ok, audit_event()} | {:error, :not_found}

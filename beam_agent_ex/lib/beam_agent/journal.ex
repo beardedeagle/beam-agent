@@ -65,6 +65,13 @@ defmodule BeamAgent.Journal do
           optional(:run_id) => binary()
         }
 
+  @typedoc "Error returned when appending an invalid or inconsistent journal event."
+  @type append_error() ::
+          :already_exists
+          | :session_id_required_for_thread
+          | {:invalid_event, :event_id | :payload | :run_id | :session_id | :tags | :thread_id | :timestamp}
+          | {:invalid_event_type, binary()}
+
   @doc """
   Ensure the journal ETS tables exist.
   """
@@ -80,7 +87,7 @@ defmodule BeamAgent.Journal do
   @doc """
   Append a normalized BeamAgent domain event to the durable journal.
   """
-  @spec append(event_type(), event_input()) :: {:ok, entry()} | {:error, term()}
+  @spec append(event_type(), event_input()) :: {:ok, entry()} | {:error, append_error()}
   defdelegate append(event_type, event), to: :beam_agent_journal
 
   @doc """

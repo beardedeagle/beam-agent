@@ -19,7 +19,10 @@ thread history is reduced.
 -export_type([
     scope/0,
     context_status/0,
-    budget_estimate_result/0
+    budget_estimate_result/0,
+    context_error/0,
+    compact_now_result/0,
+    maybe_compact_result/0
 ]).
 
 -type scope() ::
@@ -34,6 +37,65 @@ thread history is reduced.
     session_id := binary(),
     thread_id => binary()
 }.
+-type context_error() :: invalid_scope | not_found.
+-type budget_snapshot() :: #{
+    scope := resolved_scope(),
+    session_message_count := non_neg_integer(),
+    visible_message_count := non_neg_integer(),
+    estimated_content_bytes := non_neg_integer(),
+    estimated_token_count := non_neg_integer(),
+    idle_ms := non_neg_integer(),
+    summary_present := boolean(),
+    memory_count := non_neg_integer()
+}.
+-type compaction_trigger() ::
+    estimated_token_threshold
+  | idle_ms_threshold
+  | message_count_threshold
+  | task_boundary
+  | visible_message_threshold.
+-type summary_result() :: #{
+    generated := boolean(),
+    summary => beam_agent_session_store_core:session_summary()
+}.
+-type memory_promotion_result() :: #{
+    promoted := boolean(),
+    memory => beam_agent_memory:memory_record(),
+    error => term()
+}.
+-type compact_selector() :: #{
+    count => term(),
+    message_id => term(),
+    uuid => term(),
+    visible_message_count => term()
+}.
+-type thread_compaction_result() :: #{
+    compacted := boolean(),
+    selector => compact_selector(),
+    thread => beam_agent_threads_core:thread_meta(),
+    error => invalid_selector | not_found
+}.
+-type compact_now_result() :: #{
+    compacted := boolean(),
+    scope := resolved_scope(),
+    session_summary := summary_result(),
+    memory := memory_promotion_result(),
+    thread_compaction := thread_compaction_result(),
+    budget_after := budget_estimate_result()
+}.
+-type maybe_compact_result() :: #{
+    compacted := boolean(),
+    scope := resolved_scope(),
+    budget_before := budget_estimate_result(),
+    triggers := [compaction_trigger()],
+    budget_after => budget_estimate_result(),
+    session_summary => summary_result(),
+    memory => memory_promotion_result(),
+    thread_compaction => thread_compaction_result()
+}.
+-type context_result() :: context_status() | budget_estimate_result() |
+    compact_now_result() | maybe_compact_result().
+-type context_operation() :: context_status | budget_estimate | compact_now | maybe_compact.
 
 -type budget_estimate_result() :: #{
     scope := resolved_scope(),
@@ -44,7 +106,7 @@ thread history is reduced.
     idle_ms := non_neg_integer(),
     summary_present := boolean(),
     memory_count := non_neg_integer(),
-    triggers := [atom()],
+    triggers := [compaction_trigger()],
     recommended := boolean()
 }.
 
@@ -56,7 +118,7 @@ thread history is reduced.
 }.
 
 -doc "Return current context pressure and available summary/memory state.".
--spec context_status(scope()) -> {ok, context_status()} | {error, term()}.
+-spec context_status(scope()) -> {ok, context_status()} | {error, context_error()}.
 context_status(SessionOrThread) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, #{}),
     StartTime = telemetry_start(context_status, TeleMeta),
@@ -94,7 +156,7 @@ context_status(SessionOrThread) ->
     Result.
 
 -doc "Estimate current context budget pressure using default policy thresholds.".
--spec budget_estimate(scope()) -> {ok, budget_estimate_result()} | {error, term()}.
+-spec budget_estimate(scope()) -> {ok, budget_estimate_result()} | {error, context_error()}.
 budget_estimate(SessionOrThread) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, #{}),
     StartTime = telemetry_start(budget_estimate, TeleMeta),
@@ -111,7 +173,7 @@ budget_estimate(SessionOrThread) ->
 Summarize a session, optionally promote the summary to memory, and compact the
 thread scope immediately.
 """.
--spec compact_now(scope(), map()) -> {ok, map()} | {error, term()}.
+-spec compact_now(scope(), map()) -> {ok, compact_now_result()} | {error, context_error()}.
 compact_now(SessionOrThread, Opts) when is_map(Opts) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
     StartTime = telemetry_start(compact_now, TeleMeta),
@@ -135,7 +197,7 @@ Supported triggers:
   - `idle_ms_threshold`
   - `task_boundary`
 """.
--spec maybe_compact(scope(), map()) -> {ok, map()} | {error, term()}.
+-spec maybe_compact(scope(), map()) -> {ok, maybe_compact_result()} | {error, context_error()}.
 maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
     StartTime = telemetry_start(maybe_compact, TeleMeta),
@@ -175,7 +237,8 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
 %% Internal
 %%--------------------------------------------------------------------
 
--spec compact_now_for_scope(resolved_scope(), map()) -> {ok, map()} | {error, term()}.
+-spec compact_now_for_scope(resolved_scope(), map()) ->
+    {ok, compact_now_result()} | {error, not_found}.
 compact_now_for_scope(#{session_id := SessionId} = Scope, Opts) ->
     case beam_agent_session_store_core:get_session(SessionId) of
         {ok, _Meta} ->
@@ -198,7 +261,7 @@ compact_now_for_scope(#{session_id := SessionId} = Scope, Opts) ->
     end.
 
 -spec budget_estimate_for_scope(resolved_scope(), map()) ->
-    {ok, budget_estimate_result()} | {error, term()}.
+    {ok, budget_estimate_result()} | {error, not_found}.
 budget_estimate_for_scope(#{session_id := SessionId} = Scope, Opts) ->
     case beam_agent_session_store_core:get_session(SessionId) of
         {ok, Meta} ->
@@ -228,7 +291,7 @@ budget_estimate_for_scope(#{session_id := SessionId} = Scope, Opts) ->
             {error, not_found}
     end.
 
--spec resolve_scope(scope(), map()) -> {ok, resolved_scope()} | {error, term()}.
+-spec resolve_scope(scope(), map()) -> {ok, resolved_scope()} | {error, invalid_scope}.
 resolve_scope(Session, Opts) when is_pid(Session) ->
     resolve_scope(beam_agent_core:session_identity(Session), Opts);
 resolve_scope(SessionId, Opts) when is_binary(SessionId), byte_size(SessionId) > 0 ->
@@ -242,7 +305,7 @@ resolve_scope(_Other, _Opts) ->
     {error, invalid_scope}.
 
 -spec resolve_scope_from_parts(binary(), term()) ->
-    {ok, resolved_scope()} | {error, term()}.
+    {ok, resolved_scope()} | {error, invalid_scope}.
 resolve_scope_from_parts(SessionId, ThreadId) when is_binary(ThreadId), byte_size(ThreadId) > 0 ->
     {ok, #{session_id => SessionId, thread_id => ThreadId}};
 resolve_scope_from_parts(SessionId, undefined) ->
@@ -278,7 +341,8 @@ maybe_summarize_session(SessionId, Opts) ->
             end
     end.
 
--spec maybe_promote_summary(resolved_scope(), binary() | undefined, map()) -> map().
+-spec maybe_promote_summary(resolved_scope(), binary() | undefined, map()) ->
+    memory_promotion_result().
 maybe_promote_summary(_Scope, undefined, _Opts) ->
     #{promoted => false};
 maybe_promote_summary(_Scope, _Summary, #{promote_to_memory := false}) ->
@@ -322,7 +386,7 @@ maybe_promote_summary(#{session_id := SessionId} = Scope, SummaryContent, Opts) 
             }
     end.
 
--spec maybe_compact_thread(resolved_scope(), map()) -> map().
+-spec maybe_compact_thread(resolved_scope(), map()) -> thread_compaction_result().
 maybe_compact_thread(#{session_id := SessionId} = Scope, Opts) ->
     case maps:get(compact_thread, Opts, true) of
         false ->
@@ -349,7 +413,7 @@ maybe_compact_thread(#{session_id := SessionId} = Scope, Opts) ->
             end
     end.
 
--spec compact_selector(map()) -> map().
+-spec compact_selector(map()) -> compact_selector().
 compact_selector(Opts) ->
     Selector0 =
         maybe_put_selector(count, maps:get(count, Opts, undefined),
@@ -410,7 +474,7 @@ scope_memory_count(#{session_id := SessionId}) ->
         {error, _} -> 0
     end.
 
--spec compaction_triggers(map(), map()) -> [atom()].
+-spec compaction_triggers(budget_snapshot(), map()) -> [compaction_trigger()].
 compaction_triggers(Budget, Opts) ->
     maybe_add_trigger(task_boundary, maps:get(task_boundary, Opts, false),
         maybe_add_trigger(idle_ms_threshold,
@@ -435,46 +499,51 @@ over_threshold(Value, Threshold) when is_integer(Threshold), Threshold >= 0 ->
 over_threshold(_Value, _Threshold) ->
     false.
 
--spec maybe_add_trigger(atom(), boolean(), [atom()]) -> [atom()].
+-spec maybe_add_trigger(compaction_trigger(), boolean(),
+    [compaction_trigger()]) -> [compaction_trigger()].
 maybe_add_trigger(_Trigger, false, Acc) ->
     Acc;
 maybe_add_trigger(Trigger, true, Acc) ->
     [Trigger | Acc].
 
--spec recompute_budget(resolved_scope(), map(), budget_estimate_result()) -> map().
+-spec recompute_budget(resolved_scope(), map(), budget_estimate_result()) ->
+    #{budget_after := budget_estimate_result()}.
 recompute_budget(Scope, Opts, Fallback) ->
     case budget_estimate_for_scope(Scope, Opts) of
         {ok, BudgetAfter} -> #{budget_after => BudgetAfter};
         {error, _} -> #{budget_after => Fallback}
     end.
 
--spec summary_changed(map()) -> boolean().
+-spec summary_changed(summary_result()) -> boolean().
 summary_changed(#{generated := true}) ->
     true;
 summary_changed(_) ->
     false.
 
--spec thread_compacted(map()) -> boolean().
+-spec thread_compacted(thread_compaction_result()) -> boolean().
 thread_compacted(#{compacted := true}) ->
     true;
 thread_compacted(_) ->
     false.
 
--spec maybe_put_selector(atom(), term(), map()) -> map().
+-spec maybe_put_selector(count | message_id | uuid | visible_message_count,
+    term(), compact_selector()) -> compact_selector().
 maybe_put_selector(_Key, undefined, Acc) ->
     Acc;
 maybe_put_selector(Key, Value, Acc) ->
     Acc#{Key => Value}.
 
--spec is_ok(term()) -> boolean().
+-spec is_ok({ok, beam_agent_session_store_core:session_summary()} | {error, not_found}) ->
+    boolean().
 is_ok({ok, _}) -> true;
 is_ok(_) -> false.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(context_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(context, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), integer(), {ok, map()} | {error, term()}, map()) -> ok.
+-spec telemetry_finish(context_operation(), integer(),
+    {ok, context_result()} | {error, context_error()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) ->
     TeleMeta = compact_telemetry(maps:merge(Metadata, telemetry_result_meta(Result))),
     beam_agent_telemetry_core:span_stop(context, Operation, StartTime, TeleMeta),
@@ -493,7 +562,7 @@ telemetry_scope_meta(#{session_id := _} = Scope, _Opts) ->
 telemetry_scope_meta(_Other, Opts) ->
     maps:with([thread_id], Opts).
 
--spec telemetry_result_meta(map()) -> map().
+-spec telemetry_result_meta(context_result()) -> map().
 telemetry_result_meta(Result) ->
     Base = maps:with([compacted, triggers], Result),
     case maps:get(scope, Result, undefined) of
@@ -503,7 +572,7 @@ telemetry_result_meta(Result) ->
             Base
     end.
 
--spec maybe_emit_compaction_transition(map(), map()) -> ok.
+-spec maybe_emit_compaction_transition(context_result(), map()) -> ok.
 maybe_emit_compaction_transition(#{compacted := true}, Metadata) ->
     beam_agent_telemetry_core:state_change(context, stable, compacted, Metadata);
 maybe_emit_compaction_transition(_Result, _Metadata) ->

@@ -980,7 +980,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, status_map}` or `{:error, reason}`.
   """
-  @spec session_server_status(pid()) :: {:ok, map()} | {:error, term()}
+  @spec session_server_status(pid()) :: {:ok, map()}
   defdelegate session_server_status(session), to: :beam_agent_mcp, as: :server_status
 
   @doc """
@@ -1017,9 +1017,9 @@ defmodule BeamAgent.MCP do
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
   @spec session_reconnect_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
-  defdelegate session_reconnect_server(session, server_name),
-    to: :beam_agent_mcp,
-    as: :reconnect_server
+  def session_reconnect_server(session, server_name) do
+    :beam_agent_mcp.reconnect_server(server_name, session)
+  end
 
   @doc """
   Enable or disable an MCP server on a live session.
@@ -1038,9 +1038,9 @@ defmodule BeamAgent.MCP do
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
   @spec session_toggle_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
-  defdelegate session_toggle_server(session, server_name, enabled),
-    to: :beam_agent_mcp,
-    as: :toggle_server
+  def session_toggle_server(session, server_name, enabled) do
+    :beam_agent_mcp.toggle_server(server_name, enabled, session)
+  end
 
   @doc """
   Initiate an OAuth login flow for an MCP server.

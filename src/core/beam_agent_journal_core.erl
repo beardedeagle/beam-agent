@@ -67,6 +67,18 @@ persistence to `beam_agent_journal_store`.
     thread_id => binary(),
     run_id => binary()
 }.
+-type journal_optional_key() ::
+    event_id | event_type | limit | run_id | session_id | since | tag | thread_id |
+    timestamp.
+-type journal_put_map() ::
+    event_filter()
+  | normalized_input()
+  | entry()
+  | #{
+        payload := map(),
+        sequence => integer(),
+        tags := [tag()]
+    }.
 
 -doc "Ensure the journal ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
@@ -160,14 +172,9 @@ list(Filter) when is_map(Filter) ->
     StartTime = telemetry_start(list, TeleMeta),
     case normalize_filter(Filter) of
         {ok, Normalized} ->
-            case beam_agent_journal_store:list_events(Normalized) of
-                {ok, Entries} = Result ->
-                    telemetry_stop(list, StartTime, TeleMeta#{result_count => length(Entries)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(list, Error, TeleMeta),
-                    Error
-            end;
+            {ok, Entries} = Result = beam_agent_journal_store:list_events(Normalized),
+            telemetry_stop(list, StartTime, TeleMeta#{result_count => length(Entries)}),
+            Result;
         {error, _} = Error ->
             telemetry_exception(list, Error, TeleMeta),
             Error
@@ -195,15 +202,10 @@ stream_from(Cursor, Filter) when is_integer(Cursor), Cursor >= 0, is_map(Filter)
     StartTime = telemetry_start(stream_from, TeleMeta),
     case normalize_filter(Filter) of
         {ok, Normalized} ->
-            case beam_agent_journal_store:list_events(Normalized#{after_sequence => Cursor}) of
-                {ok, Entries} = Result ->
-                    telemetry_stop(stream_from, StartTime,
-                        TeleMeta#{result_count => length(Entries)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(stream_from, Error, TeleMeta),
-                    Error
-            end;
+            {ok, Entries} = Result =
+                beam_agent_journal_store:list_events(Normalized#{after_sequence => Cursor}),
+            telemetry_stop(stream_from, StartTime, TeleMeta#{result_count => length(Entries)}),
+            Result;
         {error, _} = Error ->
             telemetry_exception(stream_from, Error, TeleMeta),
             Error
@@ -242,7 +244,7 @@ ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
             Error
     end.
 
--spec normalize_event_type(term()) -> ok | {error, {invalid_event_type, term()}}.
+-spec normalize_event_type(atom() | binary()) -> ok | {error, {invalid_event_type, binary()}}.
 normalize_event_type(EventType) when is_atom(EventType) ->
     ok;
 normalize_event_type(EventType) when is_binary(EventType), byte_size(EventType) > 0 ->
@@ -420,8 +422,9 @@ normalize_filter(Filter) when is_map(Filter) ->
             end
     end.
 
--spec normalize_optional_binary(atom(), map()) ->
-    {ok, binary() | undefined} | {error, {invalid_event, atom()}}.
+-spec normalize_optional_binary(event_id | run_id | session_id | thread_id, map()) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_event, event_id | run_id | session_id | thread_id}}.
 normalize_optional_binary(Key, Map) ->
     case maps:find(Key, Map) of
         error ->
@@ -498,8 +501,9 @@ validate_allowed_filter_keys(Map, Allowed) ->
             {error, {unsupported_filter, BadKey}}
     end.
 
--spec normalize_optional_filter_binary(atom(), map()) ->
-    {ok, binary() | undefined} | {error, {invalid_filter, atom()}}.
+-spec normalize_optional_filter_binary(event_id | run_id | session_id | thread_id, map()) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_filter, event_id | run_id | session_id | thread_id}}.
 normalize_optional_filter_binary(Key, Filter) ->
     case maps:find(Key, Filter) of
         error ->
@@ -560,22 +564,29 @@ normalize_since(Filter) ->
             {error, {invalid_filter, since}}
     end.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(journal_optional_key(), term(), journal_put_map()) -> journal_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(ack | append | get | list | stream_from, map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(journal, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(ack | append | get | list | stream_from, integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(journal, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(append | list | stream_from,
+    {error,
+        already_exists
+      | session_id_required_for_thread
+      | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+      | {invalid_event_type, binary()}
+      | {invalid_filter, event_id | event_type | limit | run_id | session_id | since |
+            tag | thread_id}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(journal, Operation, Reason,
         compact_telemetry(Metadata)).
@@ -597,7 +608,7 @@ telemetry_entry_meta(Entry) ->
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
--spec generate_event_id() -> binary().
+-spec generate_event_id() -> <<_:48, _:_*8>>.
 generate_event_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"event_", Hex/binary>>.

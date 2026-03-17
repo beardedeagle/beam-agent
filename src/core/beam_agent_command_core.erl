@@ -199,11 +199,7 @@ run(Command, Opts) when is_map(Opts) ->
         {deny, Reason} ->
             ok = audit_command_result(Command, Opts,
                 {error, {security, {deny, Reason}}}, deny, Reason),
-            {error, {security, {deny, Reason}}};
-        {throttle, RetryMs} ->
-            ok = audit_command_result(Command, Opts,
-                {error, {security, {throttle, RetryMs}}}, deny, <<"throttled">>),
-            {error, {security, {throttle, RetryMs}}}
+            {error, {security, {deny, Reason}}}
     end.
 
 %%--------------------------------------------------------------------
@@ -268,7 +264,10 @@ audit_command_result(Command, Opts, Result, Decision, Reason) ->
         decision => Decision,
         command => unicode:characters_to_binary(display_command(Command))
     },
-    Details1 = maybe_put(reason, Reason, Details0),
+    Details1 = case Reason of
+        undefined -> Details0;
+        _ -> Details0#{reason => Reason}
+    end,
     Details = case Result of
         {ok, #{exit_code := ExitCode}} ->
             Details1#{outcome => success, exit_code => ExitCode};
@@ -298,11 +297,22 @@ command_policy_profile_id(Opts) ->
 -spec audit_scope_from_opts(command_opts()) -> map().
 audit_scope_from_opts(Opts) ->
     Metadata = maps:get(metadata, Opts, #{}),
-    Scope0 = #{},
-    Scope1 = maybe_put(session_id, maps:get(session_id, Metadata, undefined), Scope0),
-    Scope2 = maybe_put(thread_id, maps:get(thread_id, Metadata, undefined), Scope1),
-    Scope3 = maybe_put(run_id, maps:get(run_id, Metadata, undefined), Scope2),
-    maybe_put(profile_id, command_policy_profile_id(Opts), Scope3).
+    Scope0 = case maps:get(session_id, Metadata, undefined) of
+        undefined -> #{};
+        SessionId -> #{session_id => SessionId}
+    end,
+    Scope1 = case maps:get(thread_id, Metadata, undefined) of
+        undefined -> Scope0;
+        ThreadId -> Scope0#{thread_id => ThreadId}
+    end,
+    Scope2 = case maps:get(run_id, Metadata, undefined) of
+        undefined -> Scope1;
+        RunId -> Scope1#{run_id => RunId}
+    end,
+    case command_policy_profile_id(Opts) of
+        undefined -> Scope2;
+        ProfileId -> Scope2#{profile_id => ProfileId}
+    end.
 
 %%--------------------------------------------------------------------
 %% Internal: Command Execution
@@ -631,9 +641,3 @@ telemetry_command(CmdStr) ->
         _ ->
             <<"<encoding-error>">>
     end.
-
--spec maybe_put(atom(), term(), map()) -> map().
-maybe_put(_Key, undefined, Map) ->
-    Map;
-maybe_put(Key, Value, Map) ->
-    Map#{Key => Value}.

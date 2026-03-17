@@ -156,6 +156,13 @@ applies policies such as `explicit`, `sticky`, `round_robin`, `failover`,
 decisions. When you add a backend, routing only becomes truthful after both the
 backend registry and capability registry are updated.
 
+The newer canonical domain modules (`beam_agent_runs`, `beam_agent_artifacts`,
+`beam_agent_journal`, `beam_agent_memory`, `beam_agent_routing`,
+`beam_agent_context`, `beam_agent_routines`, `beam_agent_orchestrator`,
+`beam_agent_policy`, `beam_agent_audit`) are shared substrate, not hidden
+runtime services. See `docs/guides/canonical_domain_guide.md` for the ownership
+rules that keep those domains process-free.
+
 **`beam_agent_capabilities`** (`src/public/beam_agent_capabilities.erl`)
 is the capability registry. Every backend must declare its support level
 for all 22 capabilities.

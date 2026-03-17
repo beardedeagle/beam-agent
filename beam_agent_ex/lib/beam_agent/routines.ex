@@ -122,6 +122,12 @@ defmodule BeamAgent.Routines do
           optional(:include_claimed) => boolean()
         }
 
+  @type run_due_result() :: %{
+          required(:job_id) => binary(),
+          required(:run) => BeamAgent.Runs.run(),
+          required(:slot_at) => integer()
+        }
+
   @doc """
   Ensure the routines ETS tables exist.
   """
@@ -149,25 +155,25 @@ defmodule BeamAgent.Routines do
   @doc """
   Cancel a routine job.
   """
-  @spec cancel(binary()) :: :ok | {:error, :not_found}
+  @spec cancel(binary()) :: :ok
   defdelegate cancel(job_id), to: :beam_agent_routines
 
   @doc """
   Execute a routine job immediately without changing its normal cadence.
   """
-  @spec run_now(binary()) :: {:ok, map()} | {:error, term()}
+  @spec run_now(binary()) :: {:ok, BeamAgent.Runs.run()} | {:error, :not_found}
   defdelegate run_now(job_id), to: :beam_agent_routines
 
   @doc """
   Execute all currently due jobs using default runner options.
   """
-  @spec run_due() :: {:ok, [map()]} | {:error, term()}
+  @spec run_due() :: {:ok, [run_due_result()]}
   defdelegate run_due(), to: :beam_agent_routines
 
   @doc """
   Execute currently due jobs from the calling process.
   """
-  @spec run_due(map()) :: {:ok, [map()]} | {:error, term()}
+  @spec run_due(map()) :: {:ok, [run_due_result()]}
   defdelegate run_due(opts), to: :beam_agent_routines
 
   @doc """

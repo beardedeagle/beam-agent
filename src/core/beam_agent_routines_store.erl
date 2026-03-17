@@ -84,7 +84,7 @@ clear() ->
     ok.
 
 -doc "Insert or overwrite a routine job, updating due indexes as needed.".
--spec put_job(job_record()) -> ok.
+-spec put_job(#{job_id := binary(), _ => term()}) -> ok.
 put_job(#{job_id := JobId} = Job) when is_binary(JobId) ->
     ensure_tables(),
     case get_job(JobId) of
@@ -293,11 +293,9 @@ apply_limit(Jobs, infinity) ->
 apply_limit(Jobs, Limit) when is_integer(Limit), Limit > 0 ->
     lists:sublist(Jobs, Limit).
 
--spec decrement_limit(infinity | pos_integer(), 0 | 1) -> infinity | non_neg_integer().
+-spec decrement_limit(infinity | pos_integer(), 1) -> infinity | non_neg_integer().
 decrement_limit(infinity, _Matched) ->
     infinity;
-decrement_limit(Limit, 0) ->
-    Limit;
 decrement_limit(Limit, 1) when is_integer(Limit), Limit > 0 ->
     Limit - 1.
 
@@ -309,7 +307,7 @@ schedule_type(Job) ->
 target_type(Job) ->
     maps:get(type, maps:get(target, Job, #{}), undefined).
 
--spec index_due(job_record()) -> ok.
+-spec index_due(#{job_id := term(), _ => term()}) -> ok.
 index_due(Job) ->
     case due_key(Job) of
         undefined ->

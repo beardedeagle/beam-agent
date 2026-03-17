@@ -196,6 +196,86 @@ canonical runs.
     thread_inherited := boolean(),
     thread_started := boolean()
 }.
+-type spawn_context() :: #{
+    owns_session := boolean(),
+    session_inherited := boolean(),
+    stop_session := boolean(),
+    thread_inherited => boolean(),
+    thread_started => boolean(),
+    session_id => binary(),
+    session_ref => pid(),
+    thread => map(),
+    thread_id => binary()
+}.
+-type resolved_spawn_context() :: #{
+    owns_session := boolean(),
+    session_inherited := boolean(),
+    stop_session := boolean(),
+    thread_inherited := boolean(),
+    thread_started := boolean(),
+    session_id => binary(),
+    session_ref => pid(),
+    thread => map(),
+    thread_id => binary()
+}.
+-type child_link() :: #{
+    metadata := map(),
+    parent_run_id := binary(),
+    relation := relation(),
+    substrate := substrate(),
+    child_run_id => binary(),
+    child_session_id => binary(),
+    child_thread_id => binary(),
+    created_at => integer(),
+    owns_session => boolean(),
+    sequence => pos_integer(),
+    session_ref => pid(),
+    stop_session => boolean(),
+    task => term(),
+    updated_at => integer()
+}.
+-type spawn_error() ::
+    already_exists
+  | inconsistent_parent_scope
+  | parent_run_not_found
+  | session_id_required_for_thread
+  | {invalid_run_opt, kind | metadata | run_id}
+  | {invalid_scope, atom()}
+  | {policy_denied, binary()}
+  | {unsupported_scope_key, atom()}.
+-type collect_error() ::
+    {invalid_collect_opt, include_descendants | include_journal | include_steps}
+  | {unsupported_collect_opt, atom()}
+  | {unsupported_spawn_opt, atom()}.
+-type normalized_collect_opts() :: #{
+    include_descendants := boolean(),
+    include_journal := boolean(),
+    include_steps := boolean()
+}.
+-type cancel_origin() :: root | {child_of, binary()}.
+-type orchestrator_meta() :: #{
+    orchestrator := #{atom() => term()},
+    _ => term()
+}.
+-type orchestrator_pair_key() ::
+    cancel_reason | error | metadata | output | parent_run_id | relation | session_id |
+    substrate | task | thread_id.
+-type orchestrator_optional_boolean_key() ::
+    include_descendants | include_journal | include_steps.
+-type orchestrator_operation() ::
+    await | cancel | collect | delegate | list_children | spawn | status.
+-type run_scope_map() :: #{atom() => term()}.
+-type orchestrator_payload() :: #{
+    child_run_id := binary(),
+    parent_run_id := binary(),
+    relation => relation(),
+    substrate => substrate(),
+    child_session_id => term(),
+    child_thread_id => term(),
+    origin => cancel_origin(),
+    reason => term(),
+    task => term()
+}.
 
 -define(DEFAULT_AWAIT_POLL_MS, 25).
 -define(DEFAULT_KIND, orchestrator_child).
@@ -460,8 +540,8 @@ spawn_child(ParentRun, Relation, Task, Opts) ->
     end.
 
 -spec persist_child_run(beam_agent_runs_core:run(), relation(), term() | undefined,
-    normalized_spawn_opts(), map()) ->
-    {ok, child()} | {error, term()}.
+    normalized_spawn_opts(), resolved_spawn_context()) ->
+    {ok, child()} | {error, spawn_error()}.
 persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
     ParentRunId = maps:get(run_id, ParentRun),
     RunScope = build_run_scope(Ctx),
@@ -527,7 +607,7 @@ persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
     end.
 
 -spec resolve_spawn_context(beam_agent_runs_core:run(), normalized_spawn_opts()) ->
-    {ok, map()} | {error, term()}.
+    {ok, resolved_spawn_context()} | {error, term()}.
 resolve_spawn_context(ParentRun, Opts) ->
     ParentSessionId = maps:get(session_id, ParentRun, undefined),
     ParentThreadId = maps:get(thread_id, ParentRun, undefined),
@@ -718,8 +798,9 @@ cancel_tree(RunId, Reason, Origin) ->
             {error, not_found}
     end.
 
--spec cancel_single_run(beam_agent_runs_core:run(), term(), root | {child_of, binary()}) ->
-    ok | {error, term()}.
+-spec cancel_single_run(beam_agent_runs_core:run(), term(), cancel_origin()) ->
+    ok | {error, not_found | {invalid_status_transition, cancelled | completed | failed,
+        cancelled}}.
 cancel_single_run(#{run_id := RunId, status := running}, Reason, Origin) ->
     case beam_agent_runs:cancel_run(RunId, Reason) of
         {ok, _Cancelled} ->
@@ -825,7 +906,7 @@ normalize_session_target(Target) ->
     {error, {invalid_session_target, Target}}.
 
 -spec normalize_thread_target(term()) ->
-    {ok, normalized_thread_target()} | {error, term()}.
+    {ok, normalized_thread_target()} | {error, {invalid_thread_target, term()}}.
 normalize_thread_target(inherit) ->
     {ok, inherit};
 normalize_thread_target(none) ->
@@ -840,7 +921,8 @@ normalize_thread_target(#{start := ThreadOpts}) when is_map(ThreadOpts) ->
 normalize_thread_target(Target) ->
     {error, {invalid_thread_target, Target}}.
 
--spec normalize_collect_opts(map()) -> {ok, collect_opts()} | {error, term()}.
+-spec normalize_collect_opts(map()) ->
+    {ok, normalized_collect_opts()} | {error, collect_error()}.
 normalize_collect_opts(Opts) ->
     Allowed = [include_steps, include_journal, include_descendants],
     case validate_allowed_keys(Opts, Allowed, unsupported_collect_opt) of
@@ -885,7 +967,8 @@ resolve_parent_run(#{run_id := ParentRunId}) when is_binary(ParentRunId) ->
 resolve_parent_run(Parent) ->
     {error, {invalid_parent, Parent}}.
 
--spec resolve_parent_run_id(parent()) -> {ok, binary()} | {error, term()}.
+-spec resolve_parent_run_id(parent()) -> {ok, binary()} | {error, parent_not_found |
+    {invalid_parent, binary()}}.
 resolve_parent_run_id(Parent) ->
     case resolve_parent_run(Parent) of
         {ok, #{run_id := RunId}} -> {ok, RunId};
@@ -899,13 +982,13 @@ ensure_parent_running(#{status := running}) ->
 ensure_parent_running(#{status := Status}) ->
     {error, {parent_not_running, Status}}.
 
--spec build_run_scope(map()) -> map().
+-spec build_run_scope(resolved_spawn_context()) -> run_scope_map().
 build_run_scope(Ctx) ->
     Scope0 = #{},
     Scope1 = maybe_put(session_id, maps:get(session_id, Ctx, undefined), Scope0),
     maybe_put(thread_id, maps:get(thread_id, Ctx, undefined), Scope1).
 
--spec determine_substrate(map()) -> substrate().
+-spec determine_substrate(resolved_spawn_context()) -> substrate().
 determine_substrate(Ctx) ->
     SessionChanged = not maps:get(session_inherited, Ctx, false) andalso
         maps:is_key(session_id, Ctx),
@@ -923,7 +1006,8 @@ determine_substrate(Ctx) ->
         _ -> run
     end.
 
--spec orchestrator_metadata(binary(), relation(), substrate(), map(), map()) -> map().
+-spec orchestrator_metadata(binary(), relation(), substrate(), map(), resolved_spawn_context()) ->
+    orchestrator_meta().
 orchestrator_metadata(ParentRunId, Relation, Substrate, Metadata, Ctx) ->
     Orchestrator = #{
         parent_run_id => ParentRunId,
@@ -980,8 +1064,9 @@ child_status_active(#{run := #{status := running}}) ->
 child_status_active(_) ->
     false.
 
--spec evaluate_orchestrator_policy(relation(), map(), beam_agent_runs_core:run(),
-    term() | undefined, map(), map()) -> allow | {deny, binary()}.
+-spec evaluate_orchestrator_policy(relation(), orchestrator_meta(),
+    beam_agent_runs_core:run(), term() | undefined, run_scope_map(), resolved_spawn_context()) ->
+    allow | {deny, binary()}.
 evaluate_orchestrator_policy(Relation, Metadata, ParentRun, Task, RunScope, Ctx) ->
     ProfileId = maps:get(policy_profile_id, Metadata, undefined),
     beam_agent_policy_core:evaluate(ProfileId, orchestrator, #{
@@ -993,7 +1078,7 @@ evaluate_orchestrator_policy(Relation, Metadata, ParentRun, Task, RunScope, Ctx)
         context => maps:without([session_ref], Ctx)
     }).
 
--spec audit_orchestrator_event(relation() | cancelled, map(),
+-spec audit_orchestrator_event(relation() | cancelled, child_link(),
     allow | deny, binary() | undefined) -> ok.
 audit_orchestrator_event(Action, Link, Decision, Reason) ->
     Scope0 = #{},
@@ -1048,7 +1133,8 @@ step_counts(Steps) ->
 child_counts(Children) ->
     {length([Child || Child <- Children, child_status_active(Child)]), length(Children)}.
 
--spec descendant_cancel_reason(binary(), term()) -> map().
+-spec descendant_cancel_reason(binary(), term()) ->
+    #{cancelled_by_parent := binary(), reason := term()}.
 descendant_cancel_reason(ParentRunId, Reason) ->
     #{
         cancelled_by_parent => ParentRunId,
@@ -1066,7 +1152,7 @@ maybe_stop_link_session(Link) ->
             ok
     end.
 
--spec cleanup_spawn_context(map()) -> ok.
+-spec cleanup_spawn_context(spawn_context()) -> ok.
 cleanup_spawn_context(Ctx) ->
     case {maps:get(owns_session, Ctx, false), maps:get(session_ref, Ctx, undefined)} of
         {true, SessionRef} when is_pid(SessionRef) ->
@@ -1076,7 +1162,7 @@ cleanup_spawn_context(Ctx) ->
             ok
     end.
 
--spec append_orchestrator_event(binary(), map()) -> ok.
+-spec append_orchestrator_event(<<_:128, _:_*16>>, orchestrator_payload()) -> ok.
 append_orchestrator_event(EventType, Payload0) ->
     Payload = maps:filter(fun(_Key, Value) -> Value =/= undefined end, Payload0),
     Event0 = #{
@@ -1091,13 +1177,13 @@ append_orchestrator_event(EventType, Payload0) ->
         {error, _} -> ok
     end.
 
--spec orchestrator_event(relation()) -> binary().
+-spec orchestrator_event(relation()) -> <<_:128, _:_*16>>.
 orchestrator_event(spawned) ->
     <<"orchestrator_spawned">>;
 orchestrator_event(delegated) ->
     <<"orchestrator_delegated">>.
 
--spec link_status_entries(beam_agent_orchestrator_store:link_record()) -> [{atom(), term()}].
+-spec link_status_entries(child_link()) -> [{orchestrator_pair_key(), term()}].
 link_status_entries(Link) ->
     maybe_pair(relation, maps:get(relation, Link, undefined)) ++
     maybe_pair(parent_run_id, maps:get(parent_run_id, Link, undefined)) ++
@@ -1107,7 +1193,7 @@ link_status_entries(Link) ->
     maybe_pair(metadata, maps:get(metadata, Link, undefined)) ++
     maybe_pair(task, maps:get(task, Link, undefined)).
 
--spec default_kind(relation()) -> atom().
+-spec default_kind(relation()) -> delegated_task | orchestrator_child.
 default_kind(spawned) ->
     ?DEFAULT_KIND;
 default_kind(delegated) ->
@@ -1174,8 +1260,8 @@ normalize_metadata(Opts) ->
             {error, {invalid_spawn_opt, metadata}}
     end.
 
--spec normalize_optional_boolean(atom(), map(), boolean()) ->
-    {ok, boolean()} | {error, {invalid_collect_opt, atom()}}.
+-spec normalize_optional_boolean(orchestrator_optional_boolean_key(), map(), boolean()) ->
+    {ok, boolean()} | {error, {invalid_collect_opt, orchestrator_optional_boolean_key()}}.
 normalize_optional_boolean(Key, Opts, Default) ->
     case maps:get(Key, Opts, Default) of
         Value when is_boolean(Value) ->
@@ -1184,38 +1270,37 @@ normalize_optional_boolean(Key, Opts, Default) ->
             {error, {invalid_collect_opt, Key}}
     end.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(atom(), term(), #{atom() => term()}) -> #{atom() => term()}.
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec maybe_pair(atom(), term()) -> [{atom(), term()}].
+-spec maybe_pair(orchestrator_pair_key(), term()) -> [{orchestrator_pair_key(), term()}].
 maybe_pair(_Key, undefined) ->
     [];
 maybe_pair(Key, Value) ->
     [{Key, Value}].
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(orchestrator_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(orchestrator, Operation,
         compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(orchestrator_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(orchestrator, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(orchestrator_operation(), term(), map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(orchestrator, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), integer(), term(), map()) -> ok.
+-spec telemetry_finish(await | collect | delegate | spawn | status, integer(),
+    {ok, map()} | {error, timeout | not_found | term()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) when is_map(Result) ->
     telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_result_meta(Result)));
-telemetry_finish(Operation, StartTime, ok, Metadata) ->
-    telemetry_stop(Operation, StartTime, Metadata);
 telemetry_finish(Operation, StartTime, {error, timeout}, Metadata) ->
     telemetry_stop(Operation, StartTime, Metadata#{timeout => true});
 telemetry_finish(Operation, StartTime, {error, not_found}, Metadata) ->

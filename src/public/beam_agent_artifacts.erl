@@ -117,7 +117,10 @@ search(Query, Filter) ->
     beam_agent_artifacts_core:search(Query, Filter).
 
 -doc "Attach a typed source reference to an existing artifact.".
--spec attach(binary(), atom() | binary(), binary()) -> ok | {error, term()}.
+-spec attach(binary(), atom() | binary(), binary()) ->
+    ok |
+    {error, inconsistent_run_scope | inconsistent_scope | not_found |
+        run_not_found | session_id_required_for_thread}.
 attach(ArtifactId, RefType, RefId) ->
     beam_agent_artifacts_core:attach(ArtifactId, RefType, RefId).
 

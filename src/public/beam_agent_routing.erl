@@ -6,6 +6,19 @@ Routing lets consumers ask BeamAgent to choose a backend according to reusable
 policy instead of hard-coding one every time. The implementation is process-free
 and backed by the canonical store abstraction.
 
+Supported routing policies in this slice are:
+
+  - `explicit`
+  - `sticky`
+  - `round_robin`
+  - `failover`
+  - `capability_first`
+  - `preferred_then_fallback`
+
+Routing decisions can use session identity, explicit exclusions, health
+overrides, preferred backend order, and capability requirements. Sticky and
+round-robin state are durable BeamAgent state, not hidden scheduler state.
+
 ## Quick example
 
 ```erlang

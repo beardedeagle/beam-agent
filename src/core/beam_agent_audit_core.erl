@@ -24,6 +24,39 @@ rest of the BeamAgent substrate.
 -type category() :: atom() | binary().
 -type action() :: atom() | binary().
 -type audit_event() :: beam_agent_journal_core:entry().
+-type audit_scope() :: #{
+    session_id => binary(),
+    thread_id => binary(),
+    run_id => binary(),
+    profile_id => binary()
+}.
+-type audit_scope_error() ::
+    invalid_audit_scope
+  | {unsupported_audit_filter, atom()}
+  | {unsupported_audit_scope_key, atom()}.
+-type normalize_term_tag() :: invalid_action | invalid_category.
+-type audit_operation() :: record | list_events | get_event.
+-type audit_allowed_key() ::
+    action | category | decision | event_id | limit | profile_id |
+    run_id | session_id | since | thread_id.
+-type audit_record_error() ::
+    {error,
+        already_exists
+      | invalid_audit_scope
+      | session_id_required_for_thread
+      | {invalid_action | invalid_category | invalid_event | invalid_event_type |
+            invalid_filter | unsupported_audit_filter |
+            unsupported_audit_scope_key, term()}}.
+-type audit_event_map() :: #{
+    action => action(),
+    category => category(),
+    payload => map(),
+    tags => [atom() | binary(), ...],
+    profile_id => binary(),
+    run_id => binary(),
+    session_id => binary(),
+    thread_id => binary()
+}.
 
 -type audit_filter() :: #{
     event_id => binary(),
@@ -177,7 +210,7 @@ matches_filter(Entry, Filter) ->
             maps:get(Key, Payload, undefined) =:= Value
     end, maps:to_list(Filter)).
 
--spec normalize_scope(map()) -> {ok, map()} | {error, term()}.
+-spec normalize_scope(map()) -> {ok, audit_scope()} | {error, audit_scope_error()}.
 normalize_scope(Scope) ->
     Allowed = [session_id, thread_id, run_id, profile_id],
     case validate_allowed_keys(Scope, Allowed, unsupported_audit_scope_key) of
@@ -198,13 +231,16 @@ is_audit_entry(Entry) ->
     lists:member(audit, maps:get(tags, Entry, [])) andalso
         maps:get(event_type, Entry, undefined) =:= <<"audit">>.
 
--spec normalize_term(term(), atom()) -> {ok, atom() | binary()} | {error, term()}.
+-spec normalize_term(term(), normalize_term_tag()) ->
+    {ok, atom() | binary()} | {error, {normalize_term_tag(), term()}}.
 normalize_term(Value, _Tag) when is_atom(Value); is_binary(Value) ->
     {ok, Value};
 normalize_term(Value, Tag) ->
     {error, {Tag, Value}}.
 
--spec validate_allowed_keys(map(), [atom()], atom()) -> ok | {error, term()}.
+-spec validate_allowed_keys(map(), [audit_allowed_key(), ...],
+    unsupported_audit_filter | unsupported_audit_scope_key) ->
+    ok | {error, {unsupported_audit_filter, atom()} | {unsupported_audit_scope_key, atom()}}.
 validate_allowed_keys(Map, Allowed, ErrorTag) ->
     case [Key || Key <- maps:keys(Map),
             is_atom(Key),
@@ -215,22 +251,23 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
             {error, {ErrorTag, Unsupported}}
     end.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(profile_id | run_id | session_id | thread_id,
+    term(), audit_event_map()) -> audit_event_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(audit_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(audit, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(audit_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(audit, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(record | list_events, audit_record_error(), map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(audit, Operation, Reason,
         compact_telemetry(Metadata)).

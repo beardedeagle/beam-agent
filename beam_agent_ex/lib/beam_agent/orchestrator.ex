@@ -11,7 +11,7 @@ defmodule BeamAgent.Orchestrator do
   collection, and cancellation.
   """
 
-  @type parent() :: binary() | map()
+  @type parent() :: binary() | BeamAgent.Runs.run()
 
   @type session_target() ::
           :inherit
@@ -46,7 +46,7 @@ defmodule BeamAgent.Orchestrator do
           required(:relation) => :spawned | :delegated,
           required(:substrate) => :run | :session | :thread | :session_thread,
           required(:parent_run_id) => binary(),
-          required(:run) => map(),
+          required(:run) => BeamAgent.Runs.run(),
           required(:metadata) => map(),
           optional(:task) => term(),
           optional(:session_id) => binary(),
@@ -58,7 +58,7 @@ defmodule BeamAgent.Orchestrator do
         }
 
   @type child_status() :: %{
-          required(:run) => map(),
+          required(:run) => BeamAgent.Runs.run(),
           required(:step_count) => non_neg_integer(),
           required(:active_step_count) => non_neg_integer(),
           required(:child_count) => non_neg_integer(),
@@ -80,17 +80,17 @@ defmodule BeamAgent.Orchestrator do
         }
 
   @type collect_result() :: %{
-          required(:run) => map(),
+          required(:run) => BeamAgent.Runs.run(),
           required(:children) => [child()],
           optional(:descendants) => [child()],
-          optional(:steps) => [map()],
-          optional(:journal) => [map()],
+          optional(:steps) => [BeamAgent.Runs.step()],
+          optional(:journal) => [BeamAgent.Journal.entry()],
           optional(:link) => map()
         }
 
   @type await_result() :: %{
           required(:status) => :completed | :failed | :cancelled,
-          required(:run) => map(),
+          required(:run) => BeamAgent.Runs.run(),
           optional(:output) => term(),
           optional(:error) => term(),
           optional(:cancel_reason) => term()
@@ -117,7 +117,7 @@ defmodule BeamAgent.Orchestrator do
   @doc """
   Create a delegated child run under a parent run.
   """
-  @spec delegate(parent(), term(), map()) :: {:ok, map()} | {:error, term()}
+  @spec delegate(parent(), term(), map()) :: {:ok, BeamAgent.Runs.run()} | {:error, term()}
   defdelegate delegate(parent, task, opts), to: :beam_agent_orchestrator
 
   @doc """
@@ -148,6 +148,6 @@ defmodule BeamAgent.Orchestrator do
   @doc """
   List direct orchestrator children for a parent run.
   """
-  @spec list_children(parent()) :: {:ok, [child()]} | {:error, term()}
+  @spec list_children(parent()) :: {:ok, [child()]} | {:error, :parent_not_found | {:invalid_parent, binary()}}
   defdelegate list_children(parent), to: :beam_agent_orchestrator
 end

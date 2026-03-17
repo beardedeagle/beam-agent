@@ -143,7 +143,14 @@ defmodule BeamAgent.Artifacts do
   @doc """
   Attach a typed source reference to an existing artifact.
   """
-  @spec attach(binary(), atom() | binary(), binary()) :: :ok | {:error, term()}
+  @spec attach(binary(), atom() | binary(), binary()) ::
+          :ok
+          | {:error,
+             :inconsistent_run_scope
+             | :inconsistent_scope
+             | :not_found
+             | :run_not_found
+             | :session_id_required_for_thread}
   defdelegate attach(artifact_id, ref_type, ref_id), to: :beam_agent_artifacts
 
   @doc """

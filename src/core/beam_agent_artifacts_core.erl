@@ -45,6 +45,58 @@ delegates persistence to beam_agent_artifacts_store.
 }.
 
 -type source_ref() :: beam_agent_artifacts_store:source_ref().
+-type optional_binary_key() ::
+    artifact_id | run_id | session_id | source_ref_id | thread_id | title.
+-type kind_key() :: format | kind.
+-type artifact_error_tag() :: invalid_artifact | invalid_filter | invalid_scope.
+-type artifact_event_operation() :: created | deleted | updated.
+-type artifact_event_payload() :: #{
+    operation => artifact_event_operation(),
+    source_ref => source_ref()
+}.
+-type journal_error() ::
+    already_exists
+  | session_id_required_for_thread
+  | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+  | {invalid_event_type, binary()}.
+-type artifact_operation() :: put | get | list | search | attach | delete.
+-type artifact_exception() ::
+    {error,
+        inconsistent_run_scope
+      | inconsistent_scope
+      | not_found
+      | run_not_found
+      | session_id_required_for_thread
+      | {invalid_artifact | invalid_filter | invalid_scope |
+            unsupported_artifact_key | unsupported_filter | unsupported_scope_key, atom()}}.
+-type artifact_summary() :: #{
+    artifact_id := binary(),
+    created_at := integer(),
+    format := artifact_format(),
+    kind := artifact_kind(),
+    metadata := map(),
+    source_refs := [source_ref()],
+    title := binary(),
+    updated_at := integer(),
+    session_id => binary(),
+    thread_id => binary(),
+    run_id => binary()
+}.
+-type artifact_meta_map() :: #{
+    created_at => integer(),
+    id => binary(),
+    payload => #{
+        artifact := map(),
+        operation := artifact_event_operation(),
+        source_ref => map()
+    },
+    source_refs => [map()],
+    tags => [artifact, ...],
+    type => atom() | binary(),
+    updated_at => integer(),
+    artifact_id | body | format | kind | limit | metadata | run_id | session_id |
+        since | source_ref_id | source_ref_type | thread_id | title => term()
+}.
 
 -type artifact_input() :: #{
     artifact_id => binary(),
@@ -191,10 +243,7 @@ list(Filter) when is_map(Filter) ->
             case beam_agent_artifacts_store:list_artifacts(Normalized) of
                 {ok, Artifacts} = Result ->
                     telemetry_stop(list, StartTime, TeleMeta#{result_count => length(Artifacts)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(list, Error, TeleMeta),
-                    Error
+                    Result
             end;
         {error, _} = Error ->
             telemetry_exception(list, Error, TeleMeta),
@@ -759,8 +808,8 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
         [BadKey | _] -> {error, {ErrorTag, BadKey}}
     end.
 
--spec normalize_optional_binary(atom(), map(), atom()) ->
-    {ok, binary() | undefined} | {error, {atom(), atom()}}.
+-spec normalize_optional_binary(optional_binary_key(), map(), artifact_error_tag()) ->
+    {ok, binary() | undefined} | {error, {artifact_error_tag(), optional_binary_key()}}.
 normalize_optional_binary(Key, Map, ErrorTag) ->
     case maps:find(Key, Map) of
         error ->
@@ -771,8 +820,8 @@ normalize_optional_binary(Key, Map, ErrorTag) ->
             {error, {ErrorTag, Key}}
     end.
 
--spec normalize_kind(atom(), term(), atom()) ->
-    {ok, atom() | binary()} | {error, {atom(), atom()}}.
+-spec normalize_kind(kind_key(), term(), invalid_artifact | invalid_filter) ->
+    {ok, atom() | binary()} | {error, {invalid_artifact | invalid_filter, kind_key()}}.
 normalize_kind(_Key, Value, _ErrorTag) when is_atom(Value) ->
     {ok, Value};
 normalize_kind(_Key, Value, _ErrorTag) when is_binary(Value), byte_size(Value) > 0 ->
@@ -844,8 +893,8 @@ normalize_since(Filter) ->
             {error, {invalid_filter, since}}
     end.
 
--spec append_artifact_event(binary(), artifact(), map()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec append_artifact_event(<<_:64, _:_*8>>, artifact(), artifact_event_payload()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 append_artifact_event(EventType, Artifact, ExtraPayload) ->
     Event0 = #{
         tags => [artifact],
@@ -856,24 +905,25 @@ append_artifact_event(EventType, Artifact, ExtraPayload) ->
     Event3 = maybe_put(run_id, maps:get(run_id, Artifact, undefined), Event2),
     beam_agent_journal_core:append(EventType, Event3).
 
--spec artifact_journal_payload(artifact()) -> map().
+-spec artifact_journal_payload(artifact()) -> #{artifact := artifact_summary()}.
 artifact_journal_payload(Artifact) ->
     #{artifact => artifact_summary(Artifact)}.
 
--spec artifact_summary(artifact()) -> map().
+-spec artifact_summary(artifact()) -> artifact_summary().
 artifact_summary(Artifact) ->
     maps:remove(body, Artifact).
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(artifact_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(artifact, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(artifact_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(artifact, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(put | list | search | attach | delete, artifact_exception(), map()) ->
+    ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(artifact, Operation, Reason,
         compact_telemetry(Metadata)).
@@ -882,9 +932,7 @@ telemetry_exception(Operation, Reason, Metadata) ->
 telemetry_scope_meta(SessionId) when is_binary(SessionId) ->
     #{session_id => SessionId};
 telemetry_scope_meta(Scope) when is_map(Scope) ->
-    maps:with([session_id, thread_id, run_id], Scope);
-telemetry_scope_meta(_Other) ->
-    #{}.
+    maps:with([session_id, thread_id, run_id], Scope).
 
 -spec telemetry_artifact_request_meta(map()) -> map().
 telemetry_artifact_request_meta(Artifact) ->
@@ -902,7 +950,9 @@ telemetry_artifact_meta(Artifact) ->
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(artifact_id | body | format | kind | limit | metadata | run_id |
+    session_id | since | source_ref_id | source_ref_type | thread_id | title,
+    term(), artifact_meta_map()) -> artifact_meta_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
@@ -914,11 +964,11 @@ consistent_scope(_Value, undefined) -> true;
 consistent_scope(Value, Value) -> true;
 consistent_scope(_Left, _Right) -> false.
 
--spec choose_scope(term(), term()) -> term().
+-spec choose_scope(binary() | undefined, term()) -> term().
 choose_scope(undefined, Value) -> Value;
 choose_scope(Value, _Fallback) -> Value.
 
--spec generate_artifact_id() -> binary().
+-spec generate_artifact_id() -> <<_:64, _:_*8>>.
 generate_artifact_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"artifact_", Hex/binary>>.

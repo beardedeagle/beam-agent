@@ -694,7 +694,7 @@ defmodule CodexEx do
   end
 
   @doc "Change the model at runtime."
-  @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(pid(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_model(session, model) do
     BeamAgent.Runtime.set_model(session, model)
   end
@@ -777,7 +777,7 @@ defmodule CodexEx do
   # ── Additional Session Control ──────────────────────────────────────
 
   @doc "Change the permission mode at runtime."
-  @spec set_permission_mode(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_permission_mode(pid(), binary()) :: {:ok, binary()} | {:error, term()}
   def set_permission_mode(session, mode) do
     BeamAgent.Runtime.set_permission_mode(session, mode)
   end

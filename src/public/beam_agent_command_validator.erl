@@ -73,6 +73,7 @@ on_execution(_Command, _Ctx, _Result) ->
 """.
 
 -export_type([
+    policy_result/0,
     validation_context/0,
     execution_context/0
 ]).
@@ -80,6 +81,8 @@ on_execution(_Command, _Ctx, _Result) ->
 %%--------------------------------------------------------------------
 %% Types
 %%--------------------------------------------------------------------
+
+-type policy_result() :: allow | ask | {deny, binary()}.
 
 -type execution_context() :: #{
     %% Raw command as provided by caller
@@ -145,7 +148,7 @@ on_execution(_Command, _Ctx, _Result) ->
     timestamp := integer(),
 
     %% Static policy result (from Layer 1)
-    policy_result := beam_agent_command_policy:policy_result(),
+    policy_result := policy_result(),
 
     %% Custom metadata (extensible by Citadel)
     metadata := map()

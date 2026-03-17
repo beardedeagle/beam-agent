@@ -140,6 +140,38 @@ defmodule BeamAgent.Runs do
           optional(:completed_at) => integer()
         }
 
+  @typedoc "Run shape returned by `start_run/2`."
+  @type started_run() :: %{
+          required(:run_id) => binary(),
+          required(:kind) => atom() | binary(),
+          required(:status) => :running,
+          required(:metadata) => map(),
+          required(:created_at) => integer(),
+          required(:updated_at) => integer(),
+          required(:input) => term(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary(),
+          optional(:parent_run_id) => binary()
+        }
+
+  @typedoc "Terminal run shape returned by complete/fail/cancel operations."
+  @type terminal_run() :: %{
+          required(:run_id) => binary(),
+          required(:kind) => atom() | binary(),
+          required(:status) => :completed | :failed | :cancelled,
+          required(:metadata) => map(),
+          required(:created_at) => integer(),
+          required(:updated_at) => integer(),
+          required(:completed_at) => integer(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary(),
+          optional(:parent_run_id) => binary(),
+          optional(:input) => term(),
+          optional(:output) => term(),
+          optional(:error) => term(),
+          optional(:cancel_reason) => term()
+        }
+
   @typedoc """
   Step record.
   """
@@ -160,6 +192,38 @@ defmodule BeamAgent.Runs do
           optional(:completed_at) => integer()
         }
 
+  @typedoc "Running step shape returned by `start_step/2`."
+  @type started_step() :: %{
+          required(:step_id) => binary(),
+          required(:run_id) => binary(),
+          required(:kind) => atom() | binary(),
+          required(:status) => :running,
+          required(:metadata) => map(),
+          required(:created_at) => integer(),
+          required(:updated_at) => integer(),
+          required(:input) => term(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary()
+        }
+
+  @typedoc "Terminal step shape returned by complete/fail/cancel operations."
+  @type terminal_step() :: %{
+          required(:step_id) => binary(),
+          required(:run_id) => binary(),
+          required(:kind) => atom() | binary(),
+          required(:status) => :completed | :failed | :cancelled,
+          required(:metadata) => map(),
+          required(:created_at) => integer(),
+          required(:updated_at) => integer(),
+          required(:completed_at) => integer(),
+          optional(:session_id) => binary(),
+          optional(:thread_id) => binary(),
+          optional(:input) => term(),
+          optional(:output) => term(),
+          optional(:error) => term(),
+          optional(:cancel_reason) => term()
+        }
+
   @doc """
   Ensure the runs ETS tables exist.
   """
@@ -175,7 +239,16 @@ defmodule BeamAgent.Runs do
   @doc """
   Start a run with the given scope and options.
   """
-  @spec start_run(scope(), run_opts()) :: {:ok, run()} | {:error, term()}
+  @spec start_run(scope(), run_opts()) ::
+          {:ok, started_run()}
+          | {:error,
+             :already_exists
+             | :inconsistent_parent_scope
+             | :parent_run_not_found
+             | :session_id_required_for_thread
+             | {:invalid_run_opt, :kind | :metadata | :run_id}
+             | {:invalid_scope, atom()}
+             | {:unsupported_scope_key, atom()}}
   defdelegate start_run(scope, opts), to: :beam_agent_runs
 
   @doc """
@@ -193,31 +266,51 @@ defmodule BeamAgent.Runs do
   @doc """
   List runs with exact-match filters.
   """
-  @spec list_runs(run_filter()) :: {:ok, [run()]} | {:error, term()}
+  @spec list_runs(run_filter()) ::
+          {:ok, [run()]}
+          | {:error,
+             {:invalid_filter,
+              :kind | :limit | :parent_run_id | :run_id | :session_id | :since | :status | :step_id | :thread_id}}
   defdelegate list_runs(filter), to: :beam_agent_runs
 
   @doc """
   Complete a run once all of its steps are terminal.
   """
-  @spec complete_run(binary(), term()) :: {:ok, run()} | {:error, term()}
+  @spec complete_run(binary(), term()) ::
+          {:ok, terminal_run()}
+          | {:error,
+             :active_steps
+             | :not_found
+             | {:invalid_status_transition, :cancelled | :completed | :failed, :completed}}
   defdelegate complete_run(run_id, result), to: :beam_agent_runs
 
   @doc """
   Fail a run and cascade failure to active steps.
   """
-  @spec fail_run(binary(), term()) :: {:ok, run()} | {:error, term()}
+  @spec fail_run(binary(), term()) ::
+          {:ok, terminal_run()}
+          | {:error, :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :failed}}
   defdelegate fail_run(run_id, error_term), to: :beam_agent_runs
 
   @doc """
   Cancel a run and cascade cancellation to active steps.
   """
-  @spec cancel_run(binary(), term()) :: {:ok, run()} | {:error, term()}
+  @spec cancel_run(binary(), term()) ::
+          {:ok, terminal_run()}
+          | {:error,
+             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
   defdelegate cancel_run(run_id, reason), to: :beam_agent_runs
 
   @doc """
   Start a step within a run.
   """
-  @spec start_step(binary(), step_opts()) :: {:ok, step()} | {:error, term()}
+  @spec start_step(binary(), step_opts()) ::
+          {:ok, started_step()}
+          | {:error,
+             :already_exists
+             | :not_found
+             | :run_not_active
+             | {:invalid_step_opt, :kind | :metadata | :step_id}}
   defdelegate start_step(run_id, opts), to: :beam_agent_runs
 
   @doc """
@@ -235,18 +328,27 @@ defmodule BeamAgent.Runs do
   @doc """
   Complete a running step.
   """
-  @spec complete_step(binary(), binary(), term()) :: {:ok, step()} | {:error, term()}
+  @spec complete_step(binary(), binary(), term()) ::
+          {:ok, terminal_step()}
+          | {:error,
+             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :completed}}
   defdelegate complete_step(run_id, step_id, result), to: :beam_agent_runs
 
   @doc """
   Fail a running step.
   """
-  @spec fail_step(binary(), binary(), term()) :: {:ok, step()} | {:error, term()}
+  @spec fail_step(binary(), binary(), term()) ::
+          {:ok, terminal_step()}
+          | {:error,
+             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :failed}}
   defdelegate fail_step(run_id, step_id, error_term), to: :beam_agent_runs
 
   @doc """
   Cancel a running step.
   """
-  @spec cancel_step(binary(), binary(), term()) :: {:ok, step()} | {:error, term()}
+  @spec cancel_step(binary(), binary(), term()) ::
+          {:ok, terminal_step()}
+          | {:error,
+             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
   defdelegate cancel_step(run_id, step_id, reason), to: :beam_agent_runs
 end

@@ -192,6 +192,84 @@ Target execution itself lives in `beam_agent_routine_runner`.
     next_run_at => integer(),
     metadata => map()
 }.
+-type routine_validation_tag() :: invalid_job | invalid_patch.
+-type routine_normalize_error_tag() ::
+    invalid_job
+  | unsupported_filter
+  | unsupported_job_key
+  | unsupported_patch_key
+  | unsupported_retry_key
+  | unsupported_schedule_key
+  | unsupported_session_target_key
+  | unsupported_target_key
+  | unsupported_thread_key.
+-type routine_normalize_error() :: {routine_normalize_error_tag(), atom()}.
+-type thread_target_error() ::
+    {invalid_job, thread}
+  | {unsupported_thread_key, atom()}.
+-type routine_error_tag() ::
+    routine_normalize_error_tag()
+  | invalid_patch
+  | policy_denied
+  | invalid_filter.
+-type routine_error() ::
+    routine_normalize_error()
+  | {invalid_patch, atom()}
+  | {invalid_filter, atom()}
+  | {policy_denied, binary()}.
+-type routine_action() :: cancelled | created | updated.
+-type routine_operation() :: cancel | create | list_due | update.
+-type routine_optional_key() ::
+    cancel_reason | due_before | error | job_id | limit | metadata | next_run_at |
+    outcome | payload | profile_id | result | run_id | thread.
+-type routine_run_target_base() :: #{
+    type := run,
+    scope := beam_agent_runs_core:scope(),
+    run_opts := map(),
+    outcome => completed | failed | cancelled,
+    result => term(),
+    error => term(),
+    cancel_reason => term()
+}.
+-type routine_query_target_base() :: #{
+    type := query,
+    session := session_target(),
+    prompt := binary(),
+    query_opts := map(),
+    stop_session := boolean(),
+    thread => thread_target()
+}.
+-type routine_put_map() ::
+    due_filter()
+  | job_filter()
+  | job_record()
+  | normalized_job_input()
+  | normalized_patch()
+  | routine_run_target_base()
+  | routine_query_target_base()
+  | #{decision := allow, patch => map()}
+  | #{run_id => binary()}
+  | #{
+        payload := map(),
+        tags := [routine | query | run, ...],
+        timestamp := integer()
+    }.
+-type routine_telemetry_meta() :: #{
+    at => integer(),
+    due_before => integer(),
+    found => boolean(),
+    idempotency_key => binary(),
+    job_id => binary(),
+    last_run_id => binary(),
+    limit => pos_integer(),
+    next_run_at => integer(),
+    result_count => non_neg_integer(),
+    state => job_state()
+}.
+-type routine_audit_details() :: #{
+    decision := allow,
+    patch => map()
+}.
 
 -doc "Ensure the routines store tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
@@ -204,7 +282,7 @@ clear() ->
     beam_agent_routines_store:clear().
 
 -doc "Create a new routine job.".
--spec create(job_input()) ->
+-spec create(map()) ->
     {ok, job_record()} |
     {error, already_exists | {unsupported_job_key, atom()} |
         {unsupported_schedule_key, atom()} | {unsupported_target_key, atom()} |
@@ -259,7 +337,7 @@ create(JobInput) when is_map(JobInput) ->
     Result.
 
 -doc "Update a routine job. Busy or terminal jobs reject mutable updates.".
--spec update(binary(), job_patch()) ->
+-spec update(binary(), map()) ->
     {ok, job_record()} |
     {error, not_found | job_busy | job_terminal |
         {unsupported_patch_key, atom()} | {unsupported_schedule_key, atom()} |
@@ -359,7 +437,7 @@ due() ->
     list_due().
 
 -doc "Alias for list_due/1.".
--spec due(due_filter()) -> {ok, [job_record()]} | {error, term()}.
+-spec due(map()) -> {ok, [job_record()]} | {error, term()}.
 due(Filter) ->
     list_due(Filter).
 
@@ -369,22 +447,17 @@ list_due() ->
     list_due(#{}).
 
 -doc "List jobs currently due using an explicit due filter.".
--spec list_due(due_filter()) -> {ok, [job_record()]} | {error, term()}.
+-spec list_due(map()) -> {ok, [job_record()]} | {error, term()}.
 list_due(Filter) when is_map(Filter) ->
     Now = maps:get(at, Filter, erlang:system_time(millisecond)),
     TeleMeta = telemetry_due_filter_meta(Filter, Now),
     StartTime = telemetry_start(list_due, TeleMeta),
     case normalize_due_filter(Filter, Now) of
         {ok, Normalized} ->
-            case beam_agent_routines_store:list_due_jobs(Now, Normalized) of
-                {ok, Jobs} = Result ->
-                    telemetry_stop(list_due, StartTime,
-                        TeleMeta#{result_count => length(Jobs)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(list_due, Error, TeleMeta),
-                    Error
-            end;
+            {ok, Jobs} = Result = beam_agent_routines_store:list_due_jobs(Now, Normalized),
+            telemetry_stop(list_due, StartTime,
+                TeleMeta#{result_count => length(Jobs)}),
+            Result;
         {error, _} = Error ->
             telemetry_exception(list_due, Error, TeleMeta),
             Error
@@ -667,7 +740,7 @@ normalize_job_input(JobInput, Now) ->
             Error
     end.
 
--spec normalize_patch(map()) -> {ok, normalized_patch()} | {error, term()}.
+-spec normalize_patch(map()) -> {ok, normalized_patch()} | {error, routine_error()}.
 normalize_patch(Patch) ->
     Allowed = [schedule, target, payload, routing_policy, retry_policy,
         idempotency_key, state, next_run_at, metadata],
@@ -883,7 +956,8 @@ normalize_session_target(#{kind := routed, opts := Opts} = Target) when is_map(O
 normalize_session_target(_) ->
     {error, {invalid_job, session}}.
 
--spec normalize_thread_target(term()) -> {ok, thread_target() | undefined} | {error, term()}.
+-spec normalize_thread_target(term()) ->
+    {ok, thread_target() | undefined} | {error, thread_target_error()}.
 normalize_thread_target(undefined) ->
     {ok, undefined};
 normalize_thread_target(#{thread_id := ThreadId} = Target) when is_binary(ThreadId) ->
@@ -928,7 +1002,8 @@ normalize_retry_policy(Policy) when is_map(Policy) ->
 normalize_retry_policy(_) ->
     {error, {invalid_job, retry_policy}}.
 
--spec normalize_routing_policy(term(), atom()) -> {ok, map()} | {error, term()}.
+-spec normalize_routing_policy(term(), routine_validation_tag()) ->
+    {ok, map()} | {error, {routine_validation_tag(), routing_policy}}.
 normalize_routing_policy(Policy, _Kind) when is_map(Policy) ->
     {ok, Policy};
 normalize_routing_policy(_, Kind) ->
@@ -944,7 +1019,7 @@ normalize_idempotency_key(Value, _MaybeJobId) ->
     normalize_optional_binary_value(Value, invalid_job).
 
 -spec normalize_initial_state(term()) ->
-    {ok, active | paused} | {error, term()}.
+    {ok, active | paused} | {error, {invalid_job, state}}.
 normalize_initial_state(active) ->
     {ok, active};
 normalize_initial_state(paused) ->
@@ -952,8 +1027,9 @@ normalize_initial_state(paused) ->
 normalize_initial_state(_) ->
     {error, {invalid_job, state}}.
 
--spec normalize_next_run_override(term(), atom()) ->
-    {ok, integer() | undefined} | {error, term()}.
+-spec normalize_next_run_override(term(), routine_validation_tag()) ->
+    {ok, non_neg_integer() | undefined} |
+    {error, {routine_validation_tag(), next_run_at}}.
 normalize_next_run_override(undefined, _Kind) ->
     {ok, undefined};
 normalize_next_run_override(Value, _Kind) when is_integer(Value), Value >= 0 ->
@@ -1000,7 +1076,8 @@ normalize_due_filter(Filter, Now) ->
             Error
     end.
 
--spec normalize_limit(map()) -> {ok, pos_integer() | undefined} | {error, term()}.
+-spec normalize_limit(map()) ->
+    {ok, pos_integer() | undefined} | {error, {invalid_filter, limit}}.
 normalize_limit(Filter) ->
     case maps:get(limit, Filter, undefined) of
         undefined ->
@@ -1048,7 +1125,7 @@ compute_initial_next_run_at(#{type := interval, start_at := StartAt}, _Override,
     StartAt.
 
 -spec next_after_success(schedule(), integer(), integer()) ->
-    {completed | active, integer() | undefined}.
+    {active, integer()} | {completed, undefined}.
 next_after_success(#{type := once}, _SlotAt, _Now) ->
     {completed, undefined};
 next_after_success(#{type := interval, every_ms := EveryMs, catch_up := true},
@@ -1058,7 +1135,7 @@ next_after_success(#{type := interval, every_ms := EveryMs}, _SlotAt, Now) ->
     {active, Now + EveryMs}.
 
 -spec next_after_failure(schedule(), integer(), integer()) ->
-    {exhausted | active, integer() | undefined}.
+    {active, integer()} | {exhausted, undefined}.
 next_after_failure(#{type := once}, _SlotAt, _Now) ->
     {exhausted, undefined};
 next_after_failure(#{type := interval, every_ms := EveryMs, catch_up := true},
@@ -1144,7 +1221,7 @@ append_job_event(EventType, Job, PayloadExtra) ->
     Event = maybe_put(run_id, maps:get(last_run_id, Job, undefined), Event0),
     beam_agent_journal_core:append(EventType, Event).
 
--spec evaluate_routine_policy(map()) -> allow | {deny, binary()}.
+-spec evaluate_routine_policy(job_record() | normalized_job_input()) -> allow | {deny, binary()}.
 evaluate_routine_policy(JobOrInput) ->
     Metadata = maps:get(metadata, JobOrInput, #{}),
     ProfileId = maps:get(policy_profile_id, Metadata, undefined),
@@ -1166,7 +1243,8 @@ evaluate_routine_policy(JobOrInput) ->
             {deny, Reason}
     end.
 
--spec audit_routine_event(atom(), map(), map()) -> ok.
+-spec audit_routine_event(routine_action(), job_record(),
+    #{decision := allow} | routine_audit_details()) -> ok.
 audit_routine_event(Action, Job, ExtraDetails) ->
     Metadata = maps:get(metadata, Job, #{}),
     ProfileId = maps:get(policy_profile_id, Metadata, undefined),
@@ -1188,7 +1266,8 @@ routine_audit_scope(JobOrInput, ProfileId) ->
         run_id => maps:get(last_run_id, JobOrInput, undefined)
     }).
 
--spec validate_allowed_keys(map(), [atom()], atom()) -> ok | {error, term()}.
+-spec validate_allowed_keys(map(), [atom()], routine_error_tag()) ->
+    ok | {error, routine_error()}.
 validate_allowed_keys(Map, Allowed, ErrorTag) ->
     case lists:dropwhile(fun(Key) -> lists:member(Key, Allowed) end,
         maps:keys(Map)) of
@@ -1198,18 +1277,21 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
             {error, {ErrorTag, Key}}
     end.
 
--spec normalize_optional_binary(atom(), map(), atom()) ->
-    {ok, binary() | undefined} | {error, term()}.
+-spec normalize_optional_binary(job_id, map(), invalid_job) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_job, job_id | value} | {invalid_patch, job_id | value}}.
 normalize_optional_binary(Key, Map, ErrorKind) ->
     normalize_optional_binary_value(maps:get(Key, Map, undefined), ErrorKind, Key).
 
--spec normalize_optional_binary_value(term(), atom()) ->
-    {ok, binary() | undefined} | {error, term()}.
+-spec normalize_optional_binary_value(term(), routine_validation_tag()) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_job, job_id | value} | {invalid_patch, job_id | value}}.
 normalize_optional_binary_value(Value, ErrorKind) ->
     normalize_optional_binary_value(Value, ErrorKind, value).
 
--spec normalize_optional_binary_value(term(), atom(), atom()) ->
-    {ok, binary() | undefined} | {error, term()}.
+-spec normalize_optional_binary_value(term(), routine_validation_tag(), job_id | value) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_job, job_id | value} | {invalid_patch, job_id | value}}.
 normalize_optional_binary_value(undefined, _ErrorKind, _Key) ->
     {ok, undefined};
 normalize_optional_binary_value(Value, _ErrorKind, _Key)
@@ -1218,7 +1300,7 @@ normalize_optional_binary_value(Value, _ErrorKind, _Key)
 normalize_optional_binary_value(_Value, ErrorKind, Key) ->
     {error, {ErrorKind, Key}}.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(routine_optional_key(), term(), routine_put_map()) -> routine_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
@@ -1249,25 +1331,29 @@ session_target_is_routed(#{kind := routed}) ->
 session_target_is_routed(_) ->
     false.
 
--spec any_runner() -> binary().
+-spec any_runner() -> <<_:112>>.
 any_runner() ->
     <<"__any_runner__">>.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(routine_operation(), routine_telemetry_meta()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(routine_operation(), integer(), routine_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(create | list_due | update,
+    already_exists | job_busy | job_terminal | not_found | {error, routine_error()},
+    routine_telemetry_meta()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(routine, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), integer(), {ok, map()} | {error, term()}, map()) -> ok.
+-spec telemetry_finish(create | update, integer(),
+    {ok, job_record()} | {error, already_exists | job_busy | job_terminal | not_found |
+        routine_error()}, routine_telemetry_meta()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Job}, Metadata) ->
     telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_job_meta(Job)));
 telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
@@ -1277,7 +1363,8 @@ telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
 telemetry_job_input_meta(JobInput) ->
     maps:with([job_id, idempotency_key, next_run_at, state], JobInput).
 
--spec telemetry_patch_meta(binary(), map()) -> map().
+-spec telemetry_patch_meta(binary(), map()) ->
+    #{job_id := binary(), next_run_at => integer(), state => active | paused}.
 telemetry_patch_meta(JobId, Patch) ->
     (maps:with([state, next_run_at], Patch))#{job_id => JobId}.
 
@@ -1285,7 +1372,7 @@ telemetry_patch_meta(JobId, Patch) ->
 telemetry_due_filter_meta(Filter, Now) ->
     (maps:with([limit, due_before], Filter))#{at => Now}.
 
--spec telemetry_job_meta(map()) -> map().
+-spec telemetry_job_meta(job_record()) -> routine_telemetry_meta().
 telemetry_job_meta(Job) ->
     maps:with([job_id, state, next_run_at, attempt_count, last_run_id], Job).
 

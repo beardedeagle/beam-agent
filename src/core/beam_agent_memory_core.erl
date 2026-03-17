@@ -47,6 +47,29 @@ such as MonkeyClaw.
 -type memory_record() :: beam_agent_memory_store:memory_record().
 -type memory_kind() :: atom() | binary().
 -type ttl() :: non_neg_integer() | infinity.
+-type memory_filter_error() ::
+    {invalid_filter,
+        before | include_expired | kind | limit | memory_id | min_salience |
+        pinned | run_id | session_id | since | source_ref_id |
+        source_ref_type | thread_id}
+  | {invalid_scope, memory_id | run_id | session_id | source_ref_id | thread_id}.
+-type normalized_memory_input() :: #{
+    kind := memory_kind(),
+    content := term(),
+    attributes := map(),
+    source_refs := [source_ref()],
+    ttl := ttl(),
+    pinned := boolean(),
+    salience := non_neg_integer(),
+    memory_id => binary()
+}.
+-type journal_error() ::
+    already_exists
+  | session_id_required_for_thread
+  | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+  | {invalid_event_type, binary()}.
+-type memory_operation() :: expire | forget | get | list | pin | remember | search | unpin.
+-type memory_sort_key() :: {integer(), 0 | 1, integer(), integer(), binary()}.
 
 -type memory_input() :: binary() | #{
     memory_id => binary(),
@@ -154,10 +177,7 @@ list(FilterInput) when is_map(FilterInput) ->
                 {ok, Memories} = Result ->
                     telemetry_stop(list, StartTime,
                         TeleMeta#{result_count => length(Memories)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(list, Error, TeleMeta),
-                    Error
+                    Result
             end;
         {error, _} = Error ->
             telemetry_exception(list, Error, TeleMeta),
@@ -195,10 +215,7 @@ search(Query, FilterInput) when is_binary(Query), is_map(FilterInput) ->
                 {ok, Memories} = Result ->
                     telemetry_stop(search, StartTime,
                         TeleMeta#{result_count => length(Memories)}),
-                    Result;
-                {error, _} = Error ->
-                    telemetry_exception(search, Error, TeleMeta),
-                    Error
+                    Result
             end;
         {error, _} = Error ->
             telemetry_exception(search, Error, TeleMeta),
@@ -243,7 +260,8 @@ expire() ->
     expire(#{}).
 
 -doc "Expire currently expired, unpinned memories matching a filter.".
--spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, term()}.
+-spec expire(memory_filter()) ->
+    {ok, non_neg_integer()} | {error, memory_filter_error()}.
 expire(FilterInput) when is_map(FilterInput) ->
     TeleMeta = telemetry_filter_meta(FilterInput),
     StartTime = telemetry_start(expire, TeleMeta),
@@ -278,7 +296,7 @@ expire(FilterInput) when is_map(FilterInput) ->
 %% Internal
 %%--------------------------------------------------------------------
 
--spec remember_normalized(binary() | scope(), scope(), map()) ->
+-spec remember_normalized(binary() | scope(), scope(), normalized_memory_input()) ->
     {ok, memory_record()} | {error, term()}.
 remember_normalized(ScopeInput, EmbeddedScope, Input) ->
     case normalize_scope_input(ScopeInput) of
@@ -356,7 +374,7 @@ do_search(Query, Filter) ->
     end,
     {ok, Memories}.
 
--spec update_pinned(binary(), boolean(), binary()) -> ok | {error, not_found}.
+-spec update_pinned(binary(), boolean(), <<_:104, _:_*16>>) -> ok | {error, not_found}.
 update_pinned(MemoryId, DesiredPinned, EventType) ->
     Operation = case DesiredPinned of
         true -> pin;
@@ -447,12 +465,10 @@ normalize_memory_input(KindOverride, Input) when is_map(Input) ->
             {error, invalid_scope};
         {error, _} = Error ->
             Error
-    end;
-normalize_memory_input(_KindOverride, _Input) ->
-    {error, invalid_memory}.
+    end.
 
 -spec do_normalize_memory_input(memory_kind() | undefined, map(), scope()) ->
-    {ok, map(), scope()} | {error, term()}.
+    {ok, normalized_memory_input(), scope()} | {error, term()}.
 do_normalize_memory_input(KindOverride, Input, EmbeddedScope) ->
     case normalize_memory_id(maps:get(memory_id, Input, undefined)) of
         {ok, MemoryId} ->
@@ -510,7 +526,8 @@ do_normalize_memory_input(KindOverride, Input, EmbeddedScope) ->
             Error
     end.
 
--spec normalize_memory_id(term()) -> {ok, binary() | undefined} | {error, term()}.
+-spec normalize_memory_id(term()) ->
+    {ok, binary() | undefined} | {error, {invalid_memory, memory_id}}.
 normalize_memory_id(undefined) ->
     {ok, undefined};
 normalize_memory_id(MemoryId) when is_binary(MemoryId), byte_size(MemoryId) > 0 ->
@@ -519,7 +536,7 @@ normalize_memory_id(_Other) ->
     {error, {invalid_memory, memory_id}}.
 
 -spec normalize_kind_value(memory_kind() | undefined, term()) ->
-    {ok, memory_kind()} | {error, term()}.
+    {ok, memory_kind()} | {error, {invalid_memory, kind}}.
 normalize_kind_value(undefined, undefined) ->
     {ok, note};
 normalize_kind_value(undefined, Kind) ->
@@ -842,8 +859,8 @@ validate_filter_scope(Filter) ->
 store_filter(Filter) ->
     maps:without([include_expired, min_salience, before, limit], Filter).
 
--spec normalize_optional_kind(map(), atom()) ->
-    {ok, atom() | binary() | undefined} | {error, term()}.
+-spec normalize_optional_kind(map(), kind) ->
+    {ok, atom() | binary() | undefined} | {error, {invalid_filter, kind}}.
 normalize_optional_kind(Filter, Key) ->
     case maps:find(Key, Filter) of
         error ->
@@ -855,8 +872,8 @@ normalize_optional_kind(Filter, Key) ->
             end
     end.
 
--spec normalize_kind(atom(), term(), atom()) ->
-    {ok, atom() | binary()} | {error, term()}.
+-spec normalize_kind(kind, term(), invalid_filter | invalid_memory) ->
+    {ok, atom() | binary()} | {error, {invalid_filter | invalid_memory, kind}}.
 normalize_kind(_Key, Value, _Namespace) when is_atom(Value) ->
     {ok, Value};
 normalize_kind(_Key, Value, _Namespace)
@@ -876,7 +893,7 @@ normalize_ref_type(_Value) ->
     {error, invalid_ref_type}.
 
 -spec normalize_optional_ref_type(map()) ->
-    {ok, atom() | binary() | undefined} | {error, term()}.
+    {ok, atom() | binary() | undefined} | {error, {invalid_filter, source_ref_type}}.
 normalize_optional_ref_type(Filter) ->
     case maps:find(source_ref_type, Filter) of
         error ->
@@ -888,8 +905,11 @@ normalize_optional_ref_type(Filter) ->
             end
     end.
 
--spec normalize_optional_binary_value(atom(), term(), atom()) ->
-    {ok, binary() | undefined} | {error, term()}.
+-spec normalize_optional_binary_value(memory_id | run_id | session_id | source_ref_id | thread_id,
+    term(), invalid_filter | invalid_scope) ->
+    {ok, binary() | undefined} |
+    {error, {invalid_filter | invalid_scope,
+        memory_id | run_id | session_id | source_ref_id | thread_id}}.
 normalize_optional_binary_value(_Key, undefined, _Namespace) ->
     {ok, undefined};
 normalize_optional_binary_value(_Key, Value, _Namespace)
@@ -900,8 +920,8 @@ normalize_optional_binary_value(Key, _Value, invalid_scope) ->
 normalize_optional_binary_value(Key, _Value, invalid_filter) ->
     {error, {invalid_filter, Key}}.
 
--spec normalize_optional_boolean(map(), atom()) ->
-    {ok, boolean() | undefined} | {error, term()}.
+-spec normalize_optional_boolean(map(), include_expired | pinned) ->
+    {ok, boolean() | undefined} | {error, {invalid_filter, include_expired | pinned}}.
 normalize_optional_boolean(Filter, Key) ->
     case maps:find(Key, Filter) of
         error ->
@@ -912,7 +932,8 @@ normalize_optional_boolean(Filter, Key) ->
             {error, {invalid_filter, Key}}
     end.
 
--spec normalize_limit(map()) -> {ok, pos_integer() | undefined} | {error, term()}.
+-spec normalize_limit(map()) ->
+    {ok, pos_integer() | undefined} | {error, {invalid_filter, limit}}.
 normalize_limit(Filter) ->
     case maps:find(limit, Filter) of
         error ->
@@ -923,7 +944,8 @@ normalize_limit(Filter) ->
             {error, {invalid_filter, limit}}
     end.
 
--spec normalize_since(map()) -> {ok, integer() | undefined} | {error, term()}.
+-spec normalize_since(map()) ->
+    {ok, integer() | undefined} | {error, {invalid_filter, since}}.
 normalize_since(Filter) ->
     case maps:find(since, Filter) of
         error ->
@@ -934,7 +956,8 @@ normalize_since(Filter) ->
             {error, {invalid_filter, since}}
     end.
 
--spec normalize_before(map()) -> {ok, integer() | undefined} | {error, term()}.
+-spec normalize_before(map()) ->
+    {ok, integer() | undefined} | {error, {invalid_filter, before}}.
 normalize_before(Filter) ->
     case maps:find(before, Filter) of
         error ->
@@ -945,8 +968,8 @@ normalize_before(Filter) ->
             {error, {invalid_filter, before}}
     end.
 
--spec normalize_optional_nonneg_integer(map(), atom()) ->
-    {ok, non_neg_integer() | undefined} | {error, term()}.
+-spec normalize_optional_nonneg_integer(map(), min_salience) ->
+    {ok, non_neg_integer() | undefined} | {error, {invalid_filter, min_salience}}.
 normalize_optional_nonneg_integer(Filter, Key) ->
     case maps:find(Key, Filter) of
         error ->
@@ -983,13 +1006,13 @@ memory_should_expire(Memory, Now) ->
             end
     end.
 
--spec expires_at(map(), integer()) -> integer() | undefined.
+-spec expires_at(memory_record(), integer()) -> integer() | undefined.
 expires_at(#{ttl := infinity}, _Now) ->
     undefined;
 expires_at(#{ttl := Ttl}, Now) when is_integer(Ttl), Ttl >= 0 ->
     Now + Ttl.
 
--spec maybe_limit([term()], infinity | pos_integer() | undefined) -> [term()].
+-spec maybe_limit([memory_record()], infinity | pos_integer() | undefined) -> [memory_record()].
 maybe_limit(Items, infinity) ->
     Items;
 maybe_limit(Items, undefined) ->
@@ -1074,7 +1097,7 @@ pinned_bonus(Memory) ->
 salience_bonus(Memory) ->
     maps:get(salience, Memory, 0).
 
--spec search_sort_key(non_neg_integer(), memory_record()) -> tuple().
+-spec search_sort_key(non_neg_integer(), memory_record()) -> memory_sort_key().
 search_sort_key(Score, Memory) ->
     {
         -Score,
@@ -1091,7 +1114,8 @@ pin_sort_key(Memory) ->
         false -> 1
     end.
 
--spec evaluate_memory_policy(map(), scope(), [source_ref()]) -> allow | {deny, binary()}.
+-spec evaluate_memory_policy(normalized_memory_input(), scope(), [source_ref()]) ->
+    allow | {deny, binary()}.
 evaluate_memory_policy(Input, Scope, SourceRefs) ->
     Attributes = maps:get(attributes, Input, #{}),
     ProfileId = maps:get(policy_profile_id, Attributes, undefined),
@@ -1134,8 +1158,8 @@ audit_memory_event(Action, Memory, ExtraDetails) ->
 memory_audit_scope(Scope, ProfileId) ->
     maybe_put(profile_id, ProfileId, maps:with([session_id, thread_id, run_id], Scope)).
 
--spec append_memory_event(binary(), memory_record(), map()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec append_memory_event(<<_:64, _:_*8>>, memory_record(), #{} | #{before => integer()}) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 append_memory_event(EventType, Memory, ExtraPayload) ->
     Scope = maps:get(scope, Memory, #{}),
     Event0 = #{
@@ -1167,21 +1191,22 @@ maybe_put(_Key, undefined, Map) ->
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(memory_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(memory, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(memory_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(memory, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(expire | list | remember | search, term(), map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(memory, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), integer(), {ok, memory_record()} | {error, term()}, map()) -> ok.
+-spec telemetry_finish(atom(), integer(),
+    {ok, memory_record()} | {error, term()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Memory}, Metadata) ->
     telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_memory_meta(Memory)));
 telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
@@ -1229,7 +1254,7 @@ choose_scope(Value, _Fallback) -> Value.
 current_time_ms() ->
     erlang:system_time(millisecond).
 
--spec generate_memory_id() -> binary().
+-spec generate_memory_id() -> <<_:56, _:_*8>>.
 generate_memory_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"memory_", Hex/binary>>.

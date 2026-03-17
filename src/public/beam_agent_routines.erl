@@ -75,17 +75,17 @@ clear() ->
     beam_agent_routines_core:clear().
 
 -doc "Create a routine job.".
--spec create(job_input()) -> {ok, job_record()} | {error, term()}.
+-spec create(map()) -> {ok, job_record()} | {error, term()}.
 create(Job) ->
     beam_agent_routines_core:create(Job).
 
 -doc "Update a routine job.".
--spec update(binary(), job_patch()) -> {ok, job_record()} | {error, term()}.
+-spec update(binary(), map()) -> {ok, job_record()} | {error, term()}.
 update(JobId, Patch) ->
     beam_agent_routines_core:update(JobId, Patch).
 
 -doc "Cancel a routine job and any active canonical run tied to it.".
--spec cancel(binary()) -> ok | {error, not_found}.
+-spec cancel(binary()) -> ok.
 cancel(JobId) ->
     beam_agent_routines_core:cancel(JobId).
 
@@ -95,12 +95,12 @@ run_now(JobId) ->
     beam_agent_routine_runner:run_now(JobId).
 
 -doc "Execute all currently due jobs with default runner options.".
--spec run_due() -> {ok, [map()]} | {error, term()}.
+-spec run_due() -> {ok, [#{job_id := binary(), run := map(), slot_at := integer()}]}.
 run_due() ->
     beam_agent_routine_runner:run_due().
 
 -doc "Execute currently due jobs from the calling process.".
--spec run_due(map()) -> {ok, [map()]} | {error, term()}.
+-spec run_due(map()) -> {ok, [#{job_id := binary(), run := map(), slot_at := integer()}]}.
 run_due(Opts) ->
     beam_agent_routine_runner:run_due(Opts).
 
@@ -125,7 +125,7 @@ due() ->
     list_due().
 
 -doc "List jobs that are currently due using an explicit due filter.".
--spec due(due_filter()) -> {ok, [job_record()]} | {error, term()}.
+-spec due(map()) -> {ok, [job_record()]} | {error, term()}.
 due(Filter) ->
     list_due(Filter).
 
@@ -135,7 +135,7 @@ list_due() ->
     beam_agent_routines_core:list_due().
 
 -doc "List jobs that are due as of the supplied due filter.".
--spec list_due(due_filter()) -> {ok, [job_record()]} | {error, term()}.
+-spec list_due(map()) -> {ok, [job_record()]} | {error, term()}.
 list_due(Filter) ->
     beam_agent_routines_core:list_due(Filter).
 

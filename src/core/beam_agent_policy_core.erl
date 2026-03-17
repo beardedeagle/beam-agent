@@ -63,6 +63,59 @@ without changing BeamAgent's execution core.
     created_at := integer(),
     updated_at := integer()
 }.
+-type profile_error_tag() ::
+    invalid_default
+  | invalid_match
+  | invalid_profile
+  | invalid_reason
+  | invalid_rule_action
+  | unsupported_profile_key
+  | unsupported_rule_key.
+-type profile_error() :: {profile_error_tag(), term()}.
+-type profile_allowed_key() :: default | metadata | rules.
+-type rule_allowed_key() :: action | decision | match | reason.
+-type policy_allowed_key() :: profile_allowed_key() | rule_allowed_key().
+-type normalized_rule_base() :: #{
+    action := action() | '*',
+    decision := decision(),
+    match := match_spec()
+}.
+-type policy_operation() :: evaluate | get_profile | list_profiles | put_profile.
+-type policy_start_meta() ::
+    #{}
+  | #{profile_id := binary()}
+  | #{profile_id := undefined}
+  | #{
+        profile_id := binary(),
+        rule_count := non_neg_integer()
+    }
+  | #{
+        action := action(),
+        profile_id := binary(),
+        rule_count := non_neg_integer()
+    }.
+-type policy_stop_meta() ::
+    #{decision := allow}
+  | #{result_count := non_neg_integer()}
+  | #{
+        profile_id := binary(),
+        found := boolean()
+    }
+  | #{
+        profile_id := binary(),
+        found := boolean(),
+        rule_count := non_neg_integer()
+    }
+  | #{
+        action := action(),
+        decision := allow | {deny, binary()},
+        profile_id := binary(),
+        rule_count := non_neg_integer()
+    }
+  | #{
+        profile_id := binary(),
+        rule_count := non_neg_integer()
+    }.
 
 -define(PROFILES_TABLE, beam_agent_policy_profiles).
 -define(STORE_DOMAIN, policy).
@@ -81,7 +134,7 @@ clear() ->
     ok.
 
 -doc "Insert or overwrite a policy profile.".
--spec put_profile(binary(), map()) -> ok | {error, term()}.
+-spec put_profile(binary(), map()) -> ok | {error, profile_error()}.
 put_profile(ProfileId, ProfileInput)
   when is_binary(ProfileId), is_map(ProfileInput) ->
     ensure_tables(),
@@ -142,7 +195,8 @@ Evaluate an action against a stored policy profile.
 Missing profiles are denied explicitly so callers cannot silently bypass a
 configured policy reference.
 """.
--spec evaluate(binary() | undefined, action(), map()) -> allow | {deny, binary()}.
+-spec evaluate(undefined, action(), map()) -> allow;
+      (binary(), action(), map()) -> allow | {deny, binary()}.
 evaluate(undefined, _Action, _Context) ->
     StartTime = telemetry_start(evaluate, #{profile_id => undefined}),
     telemetry_stop(evaluate, StartTime, #{decision => allow}),
@@ -167,7 +221,7 @@ evaluate(ProfileId, Action, Context)
 %% Internal
 %%--------------------------------------------------------------------
 
--spec normalize_profile(binary(), map()) -> {ok, profile()} | {error, term()}.
+-spec normalize_profile(binary(), map()) -> {ok, profile()} | {error, profile_error()}.
 normalize_profile(ProfileId, ProfileInput) ->
     Allowed = [default, metadata, rules],
     case validate_allowed_keys(ProfileInput, Allowed, unsupported_profile_key) of
@@ -207,7 +261,7 @@ normalize_profile(ProfileId, ProfileInput) ->
     end.
 
 -spec normalize_rules([map()], [profile_rule()]) ->
-    {ok, [profile_rule()]} | {error, term()}.
+    {ok, [profile_rule()]} | {error, profile_error()}.
 normalize_rules([], Acc) ->
     {ok, lists:reverse(Acc)};
 normalize_rules([Rule | Rest], Acc) when is_map(Rule) ->
@@ -220,7 +274,7 @@ normalize_rules([Rule | Rest], Acc) when is_map(Rule) ->
 normalize_rules(_, _Acc) ->
     {error, {invalid_profile, rules}}.
 
--spec normalize_rule(map()) -> {ok, profile_rule()} | {error, term()}.
+-spec normalize_rule(map()) -> {ok, profile_rule()} | {error, profile_error()}.
 normalize_rule(Rule) ->
     Allowed = [action, decision, match, reason],
     case validate_allowed_keys(Rule, Allowed, unsupported_rule_key) of
@@ -336,7 +390,7 @@ path_value(Context, [Key | Rest]) when is_map(Context) ->
 path_value(_Context, _Path) ->
     undefined.
 
--spec normalize_match(term()) -> {ok, match_spec()} | {error, term()}.
+-spec normalize_match(term()) -> {ok, match_spec()} | {error, profile_error()}.
 normalize_match('*') ->
     {ok, '*'};
 normalize_match({exists, Path}) ->
@@ -367,7 +421,8 @@ normalize_match({path_prefix, Path, Prefix}) when is_binary(Prefix) ->
 normalize_match(Match) ->
     {error, {invalid_match, Match}}.
 
--spec normalize_key_path(term(), atom()) -> {ok, key_path()} | {error, term()}.
+-spec normalize_key_path(term(), profile_error_tag()) ->
+    {ok, key_path()} | {error, profile_error()}.
 normalize_key_path(Path, _ErrorTag) when is_atom(Path); is_binary(Path) ->
     {ok, Path};
 normalize_key_path(Path, ErrorTag) when is_list(Path) ->
@@ -378,7 +433,8 @@ normalize_key_path(Path, ErrorTag) when is_list(Path) ->
 normalize_key_path(Path, ErrorTag) ->
     {error, {ErrorTag, Path}}.
 
--spec normalize_rule_action(term()) -> {ok, action() | '*'} | {error, term()}.
+-spec normalize_rule_action(term()) ->
+    {ok, action() | '*'} | {error, {invalid_rule_action, term()}}.
 normalize_rule_action('*') ->
     {ok, '*'};
 normalize_rule_action(Action) when is_atom(Action); is_binary(Action) ->
@@ -386,12 +442,13 @@ normalize_rule_action(Action) when is_atom(Action); is_binary(Action) ->
 normalize_rule_action(Action) ->
     {error, {invalid_rule_action, Action}}.
 
--spec normalize_default(term()) -> {ok, decision()} | {error, term()}.
+-spec normalize_default(term()) -> {ok, decision()} | {error, {invalid_default, term()}}.
 normalize_default(allow) -> {ok, allow};
 normalize_default(deny) -> {ok, deny};
 normalize_default(Value) -> {error, {invalid_default, Value}}.
 
--spec normalize_reason(term()) -> {ok, binary() | undefined} | {error, term()}.
+-spec normalize_reason(term()) ->
+    {ok, binary() | undefined} | {error, {invalid_reason, term()}}.
 normalize_reason(undefined) ->
     {ok, undefined};
 normalize_reason(Reason) when is_binary(Reason) ->
@@ -399,13 +456,15 @@ normalize_reason(Reason) when is_binary(Reason) ->
 normalize_reason(Reason) ->
     {error, {invalid_reason, Reason}}.
 
--spec normalize_metadata(term()) -> {ok, map()} | {error, term()}.
+-spec normalize_metadata(term()) -> {ok, map()} | {error, {invalid_profile, term()}}.
 normalize_metadata(Metadata) when is_map(Metadata) ->
     {ok, Metadata};
 normalize_metadata(Metadata) ->
     {error, {invalid_profile, Metadata}}.
 
--spec validate_allowed_keys(map(), [atom()], atom()) -> ok | {error, term()}.
+-spec validate_allowed_keys(map(), [policy_allowed_key(), ...],
+    unsupported_profile_key | unsupported_rule_key) ->
+    ok | {error, {unsupported_profile_key | unsupported_rule_key, atom()}}.
 validate_allowed_keys(Map, Allowed, ErrorTag) ->
     case [Key || Key <- maps:keys(Map),
             is_atom(Key),
@@ -416,31 +475,39 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
             {error, {ErrorTag, Unsupported}}
     end.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(reason, binary() | undefined, normalized_rule_base()) -> profile_rule().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(policy_operation(), policy_start_meta()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(policy, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(policy_operation(), integer(), policy_stop_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(policy, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(put_profile, {error, profile_error()},
+    #{profile_id := binary(), rule_count := non_neg_integer()}) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(policy, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec compact_telemetry(map()) -> map().
+-spec compact_telemetry(#{
+    action => action(),
+    decision => allow | {deny, binary()},
+    found => boolean(),
+    profile_id => binary() | undefined,
+    result_count => non_neg_integer(),
+    rule_count => non_neg_integer()
+}) -> map().
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
--spec result_from_default(decision()) -> allow | {deny, binary()}.
+-spec result_from_default(decision()) -> allow | {deny, <<_:256>>}.
 result_from_default(allow) ->
     allow;
 result_from_default(deny) ->

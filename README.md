@@ -329,6 +329,9 @@ Internally, the newer canonical stores route through `beam_agent_store` with
 `beam_agent_store_ets` as the default adapter, preserving the existing
 process-free ETS plus hardened table-owner behavior.
 
+For a domain-by-domain explanation of ownership, storage, and process
+boundaries, see [docs/guides/canonical_domain_guide.md](docs/guides/canonical_domain_guide.md).
+
 ## Unified Message Format
 
 All adapters normalize messages to `beam_agent:message()`:

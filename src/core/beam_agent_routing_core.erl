@@ -83,6 +83,53 @@ events into the BeamAgent journal.
     remaining := [beam_agent_backend:backend()],
     ordered := [beam_agent_backend:backend()]
 }.
+-type default_route_policy() :: explicit | preferred_then_fallback.
+-type selection_reason_text() :: <<_:64, _:_*8>>.
+-type no_backend_error() :: {error, {no_backend_available, #{
+    policy := route_policy(),
+    requested_capabilities := [beam_agent_capabilities:capability()],
+    preferred_backends := [beam_agent_backend:backend()],
+    excluded_backends := [beam_agent_backend:backend()],
+    eligible_backends := [beam_agent_backend:backend()]
+}}}.
+-type route_key() :: {routing,
+    route_policy(),
+    boolean(),
+    [beam_agent_backend:backend(), ...],
+    [beam_agent_capabilities:capability()],
+    [beam_agent_backend:backend()],
+    [beam_agent_backend:backend()],
+    [beam_agent_backend:backend()]}.
+-type routing_operation() :: select_backend.
+-type routing_decision_meta() :: #{
+    backend := beam_agent_backend:backend(),
+    candidate_count := non_neg_integer(),
+    fallback_count := non_neg_integer(),
+    policy := route_policy(),
+    reason_count := non_neg_integer()
+}.
+-type routing_telemetry_meta() :: #{
+    backend := beam_agent_backend:backend(),
+    candidate_count := non_neg_integer(),
+    fallback_count := non_neg_integer(),
+    policy := route_policy(),
+    reason_count := non_neg_integer(),
+    decision := allow | {deny, binary()}
+}.
+-type routing_optional_key() ::
+    affinity_key | backend | last_backend | policy_profile_id | profile_id | reason |
+    reasons.
+-type routing_put_map() ::
+    route_request()
+  | route_decision()
+  | normalized_request()
+  | routing_telemetry_meta()
+  | #{
+        candidates := [beam_agent_backend:backend()],
+        decision := allow | deny,
+        fallback_chain := [term()],
+        atom() => term()
+    }.
 
 -define(AFFINITY_TABLE, beam_agent_routing_affinity).
 -define(ROUND_ROBIN_TABLE, beam_agent_routing_round_robin).
@@ -473,7 +520,7 @@ with_normalized_request(Request) ->
         end)
     end).
 
--spec default_policy(route_request()) -> route_policy().
+-spec default_policy(route_request()) -> default_route_policy().
 default_policy(Request) ->
     case maps:get(backend, Request, undefined) of
         undefined ->
@@ -699,7 +746,7 @@ ordered_subset(Requested, Eligible) ->
     [Backend || Backend <- Requested, lists:member(Backend, Eligible)].
 
 -spec selection_reason(beam_agent_backend:backend(), candidate_sets(),
-    normalized_request()) -> binary().
+    normalized_request()) -> selection_reason_text().
 selection_reason(Backend, Candidates, _Request) ->
     case lists:member(Backend, maps:get(preferred, Candidates)) of
         true ->
@@ -724,7 +771,7 @@ decision(Backend, Candidates, Policy, Reasons, Request) ->
     },
     maybe_put(affinity_key, maps:get(affinity_key, Request, undefined), Decision0).
 
--spec no_backend_error(normalized_request(), candidate_sets()) -> {error, term()}.
+-spec no_backend_error(normalized_request(), candidate_sets()) -> no_backend_error().
 no_backend_error(Request, Candidates) ->
     {error, {no_backend_available, #{
         policy => maps:get(policy, Request),
@@ -734,7 +781,8 @@ no_backend_error(Request, Candidates) ->
         eligible_backends => maps:get(eligible, Candidates)
     }}}.
 
--spec route_key(normalized_request(), [beam_agent_backend:backend()], boolean()) -> term().
+-spec route_key(normalized_request(), [beam_agent_backend:backend(), ...], boolean()) ->
+    route_key().
 route_key(Request, Candidates, Sticky) ->
     {routing,
      maps:get(policy, Request),
@@ -745,10 +793,8 @@ route_key(Request, Candidates, Sticky) ->
      maps:get(fallback_backends, Request),
      maps:get(excluded_backends, Request)}.
 
--spec rotate_candidates([beam_agent_backend:backend()], non_neg_integer()) ->
+-spec rotate_candidates([beam_agent_backend:backend(), ...], non_neg_integer()) ->
     [beam_agent_backend:backend()].
-rotate_candidates([], _Index) ->
-    [];
 rotate_candidates(Candidates, 0) ->
     Candidates;
 rotate_candidates(Candidates, Index) ->
@@ -872,22 +918,22 @@ base_request_from_opts(Opts, Routing) ->
             {ok, Routing#{backend => Backend, policy => explicit}}
     end.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(routing_optional_key(), term(), routing_put_map()) -> routing_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec telemetry_start(atom(), map()) -> integer().
+-spec telemetry_start(routing_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(routing, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_stop(atom(), integer(), map()) -> ok.
+-spec telemetry_stop(routing_operation(), integer(), routing_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(routing, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(atom(), term(), map()) -> ok.
+-spec telemetry_exception(routing_operation(), {error, {atom(), term()}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(routing, Operation, Reason,
         compact_telemetry(Metadata)).
@@ -897,7 +943,7 @@ telemetry_request_meta(Request) ->
     maps:with([backend, policy, affinity_key, policy_profile_id, last_backend,
         fallback_policy], Request).
 
--spec telemetry_decision_meta(route_decision()) -> map().
+-spec telemetry_decision_meta(route_decision()) -> routing_decision_meta().
 telemetry_decision_meta(Decision) ->
     #{
         backend => maps:get(backend, Decision),

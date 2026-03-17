@@ -4,6 +4,11 @@ defmodule BeamAgent.Routing do
 
   This module chooses a backend according to reusable routing policy instead of
   forcing callers to hard-code backend choice on every session start.
+
+  Supported policies are `:explicit`, `:sticky`, `:round_robin`, `:failover`,
+  `:capability_first`, and `:preferred_then_fallback`. Sticky affinity and
+  round-robin cursors are stored as canonical BeamAgent state, but the module
+  itself stays process-free.
   """
 
   @typedoc """
@@ -63,4 +68,3 @@ defmodule BeamAgent.Routing do
           {:ok, route_decision()} | {:error, term()}
   defdelegate select_backend(session_or_opts, route_request), to: :beam_agent_routing
 end
-

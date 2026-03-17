@@ -70,7 +70,7 @@ Pure functions -- no processes, no side effects.
 Parse a list of raw JSON content block maps into typed blocks.
 
 Non-map elements are silently dropped. Unknown block types are
-preserved as `raw` blocks for forward compatibility.
+preserved as `raw` blocks so the original payload remains accessible.
 """.
 -spec parse_blocks(list()) -> [content_block()].
 parse_blocks(Blocks) when is_list(Blocks) ->
@@ -263,7 +263,7 @@ parse_block(#{<<"type">> := <<"tool_result">>} = Raw) ->
         content => maps:get(<<"content">>, Raw, <<>>)
     }};
 parse_block(Raw) when is_map(Raw) ->
-    %% Unknown block type — preserve as raw for forward compatibility
+    %% Unknown block type — preserve it as a raw block instead of discarding it
     {true, #{type => raw, raw => Raw}};
 parse_block(_) ->
     false.

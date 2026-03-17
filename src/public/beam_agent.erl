@@ -99,13 +99,13 @@ field reference per message type.
 The normalized message type tag.
 
 Values: text, assistant, tool_use, tool_result, system, result, error,
-user, control, control_request, control_response, stream_event,
+user, control_request, control_response, stream_event,
 rate_limit_event, tool_progress, tool_use_summary, thinking,
 auth_status, prompt_suggestion, raw.
 
 The `result` type signals query completion. The `error` type signals
 a backend error. The `raw` type preserves unrecognized wire messages
-for forward compatibility.
+verbatim so normalization stays lossless.
 """.
 -type message_type() :: beam_agent_core:message_type().
 

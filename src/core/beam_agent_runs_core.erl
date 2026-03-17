@@ -55,6 +55,8 @@ hardened write proxy is the right level of machinery here.
 
 -type run_status() :: running | completed | failed | cancelled.
 -type step_status() :: running | completed | failed | cancelled.
+-type terminal_status() :: completed | failed | cancelled.
+-type terminal_current_status() :: completed | failed | cancelled.
 -type run_kind() :: atom() | binary().
 -type step_kind() :: atom() | binary().
 
@@ -101,6 +103,88 @@ hardened write proxy is the right level of machinery here.
     step_id => binary(),
     input => term()
 }.
+-type normalize_binary_key() :: parent_run_id | run_id | session_id | step_id | thread_id.
+-type journal_error() ::
+    already_exists
+  | session_id_required_for_thread
+  | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
+  | {invalid_event_type, binary()}.
+-type run_event_type_binary() :: <<_:80, _:_*24>>.
+-type step_event_type_binary() :: <<_:88, _:_*24>>.
+-type telemetry_domain() :: run | step.
+-type telemetry_operation() ::
+    start_run | start_step | complete_run | complete_step |
+    fail_run | fail_step | cancel_run | cancel_step.
+-type run_transition_error() ::
+    {error, {invalid_status_transition, terminal_current_status(), terminal_status()}}.
+-type step_transition_error() ::
+    {error, {invalid_status_transition, terminal_current_status(), terminal_status()}}.
+-type run_telemetry_request_meta() :: #{
+    requested_kind := term(),
+    run_id := term(),
+    session_id => binary(),
+    thread_id => binary(),
+    parent_run_id => binary()
+}.
+-type step_telemetry_request_meta() :: #{
+    run_id := binary(),
+    requested_kind := term(),
+    step_id := term()
+}.
+-type run_telemetry_meta() :: #{
+    run_id := binary(),
+    kind := run_kind(),
+    status := run_status()
+}.
+-type step_telemetry_meta() :: #{
+    run_id := binary(),
+    step_id := binary(),
+    kind := step_kind(),
+    status := step_status()
+}.
+-type telemetry_result() ::
+    {ok, run() | step()} |
+    {error,
+        active_steps
+      | already_exists
+      | inconsistent_parent_scope
+      | not_found
+      | parent_run_not_found
+      | run_not_active
+      | session_id_required_for_thread
+      | {invalid_run_opt, kind | metadata | run_id}
+      | {invalid_scope, atom()}
+      | {invalid_step_opt, kind | metadata | step_id}
+      | {unsupported_scope_key, atom()}
+      | {invalid_status_transition, terminal_current_status(), terminal_status()}}.
+-type telemetry_metadata() :: #{
+    run_id := term(),
+    parent_run_id => binary(),
+    requested_kind => term(),
+    session_id => binary(),
+    step_id => term(),
+    target_status => terminal_status(),
+    thread_id => binary()
+}.
+-type runs_put_key() ::
+    input | kind | limit | parent_run_id | run_id | session_id | since | status |
+    step_id | thread_id.
+-type runs_event_map() :: #{
+    payload := #{run => map()} | #{step => map()},
+    tags := [run | step, ...],
+    created_at => integer(),
+    metadata => map(),
+    updated_at => integer(),
+    runs_put_key() => term()
+}.
+-type runs_put_map() ::
+    normalized_scope()
+  | normalized_run_opts()
+  | normalized_step_opts()
+  | run_filter()
+  | run()
+  | step()
+  | runs_event_map().
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -582,15 +666,15 @@ transition_step(RunId, StepId, TargetStatus, Payload) ->
     telemetry_finish(step, Operation, StartTime, Result, TeleMeta),
     Result.
 
--spec ensure_run_transition(run(), completed | failed | cancelled) ->
-    ok | {error, {invalid_status_transition, run_status(), completed | failed | cancelled}}.
+-spec ensure_run_transition(run(), terminal_status()) ->
+    ok | run_transition_error().
 ensure_run_transition(#{status := running}, _Target) ->
     ok;
 ensure_run_transition(#{status := Current}, Target) ->
     {error, {invalid_status_transition, Current, Target}}.
 
--spec ensure_step_transition(step(), completed | failed | cancelled) ->
-    ok | {error, {invalid_status_transition, step_status(), completed | failed | cancelled}}.
+-spec ensure_step_transition(step(), terminal_status()) ->
+    ok | step_transition_error().
 ensure_step_transition(#{status := running}, _Target) ->
     ok;
 ensure_step_transition(#{status := Current}, Target) ->
@@ -762,9 +846,13 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
             {error, {ErrorTag, BadKey}}
     end.
 
--spec normalize_optional_binary(atom(), map()) ->
-    {ok, binary() | undefined} | {error, {invalid_scope | invalid_run_opt |
-        invalid_step_opt | invalid_filter, atom()}}.
+-spec normalize_optional_binary(normalize_binary_key(), map()) ->
+    {ok, binary() | undefined} |
+    {error,
+        {invalid_filter, normalize_binary_key()} |
+        {invalid_run_opt, run_id} |
+        {invalid_scope, parent_run_id | session_id | thread_id} |
+        {invalid_step_opt, step_id}}.
 normalize_optional_binary(Key, Map) ->
     case maps:find(Key, Map) of
         error ->
@@ -781,8 +869,9 @@ normalize_optional_binary(Key, Map) ->
             {error, {invalid_filter, Key}}
     end.
 
--spec normalize_kind(atom(), term(), invalid_run_opt | invalid_step_opt | invalid_filter) ->
-    {ok, atom() | binary()} | {error, {invalid_run_opt | invalid_step_opt | invalid_filter, atom()}}.
+-spec normalize_kind(kind, term(), invalid_run_opt | invalid_step_opt | invalid_filter) ->
+    {ok, atom() | binary()} |
+    {error, {invalid_run_opt | invalid_step_opt | invalid_filter, kind}}.
 normalize_kind(_Key, Value, _ErrorTag) when is_atom(Value) ->
     {ok, Value};
 normalize_kind(_Key, Value, _ErrorTag) when is_binary(Value), byte_size(Value) > 0 ->
@@ -851,34 +940,33 @@ normalize_since(Filter) ->
 %% Internal: Misc Helpers
 %%--------------------------------------------------------------------
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(runs_put_key(), term(), runs_put_map()) -> runs_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec generate_run_id() -> binary().
+-spec generate_run_id() -> <<_:32, _:_*8>>.
 generate_run_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"run_", Hex/binary>>.
 
--spec generate_step_id() -> binary().
+-spec generate_step_id() -> <<_:40, _:_*8>>.
 generate_step_id() ->
     Hex = binary:encode_hex(crypto:strong_rand_bytes(8), lowercase),
     <<"step_", Hex/binary>>.
 
--spec run_event_type(completed | failed | cancelled) -> binary().
-run_event_type(completed) -> <<"run_completed">>;
+-spec run_event_type(failed | cancelled) -> run_event_type_binary().
 run_event_type(failed) -> <<"run_failed">>;
 run_event_type(cancelled) -> <<"run_cancelled">>.
 
--spec step_event_type(completed | failed | cancelled) -> binary().
+-spec step_event_type(completed | failed | cancelled) -> step_event_type_binary().
 step_event_type(completed) -> <<"step_completed">>;
 step_event_type(failed) -> <<"step_failed">>;
 step_event_type(cancelled) -> <<"step_cancelled">>.
 
--spec append_run_event(binary(), run()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec append_run_event(<<_:64, _:_*8>>, run()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 append_run_event(EventType, Run) ->
     Event0 = #{
         run_id => maps:get(run_id, Run),
@@ -889,8 +977,8 @@ append_run_event(EventType, Run) ->
     Event2 = maybe_put(thread_id, maps:get(thread_id, Run, undefined), Event1),
     beam_agent_journal_core:append(EventType, Event2).
 
--spec append_step_event(binary(), step()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+-spec append_step_event(<<_:64, _:_*8>>, step()) ->
+    {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 append_step_event(EventType, Step) ->
     Event0 = #{
         run_id => maps:get(run_id, Step),
@@ -905,18 +993,16 @@ append_step_event(EventType, Step) ->
 telemetry_scope_meta(SessionId) when is_binary(SessionId) ->
     #{session_id => SessionId};
 telemetry_scope_meta(Scope) when is_map(Scope) ->
-    maps:with([session_id, thread_id, parent_run_id], Scope);
-telemetry_scope_meta(_Other) ->
-    #{}.
+    maps:with([session_id, thread_id, parent_run_id], Scope).
 
--spec telemetry_run_request_meta(map(), map()) -> map().
+-spec telemetry_run_request_meta(map(), map()) -> run_telemetry_request_meta().
 telemetry_run_request_meta(Opts, ScopeMeta) ->
     ScopeMeta#{
         requested_kind => maps:get(kind, Opts, undefined),
         run_id => maps:get(run_id, Opts, undefined)
     }.
 
--spec telemetry_step_request_meta(binary(), map()) -> map().
+-spec telemetry_step_request_meta(binary(), map()) -> step_telemetry_request_meta().
 telemetry_step_request_meta(RunId, Opts) ->
     #{
         run_id => RunId,
@@ -924,7 +1010,7 @@ telemetry_step_request_meta(RunId, Opts) ->
         step_id => maps:get(step_id, Opts, undefined)
     }.
 
--spec telemetry_run_meta(run()) -> map().
+-spec telemetry_run_meta(run()) -> run_telemetry_meta().
 telemetry_run_meta(Run) ->
     #{
         run_id => maps:get(run_id, Run),
@@ -932,7 +1018,7 @@ telemetry_run_meta(Run) ->
         status => maps:get(status, Run)
     }.
 
--spec telemetry_step_meta(step()) -> map().
+-spec telemetry_step_meta(step()) -> step_telemetry_meta().
 telemetry_step_meta(Step) ->
     #{
         run_id => maps:get(run_id, Step),
@@ -941,9 +1027,8 @@ telemetry_step_meta(Step) ->
         status => maps:get(status, Step)
     }.
 
--spec run_transition_operation(completed | failed | cancelled) ->
-    complete_run | fail_run | cancel_run.
-run_transition_operation(completed) -> complete_run;
+-spec run_transition_operation(failed | cancelled) ->
+    fail_run | cancel_run.
 run_transition_operation(failed) -> fail_run;
 run_transition_operation(cancelled) -> cancel_run.
 
@@ -953,22 +1038,24 @@ step_transition_operation(completed) -> complete_step;
 step_transition_operation(failed) -> fail_step;
 step_transition_operation(cancelled) -> cancel_step.
 
--spec telemetry_start(atom(), atom(), map()) -> integer().
+-spec telemetry_start(telemetry_domain(), telemetry_operation(),
+    run_telemetry_request_meta() | step_telemetry_request_meta() | telemetry_metadata()) ->
+    integer().
 telemetry_start(Domain, Operation, Metadata) ->
     beam_agent_telemetry_core:span_start(Domain, Operation, compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), atom(), term(), map(), map()) -> ok.
+-spec telemetry_finish(telemetry_domain(), telemetry_operation(), integer(),
+    telemetry_result(),
+    run_telemetry_request_meta() | step_telemetry_request_meta() | telemetry_metadata()) -> ok.
 telemetry_finish(Domain, Operation, StartTime, {ok, Value}, Metadata) when is_map(Value) ->
     beam_agent_telemetry_core:span_stop(Domain, Operation, StartTime,
         compact_telemetry(maps:merge(Metadata, success_telemetry(Value))));
-telemetry_finish(Domain, Operation, StartTime, {ok, _Value}, Metadata) ->
-    beam_agent_telemetry_core:span_stop(Domain, Operation, StartTime,
-        compact_telemetry(Metadata));
 telemetry_finish(Domain, Operation, _StartTime, {error, Reason}, Metadata) ->
     beam_agent_telemetry_core:span_exception(Domain, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec emit_state_change(atom(), atom(), atom(), map()) -> ok.
+-spec emit_state_change(telemetry_domain(), created | running | terminal_current_status(),
+    running | terminal_status(), run_telemetry_meta() | step_telemetry_meta()) -> ok.
 emit_state_change(Domain, FromState, ToState, Metadata) ->
     beam_agent_telemetry_core:state_change(Domain, FromState, ToState,
         compact_telemetry(Metadata)).
@@ -977,6 +1064,6 @@ emit_state_change(Domain, FromState, ToState, Metadata) ->
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
--spec success_telemetry(map()) -> map().
+-spec success_telemetry(run() | step()) -> map().
 success_telemetry(Value) ->
     maps:with([run_id, step_id, session_id, thread_id, kind, status], Value).

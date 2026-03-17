@@ -84,7 +84,7 @@ Domains default to `beam_agent_store_ets`; callers only need this when a test
 or future durable adapter wants to override that default.
 """.
 -spec configure_domain(domain(), store_config()) ->
-    ok | {error, invalid_options | {invalid_adapter, term()}}.
+    ok | {error, invalid_options | {invalid_adapter, atom()}}.
 configure_domain(Domain, Config) when is_atom(Domain), is_map(Config) ->
     ensure_tables(),
     case normalize_config(Config) of
@@ -235,7 +235,7 @@ normalize_config(#{adapter := Adapter} = Config) when is_atom(Adapter) ->
 normalize_config(_) ->
     {error, invalid_options}.
 
--spec validate_adapter(adapter_module()) -> ok | {error, {invalid_adapter, term()}}.
+-spec validate_adapter(adapter_module()) -> ok | {error, {invalid_adapter, atom()}}.
 validate_adapter(Adapter) ->
     case code:ensure_loaded(Adapter) of
         {module, Adapter} ->
@@ -251,7 +251,13 @@ validate_adapter(Adapter) ->
             {error, {invalid_adapter, Adapter}}
     end.
 
--spec required_callbacks() -> [{atom(), arity()}].
+-type required_callback() ::
+    {ensure_table | insert | insert_new | delete | delete_object | lookup | next, 3}
+  | {delete_all_objects | first, 2}
+  | {update_counter, 4 | 5}
+  | {foldl, 4}.
+
+-spec required_callbacks() -> [required_callback(), ...].
 required_callbacks() ->
     [
         {ensure_table, 3},
@@ -268,7 +274,7 @@ required_callbacks() ->
         {next, 3}
     ].
 
--spec default_config() -> store_config().
+-spec default_config() -> #{adapter := beam_agent_store_ets, options := #{}}.
 default_config() ->
     #{
         adapter => beam_agent_store_ets,
