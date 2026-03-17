@@ -18,7 +18,11 @@ defmodule BeamAgent.Orchestrator do
           | :none
           | binary()
           | pid()
-          | %{required(:kind) => :live, required(:ref) => pid(), optional(:stop_session) => boolean()}
+          | %{
+              required(:kind) => :live,
+              required(:ref) => pid(),
+              optional(:stop_session) => boolean()
+            }
           | %{required(:kind) => :session_id, required(:id) => binary()}
           | %{
               required(:kind) => :routed,
@@ -148,6 +152,7 @@ defmodule BeamAgent.Orchestrator do
   @doc """
   List direct orchestrator children for a parent run.
   """
-  @spec list_children(parent()) :: {:ok, [child()]} | {:error, :parent_not_found | {:invalid_parent, binary()}}
+  @spec list_children(parent()) ::
+          {:ok, [child()]} | {:error, :parent_not_found | {:invalid_parent, binary()}}
   defdelegate list_children(parent), to: :beam_agent_orchestrator
 end

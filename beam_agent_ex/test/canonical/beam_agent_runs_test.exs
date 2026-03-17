@@ -34,7 +34,10 @@ defmodule BeamAgent.RunsTest do
              })
 
     assert {:ok, step} = BeamAgent.Runs.start_step(run.run_id, %{kind: :review})
-    assert {:ok, completed_step} = BeamAgent.Runs.complete_step(run.run_id, step.step_id, %{ok: true})
+
+    assert {:ok, completed_step} =
+             BeamAgent.Runs.complete_step(run.run_id, step.step_id, %{ok: true})
+
     assert completed_step.status == :completed
 
     assert {:ok, completed_run} = BeamAgent.Runs.complete_run(run.run_id, %{summary: "done"})

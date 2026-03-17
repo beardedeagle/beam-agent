@@ -1338,6 +1338,8 @@ telemetry_result_meta(#{run := Run} = Result) when is_map(Run) ->
         Steps when is_list(Steps) -> Base2#{step_count => length(Steps)};
         _ -> Base2
     end;
+telemetry_result_meta(#{run_id := _} = Run) ->
+    telemetry_run_meta(Run);
 telemetry_result_meta(#{relation := _, run := Run} = Child) when is_map(Run) ->
     maps:merge(telemetry_run_meta(Run), maps:with([parent_run_id, substrate], Child));
 telemetry_result_meta(#{status := Status, run := Run}) when is_map(Run) ->

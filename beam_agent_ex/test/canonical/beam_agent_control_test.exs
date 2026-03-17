@@ -47,7 +47,12 @@ defmodule BeamAgent.ControlTest do
 
     assert {:ok, run} = BeamAgent.Runs.get_run(task_after_stop.run_id)
     assert run.status == :cancelled
-    assert run.cancel_reason == %{reason: :task_stopped, source: :control_task, task_id: "task-stop"}
+
+    assert run.cancel_reason == %{
+             reason: :task_stopped,
+             source: :control_task,
+             task_id: "task-stop"
+           }
   end
 
   test "unregister_task removes the task entry and completes the linked run" do
@@ -61,7 +66,12 @@ defmodule BeamAgent.ControlTest do
 
     assert {:ok, run} = BeamAgent.Runs.get_run(task.run_id)
     assert run.status == :completed
-    assert run.output == %{source: :control_task, task_id: "task-unregister", terminal_status: :completed}
+
+    assert run.output == %{
+             source: :control_task,
+             task_id: "task-unregister",
+             terminal_status: :completed
+           }
 
     Process.exit(pid, :kill)
   end

@@ -25,6 +25,7 @@ defmodule BeamAgent.OrchestratorTest do
 
   test "spawns a child thread and tracks it under the parent run" do
     session = "ex-orchestrator-session-#{System.unique_integer([:positive])}"
+
     :ok =
       :beam_agent_session_store_core.register_session(session, %{
         session_id: session,
@@ -59,6 +60,7 @@ defmodule BeamAgent.OrchestratorTest do
 
     assert is_list(collected[:journal] || collected["journal"])
     assert {:ok, children} = BeamAgent.Orchestrator.list_children(parent_run_id)
+
     assert Enum.any?(children, fn entry ->
              child_run = entry[:run] || entry["run"]
              (child_run[:run_id] || child_run["run_id"]) == child_run_id

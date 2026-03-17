@@ -13,4 +13,3 @@ defmodule BeamAgent.ContextTest do
     assert function_exported?(BeamAgent.Context, :maybe_compact, 2)
   end
 end
-

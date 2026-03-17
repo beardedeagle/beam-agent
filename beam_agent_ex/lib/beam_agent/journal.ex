@@ -69,7 +69,8 @@ defmodule BeamAgent.Journal do
   @type append_error() ::
           :already_exists
           | :session_id_required_for_thread
-          | {:invalid_event, :event_id | :payload | :run_id | :session_id | :tags | :thread_id | :timestamp}
+          | {:invalid_event,
+             :event_id | :payload | :run_id | :session_id | :tags | :thread_id | :timestamp}
           | {:invalid_event_type, binary()}
 
   @doc """

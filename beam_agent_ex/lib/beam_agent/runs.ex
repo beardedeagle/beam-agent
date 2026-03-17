@@ -270,7 +270,15 @@ defmodule BeamAgent.Runs do
           {:ok, [run()]}
           | {:error,
              {:invalid_filter,
-              :kind | :limit | :parent_run_id | :run_id | :session_id | :since | :status | :step_id | :thread_id}}
+              :kind
+              | :limit
+              | :parent_run_id
+              | :run_id
+              | :session_id
+              | :since
+              | :status
+              | :step_id
+              | :thread_id}}
   defdelegate list_runs(filter), to: :beam_agent_runs
 
   @doc """
@@ -289,7 +297,8 @@ defmodule BeamAgent.Runs do
   """
   @spec fail_run(binary(), term()) ::
           {:ok, terminal_run()}
-          | {:error, :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :failed}}
+          | {:error,
+             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :failed}}
   defdelegate fail_run(run_id, error_term), to: :beam_agent_runs
 
   @doc """
@@ -298,7 +307,8 @@ defmodule BeamAgent.Runs do
   @spec cancel_run(binary(), term()) ::
           {:ok, terminal_run()}
           | {:error,
-             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
+             :not_found
+             | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
   defdelegate cancel_run(run_id, reason), to: :beam_agent_runs
 
   @doc """
@@ -331,7 +341,8 @@ defmodule BeamAgent.Runs do
   @spec complete_step(binary(), binary(), term()) ::
           {:ok, terminal_step()}
           | {:error,
-             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :completed}}
+             :not_found
+             | {:invalid_status_transition, :cancelled | :completed | :failed, :completed}}
   defdelegate complete_step(run_id, step_id, result), to: :beam_agent_runs
 
   @doc """
@@ -349,6 +360,7 @@ defmodule BeamAgent.Runs do
   @spec cancel_step(binary(), binary(), term()) ::
           {:ok, terminal_step()}
           | {:error,
-             :not_found | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
+             :not_found
+             | {:invalid_status_transition, :cancelled | :completed | :failed, :cancelled}}
   defdelegate cancel_step(run_id, step_id, reason), to: :beam_agent_runs
 end

@@ -195,7 +195,7 @@ select_backend(RouteRequest) when is_map(RouteRequest) ->
                             {ok, Decision, allow};
                         {deny, Reason} ->
                             ok = audit_routing_decision(Normalized, Decision, deny, Reason),
-                            {ok, Decision, {deny, Reason}}
+                            {error, {policy_denied, Reason}}
                     end;
                 {error, _} = Error ->
                     Error

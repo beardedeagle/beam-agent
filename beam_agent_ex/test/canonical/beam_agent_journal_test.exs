@@ -44,7 +44,9 @@ defmodule BeamAgent.JournalTest do
     assert listed_first.event_id == first.event_id
     assert listed_second.event_id == second.event_id
 
-    assert {:ok, [replayed]} = BeamAgent.Journal.stream_from(first.sequence, %{session_id: session})
+    assert {:ok, [replayed]} =
+             BeamAgent.Journal.stream_from(first.sequence, %{session_id: session})
+
     assert replayed.event_id == second.event_id
 
     assert :ok = BeamAgent.Journal.ack("consumer-elixir", second.event_id)

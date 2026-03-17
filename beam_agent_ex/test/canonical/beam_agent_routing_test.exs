@@ -34,4 +34,3 @@ defmodule BeamAgent.RoutingTest do
     assert second.affinity_key == "beam-agent-routing-wrapper"
   end
 end
-
