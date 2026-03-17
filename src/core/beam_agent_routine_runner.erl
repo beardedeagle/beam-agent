@@ -22,7 +22,8 @@ or other existing owner process.
 -doc "Execute a routine immediately without advancing its schedule.".
 -spec run_now(binary()) -> {ok, beam_agent_runs_core:run()} | {error, term()}.
 run_now(JobId) when is_binary(JobId) ->
-    case beam_agent_routines_core:get(JobId) of
+    StartTime = telemetry_start(run_now, #{job_id => JobId}),
+    Result = case beam_agent_routines_core:get(JobId) of
         {ok, Job} ->
             Now = erlang:system_time(millisecond),
             {Run, Outcome, Payload} = execute_job(Job, Now, true),
@@ -49,6 +50,14 @@ run_now(JobId) when is_binary(JobId) ->
             end;
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        {ok, RunResult} ->
+            telemetry_stop(run_now, StartTime, telemetry_run_meta(RunResult)),
+            Result;
+        {error, not_found} = ErrorResult ->
+            telemetry_stop(run_now, StartTime, #{job_id => JobId, found => false}),
+            ErrorResult
     end.
 
 -doc "Execute every currently due routine with default runner options.".
@@ -71,6 +80,13 @@ run_due(Opts) when is_map(Opts) ->
     RunnerId = maps:get(runner_id, Opts, default_runner_id()),
     ClaimTtlMs = maps:get(claim_ttl_ms, Opts, 60000),
     DueFilter = (maps:with([limit], Opts))#{at => Now},
+    TeleMeta = #{
+        at => Now,
+        runner_id => RunnerId,
+        claim_ttl_ms => ClaimTtlMs,
+        limit => maps:get(limit, Opts, undefined)
+    },
+    StartTime = telemetry_start(run_due, TeleMeta),
     case beam_agent_routines_core:list_due(DueFilter) of
         {ok, Jobs} ->
             Results = lists:foldl(fun(Job, Acc) ->
@@ -106,8 +122,13 @@ run_due(Opts) when is_map(Opts) ->
                         Acc
                 end
             end, [], Jobs),
+            telemetry_stop(run_due, StartTime, TeleMeta#{
+                due_count => length(Jobs),
+                executed_count => length(Results)
+            }),
             {ok, lists:reverse(Results)};
         {error, _} = Error ->
+            telemetry_exception(run_due, Error, TeleMeta),
             Error
     end.
 
@@ -379,3 +400,25 @@ audit_execution(JobId, RunId, Mode, Outcome, Payload) when is_binary(JobId) ->
                 {error, _} -> ok
             end
     end.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(routine, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_run_meta(map()) -> map().
+telemetry_run_meta(Run) ->
+    maps:with([run_id, session_id, thread_id, kind, status], Run).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

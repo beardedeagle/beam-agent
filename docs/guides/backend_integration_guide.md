@@ -1777,6 +1777,11 @@ session engine handles:
 - Query ref validation and cancel support
 - Error state with auto-stop
 
+The same telemetry helper surface is also reused by BeamAgent's canonical
+runtime domains outside the session engine, so adapters should follow the
+existing `beam_agent_telemetry` pattern rather than inventing a backend-local
+event style.
+
 Your handler only needs to implement:
 
 - Protocol encoding/decoding (wire format specifics)

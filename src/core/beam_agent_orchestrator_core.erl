@@ -217,7 +217,9 @@ thread substrate.
 -spec spawn(parent(), spawn_opts()) ->
     {ok, child()} | {error, term()}.
 spawn(Parent, Opts) when is_map(Opts) ->
-    case resolve_parent_run(Parent) of
+    TeleMeta = telemetry_spawn_meta(Parent, Opts),
+    StartTime = telemetry_start(spawn, TeleMeta),
+    Result = case resolve_parent_run(Parent) of
         {ok, ParentRun} ->
             case normalize_spawn_opts(Opts) of
                 {ok, Normalized} ->
@@ -227,7 +229,9 @@ spawn(Parent, Opts) when is_map(Opts) ->
             end;
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(spawn, StartTime, Result, TeleMeta),
+    Result.
 
 -doc """
 Create a delegated child run under a parent run.
@@ -238,7 +242,12 @@ any worker loop inside BeamAgent.
 -spec delegate(parent(), term(), map()) ->
     {ok, beam_agent_runs_core:run()} | {error, term()}.
 delegate(Parent, Task, Opts) when is_map(Opts) ->
-    case maps:is_key(input, Opts) of
+    TeleMeta = (telemetry_spawn_meta(Parent, Opts))#{
+        delegated => true,
+        task_present => (Task =/= undefined)
+    },
+    StartTime = telemetry_start(delegate, TeleMeta),
+    Result = case maps:is_key(input, Opts) of
         true ->
             {error, {unsupported_delegate_opt, input}};
         false ->
@@ -258,7 +267,9 @@ delegate(Parent, Task, Opts) when is_map(Opts) ->
                 {error, _} = Error ->
                     Error
             end
-    end.
+    end,
+    telemetry_finish(delegate, StartTime, Result, TeleMeta),
+    Result.
 
 -doc """
 Wait for a run to reach a terminal state by polling the canonical run store.
@@ -269,7 +280,11 @@ Wait for a run to reach a terminal state by polling the canonical run store.
 await(RunId, Timeout)
   when is_binary(RunId), is_integer(Timeout), Timeout >= 0 ->
     Deadline = erlang:monotonic_time(millisecond) + Timeout,
-    await_loop(RunId, Deadline);
+    TeleMeta = #{run_id => RunId, timeout => Timeout},
+    StartTime = telemetry_start(await, TeleMeta),
+    Result = await_loop(RunId, Deadline),
+    telemetry_finish(await, StartTime, Result, TeleMeta),
+    Result;
 await(_RunId, Timeout) ->
     {error, {invalid_timeout, Timeout}}.
 
@@ -283,7 +298,11 @@ Supported opts:
 """.
 -spec collect(binary(), collect_opts()) -> {ok, collect_result()} | {error, term()}.
 collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
-    case normalize_collect_opts(Opts) of
+    TeleMeta = (maps:with([include_steps, include_journal, include_descendants], Opts))#{
+        run_id => RunId
+    },
+    StartTime = telemetry_start(collect, TeleMeta),
+    Result = case normalize_collect_opts(Opts) of
         {ok, Normalized} ->
             case beam_agent_runs:get_run(RunId) of
                 {ok, Run} ->
@@ -335,24 +354,36 @@ collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
             end;
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(collect, StartTime, Result, TeleMeta),
+    Result.
 
 -doc """
 Cancel a run and any active orchestrated descendants.
 """.
 -spec cancel(binary(), term()) -> ok | {error, not_found | term()}.
 cancel(RunId, Reason) when is_binary(RunId) ->
-    case cancel_tree(RunId, Reason, root) of
+    StartTime = telemetry_start(cancel, #{run_id => RunId}),
+    Result = case cancel_tree(RunId, Reason, root) of
         ok ->
             ok;
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        ok ->
+            telemetry_stop(cancel, StartTime, #{run_id => RunId}),
+            ok;
+        {error, _} = ErrorResult ->
+            telemetry_exception(cancel, ErrorResult, #{run_id => RunId}),
+            ErrorResult
     end.
 
 -doc "Return a summary status map for a run and its direct children.".
 -spec status(binary()) -> {ok, child_status()} | {error, not_found}.
 status(RunId) when is_binary(RunId) ->
-    case beam_agent_runs:get_run(RunId) of
+    StartTime = telemetry_start(status, #{run_id => RunId}),
+    Result = case beam_agent_runs:get_run(RunId) of
         {ok, Run} ->
             {ok, Steps} = beam_agent_runs:list_steps(RunId),
             {ok, Children} = list_children(RunId),
@@ -375,17 +406,30 @@ status(RunId) when is_binary(RunId) ->
             {ok, maps:from_list(maps:to_list(Base) ++ LinkInfo)};
         {error, not_found} ->
             {error, not_found}
-    end.
+    end,
+    telemetry_finish(status, StartTime, Result, #{run_id => RunId}),
+    Result.
 
 -doc "List direct orchestrator children for a parent run, oldest first.".
 -spec list_children(parent()) -> {ok, [child()]} | {error, term()}.
 list_children(Parent) ->
-    case resolve_parent_run_id(Parent) of
+    TeleMeta = telemetry_parent_meta(Parent),
+    StartTime = telemetry_start(list_children, TeleMeta),
+    Result = case resolve_parent_run_id(Parent) of
         {ok, ParentRunId} ->
             {ok, Links} = beam_agent_orchestrator_store:list_children(ParentRunId),
             {ok, [child_view(Link) || Link <- Links]};
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        {ok, Children} ->
+            telemetry_stop(list_children, StartTime,
+                TeleMeta#{result_count => length(Children)}),
+            Result;
+        {error, _} = ErrorResult ->
+            telemetry_exception(list_children, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 %%--------------------------------------------------------------------
@@ -1151,3 +1195,75 @@ maybe_pair(_Key, undefined) ->
     [];
 maybe_pair(Key, Value) ->
     [{Key, Value}].
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(orchestrator, Operation,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(orchestrator, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(orchestrator, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_finish(atom(), integer(), term(), map()) -> ok.
+telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) when is_map(Result) ->
+    telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_result_meta(Result)));
+telemetry_finish(Operation, StartTime, ok, Metadata) ->
+    telemetry_stop(Operation, StartTime, Metadata);
+telemetry_finish(Operation, StartTime, {error, timeout}, Metadata) ->
+    telemetry_stop(Operation, StartTime, Metadata#{timeout => true});
+telemetry_finish(Operation, StartTime, {error, not_found}, Metadata) ->
+    telemetry_stop(Operation, StartTime, Metadata#{found => false});
+telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
+    telemetry_exception(Operation, Reason, Metadata).
+
+-spec telemetry_parent_meta(parent()) -> map().
+telemetry_parent_meta(#{run_id := RunId}) ->
+    #{parent_run_id => RunId};
+telemetry_parent_meta(RunId) when is_binary(RunId) ->
+    #{parent_run_id => RunId};
+telemetry_parent_meta(_Other) ->
+    #{}.
+
+-spec telemetry_spawn_meta(parent(), map()) -> map().
+telemetry_spawn_meta(Parent, Opts) ->
+    maps:merge(telemetry_parent_meta(Parent),
+        maps:with([run_id, kind], Opts)).
+
+-spec telemetry_result_meta(map()) -> map().
+telemetry_result_meta(#{run := Run} = Result) when is_map(Run) ->
+    Base = telemetry_run_meta(Run),
+    Base1 = case maps:get(children, Result, undefined) of
+        Children when is_list(Children) -> Base#{child_count => length(Children)};
+        _ -> Base
+    end,
+    Base2 = case maps:get(descendants, Result, undefined) of
+        Descendants when is_list(Descendants) ->
+            Base1#{descendant_count => length(Descendants)};
+        _ ->
+            Base1
+    end,
+    case maps:get(steps, Result, undefined) of
+        Steps when is_list(Steps) -> Base2#{step_count => length(Steps)};
+        _ -> Base2
+    end;
+telemetry_result_meta(#{relation := _, run := Run} = Child) when is_map(Run) ->
+    maps:merge(telemetry_run_meta(Run), maps:with([parent_run_id, substrate], Child));
+telemetry_result_meta(#{status := Status, run := Run}) when is_map(Run) ->
+    (telemetry_run_meta(Run))#{status => Status};
+telemetry_result_meta(_Other) ->
+    #{}.
+
+-spec telemetry_run_meta(map()) -> map().
+telemetry_run_meta(Run) ->
+    maps:with([run_id, session_id, thread_id, kind, status], Run).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

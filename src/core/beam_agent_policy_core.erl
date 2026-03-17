@@ -85,23 +85,40 @@ clear() ->
 put_profile(ProfileId, ProfileInput)
   when is_binary(ProfileId), is_map(ProfileInput) ->
     ensure_tables(),
-    case normalize_profile(ProfileId, ProfileInput) of
+    TeleMeta = #{profile_id => ProfileId, rule_count => length(maps:get(rules, ProfileInput, []))},
+    StartTime = telemetry_start(put_profile, TeleMeta),
+    Result = case normalize_profile(ProfileId, ProfileInput) of
         {ok, Profile} ->
             true = beam_agent_store:insert(?STORE_DOMAIN, ?PROFILES_TABLE,
                 {ProfileId, Profile}),
             ok;
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        ok ->
+            telemetry_stop(put_profile, StartTime, TeleMeta),
+            ok;
+        {error, _} = ErrorResult ->
+            telemetry_exception(put_profile, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc "Fetch a policy profile by id.".
 -spec get_profile(binary()) -> {ok, profile()} | {error, not_found}.
 get_profile(ProfileId) when is_binary(ProfileId) ->
     ensure_tables(),
+    StartTime = telemetry_start(get_profile, #{profile_id => ProfileId}),
     case beam_agent_store:lookup(?STORE_DOMAIN, ?PROFILES_TABLE, ProfileId) of
         [{_, Profile}] when is_map(Profile) ->
+            telemetry_stop(get_profile, StartTime, #{
+                profile_id => ProfileId,
+                found => true,
+                rule_count => length(maps:get(rules, Profile, []))
+            }),
             {ok, Profile};
         [] ->
+            telemetry_stop(get_profile, StartTime, #{profile_id => ProfileId, found => false}),
             {error, not_found}
     end.
 
@@ -109,11 +126,14 @@ get_profile(ProfileId) when is_binary(ProfileId) ->
 -spec list_profiles() -> {ok, [profile()]}.
 list_profiles() ->
     ensure_tables(),
+    StartTime = telemetry_start(list_profiles, #{}),
     Profiles = beam_agent_store:foldl(?STORE_DOMAIN, fun
         ({_, Profile}, Acc) when is_map(Profile) ->
             [Profile | Acc]
     end, [], ?PROFILES_TABLE),
-    {ok, lists:sort(fun sort_profiles/2, Profiles)}.
+    Sorted = lists:sort(fun sort_profiles/2, Profiles),
+    telemetry_stop(list_profiles, StartTime, #{result_count => length(Sorted)}),
+    {ok, Sorted}.
 
 -doc """
 Evaluate an action against a stored policy profile.
@@ -124,15 +144,24 @@ configured policy reference.
 """.
 -spec evaluate(binary() | undefined, action(), map()) -> allow | {deny, binary()}.
 evaluate(undefined, _Action, _Context) ->
+    StartTime = telemetry_start(evaluate, #{profile_id => undefined}),
+    telemetry_stop(evaluate, StartTime, #{decision => allow}),
     allow;
 evaluate(ProfileId, Action, Context)
   when is_binary(ProfileId), is_map(Context) ->
-    case get_profile(ProfileId) of
+    TeleMeta = #{
+        profile_id => ProfileId,
+        action => Action
+    },
+    StartTime = telemetry_start(evaluate, TeleMeta),
+    Result = case get_profile(ProfileId) of
         {ok, Profile} ->
             evaluate_profile(Profile, Action, Context);
         {error, not_found} ->
             {deny, <<"unknown policy profile">>}
-    end.
+    end,
+    telemetry_stop(evaluate, StartTime, TeleMeta#{decision => Result}),
+    Result.
 
 %%--------------------------------------------------------------------
 %% Internal
@@ -392,6 +421,24 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(policy, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(policy, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(policy, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
 -spec result_from_default(decision()) -> allow | {deny, binary()}.
 result_from_default(allow) ->

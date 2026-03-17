@@ -492,8 +492,11 @@ Hook events: `pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `stop`,
 
 ### Telemetry
 
-All adapters emit telemetry events at key points (query lifecycle, command
-execution, state transitions, buffer overflow). The `telemetry` library is an
+BeamAgent emits telemetry at key points across both backend session handling and
+the canonical runtime domains added in this repo: query lifecycle, command
+execution, run and step lifecycle, routing decisions, artifact and memory
+operations, journal replay, routines, orchestration, policy evaluation, audit,
+context compaction, and buffer overflow. The `telemetry` library is an
 **optional** dependency — when present, events are emitted via
 `telemetry:execute/3`; when absent, emission is a silent no-op with zero
 overhead.
@@ -502,12 +505,24 @@ To opt in, add `{telemetry, "~> 1.3"}` to your application's `deps` and
 `applications` list, then attach handlers:
 
 ```erlang
-telemetry:attach(my_handler, [beam_agent, query, stop], fun handle/4, #{}).
+telemetry:attach(my_handler, [beam_agent, command, run, stop], fun handle/4, #{}).
 ```
 
-Events: `[beam_agent, query, start|stop|exception]`,
-`[beam_agent, command, run, start|stop|exception]`,
-`[beam_agent, message, received]`, `[beam_agent, session, start|stop]`.
+Representative events:
+- `[beam_agent, claude, query, start|stop|exception]`
+- `[beam_agent, command, run, start|stop|exception]`
+- `[beam_agent, run, state_change]`
+- `[beam_agent, artifact, put|search, start|stop|exception]`
+- `[beam_agent, journal, append|stream_from, start|stop|exception]`
+- `[beam_agent, memory, remember|search, start|stop|exception]`
+- `[beam_agent, routing, select_backend, start|stop|exception]`
+- `[beam_agent, context, maybe_compact, start|stop|exception]`
+- `[beam_agent, context, state_change]`
+- `[beam_agent, routine, create|run_due, start|stop|exception]`
+- `[beam_agent, orchestrator, delegate|collect, start|stop|exception]`
+- `[beam_agent, policy, evaluate, start|stop|exception]`
+- `[beam_agent, audit, record|list_events, start|stop|exception]`
+- `[beam_agent, buffer, overflow]`
 
 ### ETS Initialization
 

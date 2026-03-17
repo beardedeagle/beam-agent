@@ -58,7 +58,9 @@ thread history is reduced.
 -doc "Return current context pressure and available summary/memory state.".
 -spec context_status(scope()) -> {ok, context_status()} | {error, term()}.
 context_status(SessionOrThread) ->
-    case resolve_scope(SessionOrThread, #{}) of
+    TeleMeta = telemetry_scope_meta(SessionOrThread, #{}),
+    StartTime = telemetry_start(context_status, TeleMeta),
+    Result = case resolve_scope(SessionOrThread, #{}) of
         {ok, Scope} ->
             case budget_estimate_for_scope(Scope, #{}) of
                 {ok, Budget} ->
@@ -87,17 +89,23 @@ context_status(SessionOrThread) ->
             end;
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(context_status, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Estimate current context budget pressure using default policy thresholds.".
 -spec budget_estimate(scope()) -> {ok, budget_estimate_result()} | {error, term()}.
 budget_estimate(SessionOrThread) ->
-    case resolve_scope(SessionOrThread, #{}) of
+    TeleMeta = telemetry_scope_meta(SessionOrThread, #{}),
+    StartTime = telemetry_start(budget_estimate, TeleMeta),
+    Result = case resolve_scope(SessionOrThread, #{}) of
         {ok, Scope} ->
             budget_estimate_for_scope(Scope, #{});
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(budget_estimate, StartTime, Result, TeleMeta),
+    Result.
 
 -doc """
 Summarize a session, optionally promote the summary to memory, and compact the
@@ -105,12 +113,16 @@ thread scope immediately.
 """.
 -spec compact_now(scope(), map()) -> {ok, map()} | {error, term()}.
 compact_now(SessionOrThread, Opts) when is_map(Opts) ->
-    case resolve_scope(SessionOrThread, Opts) of
+    TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
+    StartTime = telemetry_start(compact_now, TeleMeta),
+    Result = case resolve_scope(SessionOrThread, Opts) of
         {ok, Scope} ->
             compact_now_for_scope(Scope, Opts);
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(compact_now, StartTime, Result, TeleMeta),
+    Result.
 
 -doc """
 Evaluate compaction policy and compact only when at least one trigger fires.
@@ -125,7 +137,9 @@ Supported triggers:
 """.
 -spec maybe_compact(scope(), map()) -> {ok, map()} | {error, term()}.
 maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
-    case resolve_scope(SessionOrThread, Opts) of
+    TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
+    StartTime = telemetry_start(maybe_compact, TeleMeta),
+    Result = case resolve_scope(SessionOrThread, Opts) of
         {ok, Scope} ->
             case budget_estimate_for_scope(Scope, Opts) of
                 {ok, Budget} ->
@@ -139,8 +153,8 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
                             }};
                         Triggers ->
                             case compact_now_for_scope(Scope, Opts) of
-                                {ok, Result} ->
-                                    {ok, Result#{
+                                {ok, CompactResult} ->
+                                    {ok, CompactResult#{
                                         budget_before => Budget,
                                         triggers => Triggers
                                     }};
@@ -153,7 +167,9 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
             end;
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(maybe_compact, StartTime, Result, TeleMeta),
+    Result.
 
 %%--------------------------------------------------------------------
 %% Internal
@@ -453,3 +469,46 @@ maybe_put_selector(Key, Value, Acc) ->
 -spec is_ok(term()) -> boolean().
 is_ok({ok, _}) -> true;
 is_ok(_) -> false.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(context, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_finish(atom(), integer(), {ok, map()} | {error, term()}, map()) -> ok.
+telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) ->
+    TeleMeta = compact_telemetry(maps:merge(Metadata, telemetry_result_meta(Result))),
+    beam_agent_telemetry_core:span_stop(context, Operation, StartTime, TeleMeta),
+    maybe_emit_compaction_transition(Result, TeleMeta);
+telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
+    beam_agent_telemetry_core:span_exception(context, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_scope_meta(scope(), map()) -> map().
+telemetry_scope_meta(Session, _Opts) when is_pid(Session) ->
+    #{session_id => beam_agent_core:session_identity(Session)};
+telemetry_scope_meta(SessionId, _Opts) when is_binary(SessionId) ->
+    #{session_id => SessionId};
+telemetry_scope_meta(#{session_id := _} = Scope, _Opts) ->
+    maps:with([session_id, thread_id], Scope);
+telemetry_scope_meta(_Other, Opts) ->
+    maps:with([thread_id], Opts).
+
+-spec telemetry_result_meta(map()) -> map().
+telemetry_result_meta(Result) ->
+    Base = maps:with([compacted, triggers], Result),
+    case maps:get(scope, Result, undefined) of
+        Scope when is_map(Scope) ->
+            maps:merge(Base, maps:with([session_id, thread_id], Scope));
+        _ ->
+            Base
+    end.
+
+-spec maybe_emit_compaction_transition(map(), map()) -> ok.
+maybe_emit_compaction_transition(#{compacted := true}, Metadata) ->
+    beam_agent_telemetry_core:state_change(context, stable, compacted, Metadata);
+maybe_emit_compaction_transition(_Result, _Metadata) ->
+    ok.
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

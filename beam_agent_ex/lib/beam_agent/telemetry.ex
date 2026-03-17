@@ -33,6 +33,7 @@ defmodule BeamAgent.Telemetry do
   [:beam_agent, :claude, :query, :stop]
   [:beam_agent, :claude, :query, :exception]
   [:beam_agent, :session, :state_change]   # always at this fixed path
+  [:beam_agent, :run, :state_change]       # canonical run lifecycle
   [:beam_agent, :buffer, :overflow]        # always at this fixed path
   ```
 
@@ -103,6 +104,14 @@ defmodule BeamAgent.Telemetry do
   defdelegate span_stop(agent, suffix, start_time), to: :beam_agent_telemetry
 
   @doc """
+  Emit a span stop event with additional metadata.
+
+  Same as `span_stop/3` but merges caller-supplied metadata into the stop event.
+  """
+  @spec span_stop(atom(), atom(), integer(), map()) :: :ok
+  defdelegate span_stop(agent, suffix, start_time, metadata), to: :beam_agent_telemetry
+
+  @doc """
   Emit a span exception event when a unit of work fails.
 
   The event is published at `[:beam_agent, agent, event_suffix, :exception]`.
@@ -115,6 +124,15 @@ defmodule BeamAgent.Telemetry do
   """
   @spec span_exception(atom(), atom(), term()) :: :ok
   defdelegate span_exception(agent, suffix, reason), to: :beam_agent_telemetry
+
+  @doc """
+  Emit a span exception event with additional metadata.
+
+  Same as `span_exception/3` but merges caller-supplied metadata into the
+  emitted exception event.
+  """
+  @spec span_exception(atom(), atom(), term(), map()) :: :ok
+  defdelegate span_exception(agent, suffix, reason, metadata), to: :beam_agent_telemetry
 
   @doc """
   Emit a state change event for a `gen_statem` transition.
@@ -133,6 +151,16 @@ defmodule BeamAgent.Telemetry do
   """
   @spec state_change(atom(), atom(), atom()) :: :ok
   defdelegate state_change(agent, from_state, to_state), to: :beam_agent_telemetry
+
+  @doc """
+  Emit a state change event for a non-session BeamAgent domain.
+
+  The event is published at `[:beam_agent, domain, :state_change]`.
+  Canonical BeamAgent domains such as runs, steps, and routines use this helper
+  to report lifecycle transitions without inventing a second telemetry style.
+  """
+  @spec state_change(atom(), atom(), atom(), map()) :: :ok
+  defdelegate state_change(domain, from_state, to_state, metadata), to: :beam_agent_telemetry
 
   @doc """
   Emit a buffer overflow warning when accumulated transport data exceeds the limit.

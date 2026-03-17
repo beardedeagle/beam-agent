@@ -117,7 +117,10 @@ Scope may be:
         {invalid_scope, atom()} | {invalid_artifact, atom()}}.
 put(Scope, Artifact) when (is_binary(Scope) orelse is_map(Scope)), is_map(Artifact) ->
     ensure_tables(),
-    case normalize_scope(Scope) of
+    TeleMeta = maps:merge(telemetry_scope_meta(Scope),
+        telemetry_artifact_request_meta(Artifact)),
+    StartTime = telemetry_start(put, TeleMeta),
+    Result = case normalize_scope(Scope) of
         {ok, Scope1} ->
             Merged = maps:merge(Artifact, Scope1),
             case normalize_artifact(Merged) of
@@ -132,26 +135,44 @@ put(Scope, Artifact) when (is_binary(Scope) orelse is_map(Scope)), is_map(Artifa
                             {ok, _Entry} = append_artifact_event(<<"artifact_updated">>, Stored, #{
                                 operation => updated
                             }),
-                            {ok, Stored};
+                            {ok, Stored, updated};
                         {error, not_found} ->
                             Stored = build_artifact_record(ArtifactId, Normalized, Now, Now),
                             ok = beam_agent_artifacts_store:put_artifact(Stored),
                             {ok, _Entry} = append_artifact_event(<<"artifact_created">>, Stored, #{
                                 operation => created
                             }),
-                            {ok, Stored}
+                            {ok, Stored, created}
                     end;
                 Error ->
                     Error
             end;
         Error ->
             Error
+    end,
+    case Result of
+        {ok, StoredArtifact, Operation} ->
+            telemetry_stop(put, StartTime, (telemetry_artifact_meta(StoredArtifact))#{
+                operation => Operation
+            }),
+            {ok, StoredArtifact};
+        {error, _} = ErrorResult ->
+            telemetry_exception(put, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc "Fetch an artifact by id.".
 -spec get(binary()) -> {ok, artifact()} | {error, not_found}.
 get(ArtifactId) when is_binary(ArtifactId) ->
-    beam_agent_artifacts_store:get_artifact(ArtifactId).
+    StartTime = telemetry_start(get, #{artifact_id => ArtifactId}),
+    case beam_agent_artifacts_store:get_artifact(ArtifactId) of
+        {ok, Artifact} = Result ->
+            telemetry_stop(get, StartTime, (telemetry_artifact_meta(Artifact))#{found => true}),
+            Result;
+        {error, not_found} = Error ->
+            telemetry_stop(get, StartTime, #{artifact_id => ArtifactId, found => false}),
+            Error
+    end.
 
 -doc "List all artifacts without filters.".
 -spec list() -> {ok, [artifact()]}.
@@ -163,10 +184,20 @@ list() ->
     {ok, [artifact()]} |
     {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 list(Filter) when is_map(Filter) ->
+    TeleMeta = telemetry_filter_meta(Filter),
+    StartTime = telemetry_start(list, TeleMeta),
     case normalize_filter(Filter) of
         {ok, Normalized} ->
-            beam_agent_artifacts_store:list_artifacts(Normalized);
-        Error ->
+            case beam_agent_artifacts_store:list_artifacts(Normalized) of
+                {ok, Artifacts} = Result ->
+                    telemetry_stop(list, StartTime, TeleMeta#{result_count => length(Artifacts)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(list, Error, TeleMeta),
+                    Error
+            end;
+        {error, _} = Error ->
+            telemetry_exception(list, Error, TeleMeta),
             Error
     end.
 
@@ -179,18 +210,27 @@ search(Query) when is_binary(Query) ->
     {ok, [artifact()]} |
     {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 search(Query, Filter) when is_binary(Query), is_map(Filter) ->
+    QueryText = string:trim(Query),
+    LowerTokens = query_tokens(QueryText),
+    TeleMeta = (telemetry_filter_meta(Filter))#{
+        query_length => byte_size(Query),
+        query_token_count => length(LowerTokens)
+    },
+    StartTime = telemetry_start(search, TeleMeta),
     case list(Filter) of
         {ok, Artifacts} ->
-            QueryText = string:trim(Query),
             case QueryText of
                 <<>> ->
+                    telemetry_stop(search, StartTime, TeleMeta#{result_count => length(Artifacts)}),
                     {ok, Artifacts};
                 _ ->
-                    LowerTokens = query_tokens(QueryText),
-                    {ok, [Artifact || Artifact <- Artifacts,
-                        artifact_matches_query(LowerTokens, Artifact)]}
+                    Results = [Artifact || Artifact <- Artifacts,
+                        artifact_matches_query(LowerTokens, Artifact)],
+                    telemetry_stop(search, StartTime, TeleMeta#{result_count => length(Results)}),
+                    {ok, Results}
             end;
-        Error ->
+        {error, _} = Error ->
+            telemetry_exception(search, Error, TeleMeta),
             Error
     end.
 
@@ -206,7 +246,13 @@ artifact's dedicated scope fields stay aligned with its source refs.
 attach(ArtifactId, RefType, RefId)
   when is_binary(ArtifactId), is_binary(RefId),
        (is_atom(RefType) orelse is_binary(RefType)) ->
-    case beam_agent_artifacts_store:get_artifact(ArtifactId) of
+    TeleMeta = #{
+        artifact_id => ArtifactId,
+        source_ref_id => RefId,
+        source_ref_type => RefType
+    },
+    StartTime = telemetry_start(attach, TeleMeta),
+    Result = case beam_agent_artifacts_store:get_artifact(ArtifactId) of
         {ok, Artifact} ->
             case normalize_source_ref(#{type => RefType, id => RefId}) of
                 {ok, Ref} ->
@@ -217,7 +263,7 @@ attach(ArtifactId, RefType, RefId)
                             {ok, _Entry} = append_artifact_event(<<"artifact_attached">>, Updated, #{
                                 source_ref => Ref
                             }),
-                            ok;
+                            {ok, Updated};
                         Error ->
                             Error
                     end;
@@ -226,20 +272,40 @@ attach(ArtifactId, RefType, RefId)
             end;
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        {ok, UpdatedArtifact} ->
+            telemetry_stop(attach, StartTime,
+                maps:merge(TeleMeta, telemetry_artifact_meta(UpdatedArtifact))),
+            ok;
+        {error, _} = ErrorResult ->
+            telemetry_exception(attach, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc "Delete an artifact by id.".
 -spec delete(binary()) -> ok | {error, not_found}.
 delete(ArtifactId) when is_binary(ArtifactId) ->
-    case beam_agent_artifacts_store:get_artifact(ArtifactId) of
+    StartTime = telemetry_start(delete, #{artifact_id => ArtifactId}),
+    Result = case beam_agent_artifacts_store:get_artifact(ArtifactId) of
         {ok, Artifact} ->
             ok = beam_agent_artifacts_store:delete_artifact(ArtifactId),
             {ok, _Entry} = append_artifact_event(<<"artifact_deleted">>, Artifact, #{
                 operation => deleted
             }),
-            ok;
+            {ok, Artifact};
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        {ok, DeletedArtifact} ->
+            telemetry_stop(delete, StartTime, (telemetry_artifact_meta(DeletedArtifact))#{
+                operation => deleted
+            }),
+            ok;
+        {error, _} = ErrorResult ->
+            telemetry_exception(delete, ErrorResult, #{artifact_id => ArtifactId}),
+            ErrorResult
     end.
 
 -spec normalize_scope(scope()) ->
@@ -797,6 +863,44 @@ artifact_journal_payload(Artifact) ->
 -spec artifact_summary(artifact()) -> map().
 artifact_summary(Artifact) ->
     maps:remove(body, Artifact).
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(artifact, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(artifact, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(artifact, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_scope_meta(scope()) -> map().
+telemetry_scope_meta(SessionId) when is_binary(SessionId) ->
+    #{session_id => SessionId};
+telemetry_scope_meta(Scope) when is_map(Scope) ->
+    maps:with([session_id, thread_id, run_id], Scope);
+telemetry_scope_meta(_Other) ->
+    #{}.
+
+-spec telemetry_artifact_request_meta(map()) -> map().
+telemetry_artifact_request_meta(Artifact) ->
+    maps:with([artifact_id, kind, format, session_id, thread_id, run_id], Artifact).
+
+-spec telemetry_filter_meta(map()) -> map().
+telemetry_filter_meta(Filter) ->
+    maps:with([artifact_id, kind, format, session_id, thread_id, run_id, limit], Filter).
+
+-spec telemetry_artifact_meta(artifact()) -> map().
+telemetry_artifact_meta(Artifact) ->
+    maps:with([artifact_id, kind, format, session_id, thread_id, run_id], Artifact).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->

@@ -138,7 +138,9 @@ session/thread scope unless the caller provides matching explicit values.
         {invalid_run_opt, atom()}}.
 start_run(Scope, Opts) when (is_binary(Scope) orelse is_map(Scope)), is_map(Opts) ->
     ensure_tables(),
-    case normalize_scope(Scope) of
+    TeleMeta = telemetry_scope_meta(Scope),
+    StartTime = telemetry_start(run, start_run, telemetry_run_request_meta(Opts, TeleMeta)),
+    Result = case normalize_scope(Scope) of
         {ok, Scope1} ->
             case normalize_run_opts(Opts) of
                 {ok, Opts1} ->
@@ -157,6 +159,7 @@ start_run(Scope, Opts) when (is_binary(Scope) orelse is_map(Scope)), is_map(Opts
                     case beam_agent_runs_store:insert_run(Run2) of
                         true ->
                             {ok, _Entry} = append_run_event(<<"run_started">>, Run2),
+                            emit_state_change(run, created, running, telemetry_run_meta(Run2)),
                             {ok, Run2};
                         false -> {error, already_exists}
                     end;
@@ -165,7 +168,9 @@ start_run(Scope, Opts) when (is_binary(Scope) orelse is_map(Scope)), is_map(Opts
             end;
         Error ->
             Error
-    end.
+    end,
+    telemetry_finish(run, start_run, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Fetch a run by id.".
 -spec get_run(binary()) -> {ok, run()} | {error, not_found}.
@@ -210,7 +215,9 @@ step state.
     {error, not_found | active_steps |
         {invalid_status_transition, run_status(), completed}}.
 complete_run(RunId, Result) when is_binary(RunId) ->
-    case beam_agent_runs_store:get_run(RunId) of
+    TeleMeta = #{run_id => RunId},
+    StartTime = telemetry_start(run, complete_run, TeleMeta),
+    Outcome = case beam_agent_runs_store:get_run(RunId) of
         {ok, Run} ->
             case ensure_run_transition(Run, completed) of
                 ok ->
@@ -221,6 +228,8 @@ complete_run(RunId, Result) when is_binary(RunId) ->
                                 undefined, Now),
                             ok = beam_agent_runs_store:put_run(Updated),
                             {ok, _Entry} = append_run_event(<<"run_completed">>, Updated),
+                            emit_state_change(run, maps:get(status, Run), completed,
+                                telemetry_run_meta(Updated)),
                             {ok, Updated};
                         [_ | _] ->
                             {error, active_steps}
@@ -230,7 +239,9 @@ complete_run(RunId, Result) when is_binary(RunId) ->
             end;
         Error ->
             Error
-    end.
+    end,
+    telemetry_finish(run, complete_run, StartTime, Outcome, TeleMeta),
+    Outcome.
 
 -doc "Fail a running run and cascade failure to active steps.".
 -spec fail_run(binary(), term()) ->
@@ -262,7 +273,9 @@ while the run itself is still running.
         {unsupported_step_opt, atom()} | {invalid_step_opt, atom()}}.
 start_step(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
     ensure_tables(),
-    case beam_agent_runs_store:get_run(RunId) of
+    TeleMeta = telemetry_step_request_meta(RunId, Opts),
+    StartTime = telemetry_start(step, start_step, TeleMeta),
+    Result = case beam_agent_runs_store:get_run(RunId) of
         {ok, Run} ->
             case maps:get(status, Run) of
                 running ->
@@ -285,6 +298,8 @@ start_step(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
                                 true ->
                                     ok = touch_run(Run, Now),
                                     {ok, _Entry} = append_step_event(<<"step_started">>, Step2),
+                                    emit_state_change(step, created, running,
+                                        telemetry_step_meta(Step2)),
                                     {ok, Step2};
                                 false ->
                                     {error, already_exists}
@@ -297,7 +312,9 @@ start_step(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
             end;
         Error ->
             Error
-    end.
+    end,
+    telemetry_finish(step, start_step, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Fetch a step by run id and step id.".
 -spec get_step(binary(), binary()) -> {ok, step()} | {error, not_found}.
@@ -511,7 +528,10 @@ normalize_run_filter(Filter) ->
     {ok, run()} |
     {error, not_found | {invalid_status_transition, run_status(), failed | cancelled}}.
 transition_run_with_step_cascade(RunId, TargetStatus, Payload) ->
-    case beam_agent_runs_store:get_run(RunId) of
+    TeleMeta = #{run_id => RunId, target_status => TargetStatus},
+    Operation = run_transition_operation(TargetStatus),
+    StartTime = telemetry_start(run, Operation, TeleMeta),
+    Result = case beam_agent_runs_store:get_run(RunId) of
         {ok, Run} ->
             case ensure_run_transition(Run, TargetStatus) of
                 ok ->
@@ -521,20 +541,27 @@ transition_run_with_step_cascade(RunId, TargetStatus, Payload) ->
                         Payload, Now),
                     ok = beam_agent_runs_store:put_run(Updated),
                     {ok, _Entry} = append_run_event(run_event_type(TargetStatus), Updated),
+                    emit_state_change(run, maps:get(status, Run), TargetStatus,
+                        telemetry_run_meta(Updated)),
                     {ok, Updated};
                 Error ->
                     Error
             end;
         Error ->
             Error
-    end.
+    end,
+    telemetry_finish(run, Operation, StartTime, Result, TeleMeta),
+    Result.
 
 -spec transition_step(binary(), binary(), completed | failed | cancelled, term()) ->
     {ok, step()} |
     {error, not_found | {invalid_status_transition, step_status(),
         completed | failed | cancelled}}.
 transition_step(RunId, StepId, TargetStatus, Payload) ->
-    case beam_agent_runs_store:get_step(RunId, StepId) of
+    TeleMeta = #{run_id => RunId, step_id => StepId, target_status => TargetStatus},
+    Operation = step_transition_operation(TargetStatus),
+    StartTime = telemetry_start(step, Operation, TeleMeta),
+    Result = case beam_agent_runs_store:get_step(RunId, StepId) of
         {ok, Step} ->
             case ensure_step_transition(Step, TargetStatus) of
                 ok ->
@@ -543,13 +570,17 @@ transition_step(RunId, StepId, TargetStatus, Payload) ->
                     ok = beam_agent_runs_store:put_step(Updated),
                     ok = touch_run_id(RunId, Now),
                     {ok, _Entry} = append_step_event(step_event_type(TargetStatus), Updated),
+                    emit_state_change(step, maps:get(status, Step), TargetStatus,
+                        telemetry_step_meta(Updated)),
                     {ok, Updated};
                 Error ->
                     Error
             end;
         Error ->
             Error
-    end.
+    end,
+    telemetry_finish(step, Operation, StartTime, Result, TeleMeta),
+    Result.
 
 -spec ensure_run_transition(run(), completed | failed | cancelled) ->
     ok | {error, {invalid_status_transition, run_status(), completed | failed | cancelled}}.
@@ -869,3 +900,83 @@ append_step_event(EventType, Step) ->
     Event1 = maybe_put(session_id, maps:get(session_id, Step, undefined), Event0),
     Event2 = maybe_put(thread_id, maps:get(thread_id, Step, undefined), Event1),
     beam_agent_journal_core:append(EventType, Event2).
+
+-spec telemetry_scope_meta(scope()) -> map().
+telemetry_scope_meta(SessionId) when is_binary(SessionId) ->
+    #{session_id => SessionId};
+telemetry_scope_meta(Scope) when is_map(Scope) ->
+    maps:with([session_id, thread_id, parent_run_id], Scope);
+telemetry_scope_meta(_Other) ->
+    #{}.
+
+-spec telemetry_run_request_meta(map(), map()) -> map().
+telemetry_run_request_meta(Opts, ScopeMeta) ->
+    ScopeMeta#{
+        requested_kind => maps:get(kind, Opts, undefined),
+        run_id => maps:get(run_id, Opts, undefined)
+    }.
+
+-spec telemetry_step_request_meta(binary(), map()) -> map().
+telemetry_step_request_meta(RunId, Opts) ->
+    #{
+        run_id => RunId,
+        requested_kind => maps:get(kind, Opts, undefined),
+        step_id => maps:get(step_id, Opts, undefined)
+    }.
+
+-spec telemetry_run_meta(run()) -> map().
+telemetry_run_meta(Run) ->
+    #{
+        run_id => maps:get(run_id, Run),
+        kind => maps:get(kind, Run),
+        status => maps:get(status, Run)
+    }.
+
+-spec telemetry_step_meta(step()) -> map().
+telemetry_step_meta(Step) ->
+    #{
+        run_id => maps:get(run_id, Step),
+        step_id => maps:get(step_id, Step),
+        kind => maps:get(kind, Step),
+        status => maps:get(status, Step)
+    }.
+
+-spec run_transition_operation(completed | failed | cancelled) ->
+    complete_run | fail_run | cancel_run.
+run_transition_operation(completed) -> complete_run;
+run_transition_operation(failed) -> fail_run;
+run_transition_operation(cancelled) -> cancel_run.
+
+-spec step_transition_operation(completed | failed | cancelled) ->
+    complete_step | fail_step | cancel_step.
+step_transition_operation(completed) -> complete_step;
+step_transition_operation(failed) -> fail_step;
+step_transition_operation(cancelled) -> cancel_step.
+
+-spec telemetry_start(atom(), atom(), map()) -> integer().
+telemetry_start(Domain, Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(Domain, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_finish(atom(), atom(), term(), map(), map()) -> ok.
+telemetry_finish(Domain, Operation, StartTime, {ok, Value}, Metadata) when is_map(Value) ->
+    beam_agent_telemetry_core:span_stop(Domain, Operation, StartTime,
+        compact_telemetry(maps:merge(Metadata, success_telemetry(Value))));
+telemetry_finish(Domain, Operation, StartTime, {ok, _Value}, Metadata) ->
+    beam_agent_telemetry_core:span_stop(Domain, Operation, StartTime,
+        compact_telemetry(Metadata));
+telemetry_finish(Domain, Operation, _StartTime, {error, Reason}, Metadata) ->
+    beam_agent_telemetry_core:span_exception(Domain, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec emit_state_change(atom(), atom(), atom(), map()) -> ok.
+emit_state_change(Domain, FromState, ToState, Metadata) ->
+    beam_agent_telemetry_core:state_change(Domain, FromState, ToState,
+        compact_telemetry(Metadata)).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
+
+-spec success_telemetry(map()) -> map().
+success_telemetry(Value) ->
+    maps:with([run_id, step_id, session_id, thread_id, kind, status], Value).

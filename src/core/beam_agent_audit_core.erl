@@ -48,7 +48,10 @@ Record a normalized audit event in the durable journal.
     {ok, audit_event()} | {error, term()}.
 record(Category, Action, Scope, Details)
   when is_map(Scope), is_map(Details) ->
-    case {normalize_term(Category, invalid_category),
+    TeleMeta = maps:merge(maps:with([session_id, thread_id, run_id, profile_id], Scope),
+        #{category => Category, action => Action}),
+    StartTime = telemetry_start(record, TeleMeta),
+    Result = case {normalize_term(Category, invalid_category),
           normalize_term(Action, invalid_action),
           normalize_scope(Scope)} of
         {{ok, Category1}, {ok, Action1}, {ok, NormalizedScope}} ->
@@ -75,6 +78,16 @@ record(Category, Action, Scope, Details)
             Error;
         {_, _, {error, _} = Error} ->
             Error
+    end,
+    case Result of
+        {ok, AuditEntry} ->
+            telemetry_stop(record, StartTime, TeleMeta#{
+                event_id => maps:get(event_id, AuditEntry, undefined)
+            }),
+            Result;
+        {error, _} = ErrorResult ->
+            telemetry_exception(record, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc "List all audit events, oldest first.".
@@ -85,28 +98,43 @@ list_events() ->
 -doc "List audit events with exact-match filters.".
 -spec list_events(audit_filter()) -> {ok, [audit_event()]} | {error, term()}.
 list_events(FilterInput) when is_map(FilterInput) ->
+    TeleMeta = maps:with([event_id, session_id, thread_id, run_id, category, action,
+        decision, profile_id, since, limit], FilterInput),
+    StartTime = telemetry_start(list_events, TeleMeta),
     case normalize_filter(FilterInput) of
         {ok, Filter, JournalFilter} ->
             case beam_agent_journal_core:list(JournalFilter#{tag => audit}) of
                 {ok, Entries} ->
-                    {ok, [Entry || Entry <- Entries, matches_filter(Entry, Filter)]};
-                {error, _} = Error ->
-                    Error
+                    Results = [Entry || Entry <- Entries, matches_filter(Entry, Filter)],
+                    telemetry_stop(list_events, StartTime, TeleMeta#{
+                        result_count => length(Results)
+                    }),
+                    {ok, Results};
+                {error, _} = ListError ->
+                    telemetry_exception(list_events, ListError, TeleMeta),
+                    ListError
             end;
-        {error, _} = Error ->
-            Error
+        {error, _} = FilterError ->
+            telemetry_exception(list_events, FilterError, TeleMeta),
+            FilterError
     end.
 
 -doc "Fetch an audit event by event id.".
 -spec get_event(binary()) -> {ok, audit_event()} | {error, not_found}.
 get_event(EventId) when is_binary(EventId) ->
+    StartTime = telemetry_start(get_event, #{event_id => EventId}),
     case beam_agent_journal_core:get(EventId) of
         {ok, Entry} ->
             case is_audit_entry(Entry) of
-                true -> {ok, Entry};
-                false -> {error, not_found}
+                true ->
+                    telemetry_stop(get_event, StartTime, #{event_id => EventId, found => true}),
+                    {ok, Entry};
+                false ->
+                    telemetry_stop(get_event, StartTime, #{event_id => EventId, found => false}),
+                    {error, not_found}
             end;
         {error, not_found} ->
+            telemetry_stop(get_event, StartTime, #{event_id => EventId, found => false}),
             {error, not_found}
     end.
 
@@ -192,3 +220,21 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(audit, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(audit, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(audit, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

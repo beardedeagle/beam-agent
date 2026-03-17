@@ -314,6 +314,41 @@ state_change_event_name_is_fixed_test() ->
     end,
     telemetry:detach(HandlerId).
 
+domain_state_change_emits_domain_scoped_event_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = <<"test_domain_state_change_event">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, run, state_change],
+        fun(EventName, Measurements, Metadata, _Config) ->
+            Self ! {telemetry_event, EventName, Measurements, Metadata}
+        end,
+        []),
+    ok = beam_agent_telemetry_core:state_change(run, created, running, #{run_id => <<"r1">>}),
+    receive
+        {telemetry_event, EventName, Measurements, Metadata} ->
+            ?assertEqual([beam_agent, run, state_change], EventName),
+            ?assert(is_integer(maps:get(system_time, Measurements))),
+            ?assertEqual(run, maps:get(agent, Metadata)),
+            ?assertEqual(created, maps:get(from_state, Metadata)),
+            ?assertEqual(running, maps:get(to_state, Metadata)),
+            ?assertEqual(<<"r1">>, maps:get(run_id, Metadata))
+    after 1000 ->
+        ?assert(false)
+    end,
+    telemetry:detach(HandlerId).
+
+domain_state_change_returns_ok_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    HandlerId = <<"test_domain_state_change_returns_ok">>,
+    telemetry:attach(HandlerId,
+        [beam_agent, routine, state_change],
+        fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
+        []),
+    Result = beam_agent_telemetry_core:state_change(routine, active, running, #{}),
+    ?assertEqual(ok, Result),
+    telemetry:detach(HandlerId).
+
 %%====================================================================
 %% buffer_overflow/2 tests
 %%====================================================================

@@ -92,18 +92,26 @@ clear() ->
 -spec remember(binary() | scope(), memory_input()) ->
     {ok, memory_record()} | {error, term()}.
 remember(ScopeInput, MemoryInput) ->
-    case normalize_memory_input(undefined, MemoryInput) of
+    TeleMeta = maps:merge(telemetry_scope_meta(ScopeInput),
+        telemetry_memory_request_meta(MemoryInput)),
+    StartTime = telemetry_start(remember, TeleMeta),
+    Result = case normalize_memory_input(undefined, MemoryInput) of
         {ok, Input, EmbeddedScope} ->
             remember_normalized(ScopeInput, EmbeddedScope, Input);
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(remember, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Remember content with an explicit kind on a scope.".
 -spec remember(binary() | scope(), memory_kind(), memory_input()) ->
     {ok, memory_record()} | {error, term()}.
 remember(ScopeInput, Kind, MemoryInput) when is_atom(Kind); is_binary(Kind) ->
-    case normalize_kind(kind, Kind, invalid_memory) of
+    TeleMeta = maps:merge(telemetry_scope_meta(ScopeInput),
+        (telemetry_memory_request_meta(MemoryInput))#{requested_kind => Kind}),
+    StartTime = telemetry_start(remember, TeleMeta),
+    Result = case normalize_kind(kind, Kind, invalid_memory) of
         {ok, NormalizedKind} ->
             case normalize_memory_input(NormalizedKind, MemoryInput) of
                 {ok, Input, EmbeddedScope} ->
@@ -113,12 +121,22 @@ remember(ScopeInput, Kind, MemoryInput) when is_atom(Kind); is_binary(Kind) ->
             end;
         {error, _Reason} ->
             {error, {invalid_memory, kind}}
-    end.
+    end,
+    telemetry_finish(remember, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Fetch a memory record by id.".
 -spec get(binary()) -> {ok, memory_record()} | {error, not_found}.
 get(MemoryId) when is_binary(MemoryId) ->
-    beam_agent_memory_store:get_memory(MemoryId).
+    StartTime = telemetry_start(get, #{memory_id => MemoryId}),
+    case beam_agent_memory_store:get_memory(MemoryId) of
+        {ok, Memory} = Result ->
+            telemetry_stop(get, StartTime, (telemetry_memory_meta(Memory))#{found => true}),
+            Result;
+        {error, not_found} = Error ->
+            telemetry_stop(get, StartTime, #{memory_id => MemoryId, found => false}),
+            Error
+    end.
 
 -doc "List all non-expired memories.".
 -spec list() -> {ok, [memory_record()]}.
@@ -128,10 +146,21 @@ list() ->
 -doc "List memories with exact-match filters and optional visibility controls.".
 -spec list(memory_filter()) -> {ok, [memory_record()]} | {error, term()}.
 list(FilterInput) when is_map(FilterInput) ->
+    TeleMeta = telemetry_filter_meta(FilterInput),
+    StartTime = telemetry_start(list, TeleMeta),
     case normalize_filter(FilterInput) of
         {ok, Normalized} ->
-            do_list(Normalized);
+            case do_list(Normalized) of
+                {ok, Memories} = Result ->
+                    telemetry_stop(list, StartTime,
+                        TeleMeta#{result_count => length(Memories)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(list, Error, TeleMeta),
+                    Error
+            end;
         {error, _} = Error ->
+            telemetry_exception(list, Error, TeleMeta),
             Error
     end.
 
@@ -155,17 +184,32 @@ search(Query) when is_binary(Query) ->
 -spec search(binary(), memory_filter()) ->
     {ok, [memory_record()]} | {error, term()}.
 search(Query, FilterInput) when is_binary(Query), is_map(FilterInput) ->
+    TeleMeta = (telemetry_filter_meta(FilterInput))#{
+        query_length => byte_size(Query),
+        query_token_count => length(tokenize(Query))
+    },
+    StartTime = telemetry_start(search, TeleMeta),
     case normalize_filter(FilterInput) of
         {ok, Normalized} ->
-            do_search(Query, Normalized);
+            case do_search(Query, Normalized) of
+                {ok, Memories} = Result ->
+                    telemetry_stop(search, StartTime,
+                        TeleMeta#{result_count => length(Memories)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(search, Error, TeleMeta),
+                    Error
+            end;
         {error, _} = Error ->
+            telemetry_exception(search, Error, TeleMeta),
             Error
     end.
 
 -doc "Forget a memory by id.".
 -spec forget(binary()) -> ok | {error, not_found}.
 forget(MemoryId) when is_binary(MemoryId) ->
-    case beam_agent_memory_store:get_memory(MemoryId) of
+    StartTime = telemetry_start(forget, #{memory_id => MemoryId}),
+    Result = case beam_agent_memory_store:get_memory(MemoryId) of
         {ok, Memory} ->
             ok = beam_agent_memory_store:delete_memory(MemoryId),
             {ok, _Entry} = append_memory_event(<<"memory_forgotten">>, Memory, #{}),
@@ -173,6 +217,14 @@ forget(MemoryId) when is_binary(MemoryId) ->
             ok;
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        ok ->
+            telemetry_stop(forget, StartTime, #{memory_id => MemoryId}),
+            ok;
+        {error, not_found} = ErrorResult ->
+            telemetry_stop(forget, StartTime, #{memory_id => MemoryId, found => false}),
+            ErrorResult
     end.
 
 -doc "Pin a memory to keep it visible regardless of TTL expiry.".
@@ -193,7 +245,9 @@ expire() ->
 -doc "Expire currently expired, unpinned memories matching a filter.".
 -spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, term()}.
 expire(FilterInput) when is_map(FilterInput) ->
-    case normalize_filter(FilterInput) of
+    TeleMeta = telemetry_filter_meta(FilterInput),
+    StartTime = telemetry_start(expire, TeleMeta),
+    Result = case normalize_filter(FilterInput) of
         {ok, Normalized} ->
             Now = maps:get(before, Normalized, current_time_ms()),
             BaseFilter = maps:remove(before, maps:remove(limit, Normalized)),
@@ -210,6 +264,14 @@ expire(FilterInput) when is_map(FilterInput) ->
             {ok, length(Expirable)};
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        {ok, Count} ->
+            telemetry_stop(expire, StartTime, TeleMeta#{expired_count => Count}),
+            Result;
+        {error, _} = ErrorResult ->
+            telemetry_exception(expire, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 %%--------------------------------------------------------------------
@@ -296,7 +358,12 @@ do_search(Query, Filter) ->
 
 -spec update_pinned(binary(), boolean(), binary()) -> ok | {error, not_found}.
 update_pinned(MemoryId, DesiredPinned, EventType) ->
-    case beam_agent_memory_store:get_memory(MemoryId) of
+    Operation = case DesiredPinned of
+        true -> pin;
+        false -> unpin
+    end,
+    StartTime = telemetry_start(Operation, #{memory_id => MemoryId}),
+    Result = case beam_agent_memory_store:get_memory(MemoryId) of
         {ok, Memory} ->
             case maps:get(pinned, Memory, false) of
                 DesiredPinned ->
@@ -318,6 +385,14 @@ update_pinned(MemoryId, DesiredPinned, EventType) ->
             end;
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        ok ->
+            telemetry_stop(Operation, StartTime, #{memory_id => MemoryId, pinned => DesiredPinned}),
+            ok;
+        {error, not_found} = ErrorResult ->
+            telemetry_stop(Operation, StartTime, #{memory_id => MemoryId, found => false}),
+            ErrorResult
     end.
 
 -spec normalize_scope_input(binary() | scope()) -> {ok, scope()} | {error, term()}.
@@ -1091,6 +1166,54 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(memory, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(memory, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(memory, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_finish(atom(), integer(), {ok, memory_record()} | {error, term()}, map()) -> ok.
+telemetry_finish(Operation, StartTime, {ok, Memory}, Metadata) ->
+    telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_memory_meta(Memory)));
+telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
+    telemetry_exception(Operation, Reason, Metadata).
+
+-spec telemetry_scope_meta(binary() | scope()) -> map().
+telemetry_scope_meta(SessionId) when is_binary(SessionId) ->
+    #{session_id => SessionId};
+telemetry_scope_meta(Scope) when is_map(Scope) ->
+    maps:with([session_id, thread_id, run_id], Scope);
+telemetry_scope_meta(_Other) ->
+    #{}.
+
+-spec telemetry_memory_request_meta(memory_input()) -> map().
+telemetry_memory_request_meta(Input) when is_binary(Input) ->
+    #{content_type => binary};
+telemetry_memory_request_meta(Input) when is_map(Input) ->
+    maps:with([memory_id, kind, session_id, thread_id, run_id], Input);
+telemetry_memory_request_meta(_Other) ->
+    #{}.
+
+-spec telemetry_filter_meta(map()) -> map().
+telemetry_filter_meta(Filter) ->
+    maps:with([memory_id, kind, session_id, thread_id, run_id, pinned, limit], Filter).
+
+-spec telemetry_memory_meta(memory_record()) -> map().
+telemetry_memory_meta(Memory) ->
+    maps:with([memory_id, kind, session_id, thread_id, run_id, pinned, salience], Memory).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
 -spec consistent_scope(term(), term()) -> boolean().
 consistent_scope(undefined, _Value) -> true;

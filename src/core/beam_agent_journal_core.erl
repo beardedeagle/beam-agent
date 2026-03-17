@@ -91,7 +91,9 @@ Append a normalized BeamAgent domain event to the durable journal.
         {invalid_event, atom()}}.
 append(EventType, Event) when is_map(Event) ->
     ensure_tables(),
-    case normalize_event_type(EventType) of
+    TeleMeta = telemetry_event_meta(EventType, Event),
+    StartTime = telemetry_start(append, TeleMeta),
+    Result = case normalize_event_type(EventType) of
         ok ->
             case normalize_event(Event) of
                 {ok, Normalized} ->
@@ -122,6 +124,14 @@ append(EventType, Event) when is_map(Event) ->
             end;
         Error ->
             Error
+    end,
+    case Result of
+        {ok, JournalEntry} ->
+            telemetry_stop(append, StartTime, telemetry_entry_meta(JournalEntry)),
+            {ok, JournalEntry};
+        {error, _} = ErrorResult ->
+            telemetry_exception(append, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc "List all journal entries, oldest first.".
@@ -146,10 +156,20 @@ Supported filters:
     {ok, [entry()]} |
     {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 list(Filter) when is_map(Filter) ->
+    TeleMeta = telemetry_filter_meta(Filter),
+    StartTime = telemetry_start(list, TeleMeta),
     case normalize_filter(Filter) of
         {ok, Normalized} ->
-            beam_agent_journal_store:list_events(Normalized);
-        Error ->
+            case beam_agent_journal_store:list_events(Normalized) of
+                {ok, Entries} = Result ->
+                    telemetry_stop(list, StartTime, TeleMeta#{result_count => length(Entries)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(list, Error, TeleMeta),
+                    Error
+            end;
+        {error, _} = Error ->
+            telemetry_exception(list, Error, TeleMeta),
             Error
     end.
 
@@ -171,10 +191,21 @@ The cursor is the `sequence` field from the last seen journal entry. Passing
     {error, {invalid_cursor, term()} | {unsupported_filter, atom()} |
         {invalid_filter, atom()}}.
 stream_from(Cursor, Filter) when is_integer(Cursor), Cursor >= 0, is_map(Filter) ->
+    TeleMeta = (telemetry_filter_meta(Filter))#{cursor => Cursor},
+    StartTime = telemetry_start(stream_from, TeleMeta),
     case normalize_filter(Filter) of
         {ok, Normalized} ->
-            beam_agent_journal_store:list_events(Normalized#{after_sequence => Cursor});
-        Error ->
+            case beam_agent_journal_store:list_events(Normalized#{after_sequence => Cursor}) of
+                {ok, Entries} = Result ->
+                    telemetry_stop(stream_from, StartTime,
+                        TeleMeta#{result_count => length(Entries)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(stream_from, Error, TeleMeta),
+                    Error
+            end;
+        {error, _} = Error ->
+            telemetry_exception(stream_from, Error, TeleMeta),
             Error
     end;
 stream_from(Cursor, _Filter) ->
@@ -183,16 +214,33 @@ stream_from(Cursor, _Filter) ->
 -doc "Fetch a journal entry by id.".
 -spec get(binary()) -> {ok, entry()} | {error, not_found}.
 get(EventId) when is_binary(EventId) ->
-    beam_agent_journal_store:get_event(EventId).
+    StartTime = telemetry_start(get, #{event_id => EventId}),
+    case beam_agent_journal_store:get_event(EventId) of
+        {ok, Entry} = Result ->
+            telemetry_stop(get, StartTime, (telemetry_entry_meta(Entry))#{found => true}),
+            Result;
+        {error, not_found} = Error ->
+            telemetry_stop(get, StartTime, #{event_id => EventId, found => false}),
+            Error
+    end.
 
 -doc "Acknowledge a journal entry for a consumer id. Idempotent.".
 -spec ack(binary(), binary()) -> ok | {error, not_found}.
 ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
-    beam_agent_journal_store:ack_event(
+    StartTime = telemetry_start(ack, #{consumer_id => ConsumerId, event_id => EventId}),
+    case beam_agent_journal_store:ack_event(
         ConsumerId,
         EventId,
         erlang:system_time(millisecond)
-    ).
+    ) of
+        ok = Result ->
+            telemetry_stop(ack, StartTime, #{consumer_id => ConsumerId, event_id => EventId}),
+            Result;
+        {error, not_found} = Error ->
+            telemetry_stop(ack, StartTime,
+                #{consumer_id => ConsumerId, event_id => EventId, found => false}),
+            Error
+    end.
 
 -spec normalize_event_type(term()) -> ok | {error, {invalid_event_type, term()}}.
 normalize_event_type(EventType) when is_atom(EventType) ->
@@ -517,6 +565,37 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(journal, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(journal, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(journal, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_event_meta(event_type(), map()) -> map().
+telemetry_event_meta(EventType, Event) ->
+    maps:merge(#{event_type => EventType},
+        maps:with([event_id, session_id, thread_id, run_id], Event)).
+
+-spec telemetry_filter_meta(map()) -> map().
+telemetry_filter_meta(Filter) ->
+    maps:with([event_id, event_type, session_id, thread_id, run_id, since, limit], Filter).
+
+-spec telemetry_entry_meta(entry()) -> map().
+telemetry_entry_meta(Entry) ->
+    maps:with([event_id, event_type, sequence, session_id, thread_id, run_id], Entry).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
 -spec generate_event_id() -> binary().
 generate_event_id() ->

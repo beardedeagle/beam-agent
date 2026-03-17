@@ -213,7 +213,9 @@ clear() ->
 create(JobInput) when is_map(JobInput) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    case normalize_job_input(JobInput, Now) of
+    TeleMeta = telemetry_job_input_meta(JobInput),
+    StartTime = telemetry_start(create, TeleMeta),
+    Result = case normalize_job_input(JobInput, Now) of
         {ok, Normalized} ->
             case evaluate_routine_policy(Normalized) of
                 allow ->
@@ -252,7 +254,9 @@ create(JobInput) when is_map(JobInput) ->
             end;
         {error, _} = Error ->
             Error
-    end.
+    end,
+    telemetry_finish(create, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Update a routine job. Busy or terminal jobs reject mutable updates.".
 -spec update(binary(), job_patch()) ->
@@ -264,7 +268,9 @@ create(JobInput) when is_map(JobInput) ->
         {invalid_patch, atom()}}.
 update(JobId, Patch) when is_binary(JobId), is_map(Patch) ->
     ensure_tables(),
-    case beam_agent_routines_store:get_job(JobId) of
+    TeleMeta = telemetry_patch_meta(JobId, Patch),
+    StartTime = telemetry_start(update, TeleMeta),
+    Result = case beam_agent_routines_store:get_job(JobId) of
         {ok, Job} ->
             case allow_update(maps:get(state, Job)) of
                 ok ->
@@ -289,13 +295,16 @@ update(JobId, Patch) when is_binary(JobId), is_map(Patch) ->
             end;
         {error, not_found} ->
             {error, not_found}
-    end.
+    end,
+    telemetry_finish(update, StartTime, Result, TeleMeta),
+    Result.
 
 -doc "Cancel a routine job and cancel any currently active canonical run.".
 -spec cancel(binary()) -> ok | {error, not_found}.
 cancel(JobId) when is_binary(JobId) ->
     ensure_tables(),
-    case beam_agent_routines_store:get_job(JobId) of
+    StartTime = telemetry_start(cancel, #{job_id => JobId}),
+    Result = case beam_agent_routines_store:get_job(JobId) of
         {ok, Job} ->
             maybe_cancel_current_run(Job),
             Now = erlang:system_time(millisecond),
@@ -314,6 +323,14 @@ cancel(JobId) when is_binary(JobId) ->
             ok;
         {error, not_found} ->
             {error, not_found}
+    end,
+    case Result of
+        ok ->
+            telemetry_stop(cancel, StartTime, #{job_id => JobId, state => cancelled}),
+            ok;
+        {error, not_found} = ErrorResult ->
+            telemetry_stop(cancel, StartTime, #{job_id => JobId, found => false}),
+            ErrorResult
     end.
 
 -doc "Fetch a routine job by id.".
@@ -355,10 +372,21 @@ list_due() ->
 -spec list_due(due_filter()) -> {ok, [job_record()]} | {error, term()}.
 list_due(Filter) when is_map(Filter) ->
     Now = maps:get(at, Filter, erlang:system_time(millisecond)),
+    TeleMeta = telemetry_due_filter_meta(Filter, Now),
+    StartTime = telemetry_start(list_due, TeleMeta),
     case normalize_due_filter(Filter, Now) of
         {ok, Normalized} ->
-            beam_agent_routines_store:list_due_jobs(Now, Normalized);
+            case beam_agent_routines_store:list_due_jobs(Now, Normalized) of
+                {ok, Jobs} = Result ->
+                    telemetry_stop(list_due, StartTime,
+                        TeleMeta#{result_count => length(Jobs)}),
+                    Result;
+                {error, _} = Error ->
+                    telemetry_exception(list_due, Error, TeleMeta),
+                    Error
+            end;
         {error, _} = Error ->
+            telemetry_exception(list_due, Error, TeleMeta),
             Error
     end.
 
@@ -1224,3 +1252,43 @@ session_target_is_routed(_) ->
 -spec any_runner() -> binary().
 any_runner() ->
     <<"__any_runner__">>.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(routine, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_finish(atom(), integer(), {ok, map()} | {error, term()}, map()) -> ok.
+telemetry_finish(Operation, StartTime, {ok, Job}, Metadata) ->
+    telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_job_meta(Job)));
+telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
+    telemetry_exception(Operation, Reason, Metadata).
+
+-spec telemetry_job_input_meta(map()) -> map().
+telemetry_job_input_meta(JobInput) ->
+    maps:with([job_id, idempotency_key, next_run_at, state], JobInput).
+
+-spec telemetry_patch_meta(binary(), map()) -> map().
+telemetry_patch_meta(JobId, Patch) ->
+    (maps:with([state, next_run_at], Patch))#{job_id => JobId}.
+
+-spec telemetry_due_filter_meta(map(), integer()) -> map().
+telemetry_due_filter_meta(Filter, Now) ->
+    (maps:with([limit, due_before], Filter))#{at => Now}.
+
+-spec telemetry_job_meta(map()) -> map().
+telemetry_job_meta(Job) ->
+    maps:with([job_id, state, next_run_at, attempt_count, last_run_id], Job).
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

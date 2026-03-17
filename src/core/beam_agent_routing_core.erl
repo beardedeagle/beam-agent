@@ -132,7 +132,9 @@ Supported request keys:
     {error, term()}.
 select_backend(RouteRequest) when is_map(RouteRequest) ->
     ensure_tables(),
-    case normalize_request(RouteRequest) of
+    TeleMeta = telemetry_request_meta(RouteRequest),
+    StartTime = telemetry_start(select_backend, TeleMeta),
+    Result = case normalize_request(RouteRequest) of
         {ok, Normalized} ->
             case choose_backend(Normalized) of
                 {ok, Decision0} ->
@@ -143,16 +145,27 @@ select_backend(RouteRequest) when is_map(RouteRequest) ->
                             ok = persist_decision(Normalized, Decision),
                             _ = append_routing_event(Normalized, Decision),
                             ok = audit_routing_decision(Normalized, Decision, allow, undefined),
-                            {ok, Decision};
+                            {ok, Decision, allow};
                         {deny, Reason} ->
                             ok = audit_routing_decision(Normalized, Decision, deny, Reason),
-                            {error, {policy_denied, Reason}}
+                            {ok, Decision, {deny, Reason}}
                     end;
                 {error, _} = Error ->
                     Error
             end;
         {error, _} = Error ->
             Error
+    end,
+    case Result of
+        {ok, DecisionMap, DecisionResult} ->
+            telemetry_stop(select_backend, StartTime,
+                (telemetry_decision_meta(DecisionMap))#{
+                    decision => DecisionResult
+                }),
+            {ok, DecisionMap};
+        {error, _} = ErrorResult ->
+            telemetry_exception(select_backend, ErrorResult, TeleMeta),
+            ErrorResult
     end.
 
 -doc """
@@ -864,3 +877,36 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-spec telemetry_start(atom(), map()) -> integer().
+telemetry_start(Operation, Metadata) ->
+    beam_agent_telemetry_core:span_start(routing, Operation, compact_telemetry(Metadata)).
+
+-spec telemetry_stop(atom(), integer(), map()) -> ok.
+telemetry_stop(Operation, StartTime, Metadata) ->
+    beam_agent_telemetry_core:span_stop(routing, Operation, StartTime,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_exception(atom(), term(), map()) -> ok.
+telemetry_exception(Operation, Reason, Metadata) ->
+    beam_agent_telemetry_core:span_exception(routing, Operation, Reason,
+        compact_telemetry(Metadata)).
+
+-spec telemetry_request_meta(map()) -> map().
+telemetry_request_meta(Request) ->
+    maps:with([backend, policy, affinity_key, policy_profile_id, last_backend,
+        fallback_policy], Request).
+
+-spec telemetry_decision_meta(route_decision()) -> map().
+telemetry_decision_meta(Decision) ->
+    #{
+        backend => maps:get(backend, Decision),
+        policy => maps:get(policy, Decision),
+        candidate_count => length(maps:get(candidates, Decision, [])),
+        fallback_count => length(maps:get(fallback_chain, Decision, [])),
+        reason_count => length(maps:get(reasons, Decision, []))
+    }.
+
+-spec compact_telemetry(map()) -> map().
+compact_telemetry(Metadata) ->
+    maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).

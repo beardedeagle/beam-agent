@@ -29,7 +29,8 @@ the event name list:
 [:beam_agent, command, run, start]       %% shell command execution
 [:beam_agent, command, run, stop]        %% includes exit_code in metadata
 [:beam_agent, command, run, exception]   %% timeout or port failure
-[:beam_agent, session, state_change]     %% always at this fixed path
+[:beam_agent, session, state_change]     %% backend session lifecycle
+[:beam_agent, run, state_change]         %% canonical run lifecycle
 [:beam_agent, buffer, overflow]          %% always at this fixed path
 ```
 
@@ -84,13 +85,14 @@ computes the duration automatically from the start timestamp.
 
 Events follow the Erlang telemetry library convention: event names are
 lists of atoms under the [beam_agent, ...] prefix. The Agent atom
-(claude, codex, etc.) is the second element, making it easy to filter
-by backend.
+(claude, codex, etc.) is the second element for backend spans. Other
+BeamAgent domains such as run, artifact, and routine reuse that same
+position for canonical runtime instrumentation.
 
 Measurements include duration in native time units (computed from
-erlang:monotonic_time/0 deltas). Metadata maps carry backend, session_id,
-and operation-specific fields. state_change/3 and buffer_overflow/2 are
-standalone events outside the span pattern.
+erlang:monotonic_time/0 deltas). Metadata maps carry backend or domain,
+session_id, and operation-specific fields. state_change/3, state_change/4,
+and buffer_overflow/2 are standalone events outside the span pattern.
 
 Zero overhead when no handlers are attached -- the telemetry library
 short-circuits when the handler list is empty. When the telemetry
@@ -99,7 +101,7 @@ delegates to beam_agent_telemetry_core for all emission logic.
 """.
 
 -export([span_start/3, span_stop/3, span_stop/4, span_exception/3, span_exception/4,
-         state_change/3, buffer_overflow/2]).
+         state_change/3, state_change/4, buffer_overflow/2]).
 
 -doc """
 Emit a span start event and return a monotonic start time.
@@ -205,6 +207,23 @@ Valid state atoms: `connecting`, `initializing`, `ready`, `active_query`, `error
 -spec state_change(atom(), atom(), atom()) -> ok.
 state_change(Agent, FromState, ToState) ->
     beam_agent_telemetry_core:state_change(Agent, FromState, ToState).
+
+-doc """
+Emit a state change event for a non-session BeamAgent domain.
+
+The event is published at `[:beam_agent, Domain, state_change]`.
+Canonical BeamAgent domains such as runs, steps, and routines use this helper
+to report lifecycle transitions without introducing a separate telemetry style.
+
+Parameters:
+- `Domain` — BeamAgent domain atom such as `run`, `step`, or `routine`
+- `FromState` — the lifecycle state being left
+- `ToState` — the lifecycle state being entered
+- `Metadata` — additional domain-specific metadata such as ids or outcomes
+""".
+-spec state_change(atom(), atom(), atom(), map()) -> ok.
+state_change(Domain, FromState, ToState, Metadata) ->
+    beam_agent_telemetry_core:state_change(Domain, FromState, ToState, Metadata).
 
 -doc """
 Emit a buffer overflow warning when accumulated transport data exceeds the limit.

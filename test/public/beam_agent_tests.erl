@@ -74,6 +74,17 @@ exports_event_stream_subscription_api_test() ->
     ?assert(erlang:function_exported(beam_agent, receive_event, 3)),
     ?assert(erlang:function_exported(beam_agent, event_unsubscribe, 2)).
 
+exports_telemetry_surface_test() ->
+    ensure_loaded(beam_agent_telemetry),
+    ?assert(erlang:function_exported(beam_agent_telemetry, span_start, 3)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, span_stop, 3)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, span_stop, 4)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, span_exception, 3)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, span_exception, 4)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, state_change, 3)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, state_change, 4)),
+    ?assert(erlang:function_exported(beam_agent_telemetry, buffer_overflow, 2)).
+
 exports_runs_domain_surface_test() ->
     ensure_loaded(beam_agent_runs),
     ?assert(erlang:function_exported(beam_agent_runs, start_run, 2)),
