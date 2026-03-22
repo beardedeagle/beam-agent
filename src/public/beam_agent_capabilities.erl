@@ -191,13 +191,8 @@ all() ->
             all_backends(full, direct_backend, exact)),
         capability(interrupt, <<"Interrupt active work">>,
             all_backends(full, direct_backend, exact)),
-        capability(permission_mode, <<"Runtime permission mode change">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
+        capability(permission_mode, <<"Runtime permission mode change">>,
+            all_backends(full, direct_backend, exact)),
         capability(session_history, <<"Session history">>, #{
             claude => support(full, direct_backend, exact,
                 #{available_paths => [direct_backend, direct_backend_and_universal],
@@ -233,7 +228,7 @@ all() ->
             codex => support(full, direct_backend, validated_equivalent),
             gemini => support(full, universal, validated_equivalent),
             opencode => support(full, direct_backend, exact),
-            copilot => support(full, universal, validated_equivalent)
+            copilot => support(full, direct_backend, validated_equivalent)
         }),
         capability(hooks, <<"SDK lifecycle hooks">>,
             all_backends(full, universal, exact)),
@@ -268,8 +263,8 @@ all() ->
         capability(approval_callbacks, <<"Approval and permission callbacks">>, #{
             claude => support(full, direct_backend, exact),
             codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Native Gemini ACP reverse permission requests feed the universal callback broker for the canonical surface.">>}),
+            gemini => support(full, direct_backend, exact,
+                #{notes => <<"Gemini ACP reverse permission requests are handled natively via approval_mode state and approval_response/2.">>}),
             opencode => support(full, direct_backend, exact),
             copilot => support(full, direct_backend, exact)
         }),
@@ -316,7 +311,8 @@ all() ->
             gemini => support(full, universal, exact,
                 #{notes => <<"Universal runtime/provider layer exposes provider selection and auth metadata for Gemini sessions.">>}),
             opencode => support(full, direct_backend, exact),
-            copilot => support(full, universal, exact)
+            copilot => support(full, direct_backend, exact,
+                #{notes => <<"Copilot protocol has native build_agent_list/select/deselect/reload_params for provider management.">>})
         }),
         capability(attachments, <<"Attachments in query and send">>, #{
             claude => support(full, universal, exact,
