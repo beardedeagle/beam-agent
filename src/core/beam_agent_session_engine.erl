@@ -647,13 +647,26 @@ handle_interrupt(From, #engine{handler_mod = H,
                                   query_status     = interrupted},
                      ReplyActions};
                 not_supported ->
-                    {keep_state_and_data,
-                     [{reply, From, {error, not_supported}}]}
+                    soft_interrupt(From, Data)
             end;
         false ->
-            {keep_state_and_data,
-             [{reply, From, {error, not_supported}}]}
+            soft_interrupt(From, Data)
     end.
+
+%% Universal soft interrupt — transition to ready and drain the queue
+%% even when the handler cannot send an interrupt signal on the wire.
+-spec soft_interrupt(gen_statem:from(), #engine{}) ->
+    gen_statem:event_handler_result(state_name()).
+soft_interrupt(From, Data) ->
+    Actions = [{reply, From, ok}
+               | consumer_error_actions(interrupted, Data)],
+    maybe_span_stop(Data),
+    {next_state, ready,
+     Data#engine{consumer         = undefined,
+                 query_start_time = undefined,
+                 msg_queue        = queue:new(),
+                 query_status     = interrupted},
+     Actions}.
 
 %%====================================================================
 %% Internal: incoming data handling

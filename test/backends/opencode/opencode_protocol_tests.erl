@@ -423,10 +423,30 @@ message_part_delta_nontext_test() ->
     ?assert(is_integer(maps:get(timestamp, Msg))).
 
 %%====================================================================
-%% handle_set_permission_mode returns {error, not_supported}
+%% handle_set_permission_mode stores mode in hstate
 %%====================================================================
 
-handle_set_permission_mode_test() ->
-    ?assertEqual({error, not_supported},
-                 opencode_session_handler:handle_set_permission_mode(
-                     <<"auto">>, dummy_state)).
+handle_set_permission_mode_stores_mode_test() ->
+    HState = minimal_hstate(),
+    Mode = <<"auto">>,
+    {ok, Mode, [], _HState1} =
+        opencode_session_handler:handle_set_permission_mode(Mode, HState).
+
+handle_set_permission_mode_returns_no_send_actions_test() ->
+    HState = minimal_hstate(),
+    {ok, _, Actions, _} =
+        opencode_session_handler:handle_set_permission_mode(
+            <<"suggest">>, HState),
+    ?assertEqual([], Actions).
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+%% Build a minimal #hstate{} via init_handler to avoid coupling to
+%% the record definition.
+-spec minimal_hstate() -> term().
+minimal_hstate() ->
+    {ok, #{handler_state := HState}} =
+        opencode_session_handler:init_handler(#{}),
+    HState.

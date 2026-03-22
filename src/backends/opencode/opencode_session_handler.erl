@@ -97,6 +97,7 @@
     base_path = <<>>   :: binary(),
     auth               :: {basic, binary()} | none,
     model              :: binary() | map() | undefined,
+    mode               :: binary() | undefined,
     buffer_max         :: pos_integer(),
     permission_handler :: fun((binary(), map(), map()) ->
                               beam_agent_core:permission_result()) |
@@ -200,7 +201,11 @@ encode_query(Prompt, Params, #hstate{opts = Opts} = HState) ->
                 undefined -> Params;
                 Model     -> maps:put(model, Model, Params)
             end,
-            MergedOpts = merge_query_defaults(MergedOpts0, Opts),
+            MergedOpts1 = case HState#hstate.mode of
+                undefined -> MergedOpts0;
+                Mode      -> maps:put(mode, Mode, MergedOpts0)
+            end,
+            MergedOpts = merge_query_defaults(MergedOpts1, Opts),
             Body = opencode_protocol:build_prompt_input(Prompt, MergedOpts),
             HState1 = do_post_json(Path, Body, send_message, undefined, HState),
             {ok, noop, HState1}
@@ -288,11 +293,11 @@ encode_interrupt(_HState) ->
 handle_set_model(Model, #hstate{} = HState) ->
     {ok, Model, [], HState#hstate{model = Model}}.
 
--doc "OpenCode does not support native permission mode switching.".
+-doc "Store the permission mode for inclusion in the next query.".
 -spec handle_set_permission_mode(binary(), #hstate{}) ->
-    {error, not_supported}.
-handle_set_permission_mode(_Mode, _HState) ->
-    {error, not_supported}.
+    {ok, binary(), [], #hstate{}}.
+handle_set_permission_mode(Mode, #hstate{} = HState) ->
+    {ok, Mode, [], HState#hstate{mode = Mode}}.
 
 -spec on_state_enter(beam_agent_session_handler:state_name(),
                      beam_agent_session_handler:state_name() | undefined,

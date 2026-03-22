@@ -736,7 +736,10 @@ on_state_enter(_State, _OldState, HState) ->
 **When called:** When `interrupt/1` is called during `active_query`.
 
 **Return:** `{ok, Actions, NewState}` to send interrupt actions, or
-`not_supported` if the backend does not support interruption.
+`not_supported` if the handler cannot send an interrupt signal on the
+wire.  When the handler returns `not_supported`, the engine performs a
+universal **soft interrupt**: it transitions to `ready`, drains the
+message queue, and returns `ok` to the caller.
 
 **Example (from Copilot handler):**
 
@@ -1896,7 +1899,7 @@ handle_server_request(ReqId, <<"tool.call">>, Params,
 | `handle_connecting/2` | `(Event, HState) -> phase_result()` | Transport events in `connecting` | State transition or keep_state |
 | `handle_initializing/2` | `(Event, HState) -> phase_result()` | Transport events in `initializing` | State transition or keep_state |
 | `on_state_enter/3` | `(New, Old, HState) -> {ok, Actions, HState}` | Every state transition | Actions to execute on enter |
-| `encode_interrupt/1` | `(HState) -> {ok, Actions, HState} \| not_supported` | On `interrupt/1` in `active_query` | Interrupt actions or not_supported |
+| `encode_interrupt/1` | `(HState) -> {ok, Actions, HState} \| not_supported` | On `interrupt/1` in `active_query` | Interrupt actions, or `not_supported` (engine performs soft interrupt) |
 | `is_query_complete/2` | `(Msg, HState) -> boolean()` | Per message in `active_query` | `true` if message is terminal |
 | `handle_control/4` | `(Method, Params, From, HState) -> control_result()` | On `send_control/3` | Reply, noreply, or error |
 | `handle_set_model/2` | `(Model, HState) -> ...` | On `set_model/2` | `{ok, Result, Actions, HState}` or `{error, Reason}` |
@@ -1978,7 +1981,7 @@ Use this checklist to verify your backend is complete before merging.
 - [ ] `handle_initializing/2` completes the init handshake (if applicable)
 - [ ] `on_state_enter/3` sends init messages on state transitions (if applicable)
 - [ ] `is_query_complete/2` correctly identifies terminal messages
-- [ ] `encode_interrupt/1` sends an interrupt signal (if the backend supports it)
+- [ ] `encode_interrupt/1` sends an interrupt signal (the engine provides a universal soft interrupt fallback)
 
 #### Session and Adapter Modules
 
