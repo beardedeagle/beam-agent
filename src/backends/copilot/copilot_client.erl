@@ -138,7 +138,40 @@
          skills_remote_list/2,
          mcp_status/1,
          mcp_server_status_list/1,
-         account_rate_limits/1]).
+         account_rate_limits/1,
+         %% COP-7: Typed session-scoped RPC wrappers
+         session_model_current/1,
+         session_mode_get/1,
+         session_mode_set/2,
+         session_plan_read/1,
+         session_plan_update/2,
+         session_plan_delete/1,
+         session_foreground_get/1,
+         session_foreground_set/2,
+         session_log/2,
+         workspace_list_files/1,
+         workspace_read_file/2,
+         workspace_create_file/2,
+         agent_list/1,
+         agent_current/1,
+         agent_select/2,
+         agent_deselect/1,
+         agent_reload/1,
+         skills_enable/2,
+         skills_disable/2,
+         skills_reload/1,
+         mcp_list/1,
+         mcp_enable/2,
+         mcp_disable/2,
+         mcp_reload/1,
+         fleet_start/2,
+         plugins_list/1,
+         compaction_compact/1,
+         shell_exec/2,
+         shell_kill/2,
+         ui_elicitation/2,
+         tools_list/1,
+         account_quota/1]).
 
 %% Universal core return shape; map() is intentional.
 -dialyzer({nowarn_function, [thread_realtime_start/2,
@@ -852,6 +885,158 @@ collect_loop(Session, Ref, Deadline, Acc) ->
                               {error, term()}.
 receive_message_from(Session, Ref, Timeout) ->
     copilot_session:receive_message(Session, Ref, Timeout).
+%%====================================================================
+%% COP-7: Typed session-scoped RPC wrappers
+%%====================================================================
+
+%% Session management
+-spec session_model_current(pid()) -> {ok, term()} | {error, term()}.
+session_model_current(Session) ->
+    send_command(Session, <<"session.model.getCurrent">>, #{}).
+
+-spec session_mode_get(pid()) -> {ok, term()} | {error, term()}.
+session_mode_get(Session) ->
+    send_command(Session, <<"session.mode.get">>, #{}).
+
+-spec session_mode_set(pid(), binary()) -> {ok, term()} | {error, term()}.
+session_mode_set(Session, Mode) when is_binary(Mode) ->
+    send_command(Session, <<"session.mode.set">>, #{<<"mode">> => Mode}).
+
+-spec session_plan_read(pid()) -> {ok, term()} | {error, term()}.
+session_plan_read(Session) ->
+    send_command(Session, <<"session.plan.read">>, #{}).
+
+-spec session_plan_update(pid(), map()) -> {ok, term()} | {error, term()}.
+session_plan_update(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.plan.update">>, Params).
+
+-spec session_plan_delete(pid()) -> {ok, term()} | {error, term()}.
+session_plan_delete(Session) ->
+    send_command(Session, <<"session.plan.delete">>, #{}).
+
+-spec session_foreground_get(pid()) -> {ok, term()} | {error, term()}.
+session_foreground_get(Session) ->
+    send_command(Session, <<"session.getForeground">>, #{}).
+
+-spec session_foreground_set(pid(), map()) -> {ok, term()} | {error, term()}.
+session_foreground_set(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.setForeground">>, Params).
+
+-spec session_log(pid(), map()) -> {ok, term()} | {error, term()}.
+session_log(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.log">>, Params).
+
+%% Workspace
+-spec workspace_list_files(pid()) -> {ok, term()} | {error, term()}.
+workspace_list_files(Session) ->
+    send_command(Session, <<"session.workspace.listFiles">>, #{}).
+
+-spec workspace_read_file(pid(), binary()) -> {ok, term()} | {error, term()}.
+workspace_read_file(Session, Path) when is_binary(Path) ->
+    send_command(Session, <<"session.workspace.readFile">>,
+                 #{<<"path">> => Path}).
+
+-spec workspace_create_file(pid(), map()) -> {ok, term()} | {error, term()}.
+workspace_create_file(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.workspace.createFile">>, Params).
+
+%% Agents
+-spec agent_list(pid()) -> {ok, term()} | {error, term()}.
+agent_list(Session) ->
+    send_command(Session, <<"session.agent.list">>, #{}).
+
+-spec agent_current(pid()) -> {ok, term()} | {error, term()}.
+agent_current(Session) ->
+    send_command(Session, <<"session.agent.getCurrent">>, #{}).
+
+-spec agent_select(pid(), binary()) -> {ok, term()} | {error, term()}.
+agent_select(Session, AgentId) when is_binary(AgentId) ->
+    send_command(Session, <<"session.agent.select">>,
+                 #{<<"agentId">> => AgentId}).
+
+-spec agent_deselect(pid()) -> {ok, term()} | {error, term()}.
+agent_deselect(Session) ->
+    send_command(Session, <<"session.agent.deselect">>, #{}).
+
+-spec agent_reload(pid()) -> {ok, term()} | {error, term()}.
+agent_reload(Session) ->
+    send_command(Session, <<"session.agent.reload">>, #{}).
+
+%% Skills
+-spec skills_enable(pid(), binary()) -> {ok, term()} | {error, term()}.
+skills_enable(Session, SkillId) when is_binary(SkillId) ->
+    send_command(Session, <<"session.skills.enable">>,
+                 #{<<"skillId">> => SkillId}).
+
+-spec skills_disable(pid(), binary()) -> {ok, term()} | {error, term()}.
+skills_disable(Session, SkillId) when is_binary(SkillId) ->
+    send_command(Session, <<"session.skills.disable">>,
+                 #{<<"skillId">> => SkillId}).
+
+-spec skills_reload(pid()) -> {ok, term()} | {error, term()}.
+skills_reload(Session) ->
+    send_command(Session, <<"session.skills.reload">>, #{}).
+
+%% MCP
+-spec mcp_list(pid()) -> {ok, term()} | {error, term()}.
+mcp_list(Session) ->
+    send_command(Session, <<"session.mcp.list">>, #{}).
+
+-spec mcp_enable(pid(), binary()) -> {ok, term()} | {error, term()}.
+mcp_enable(Session, ServerId) when is_binary(ServerId) ->
+    send_command(Session, <<"session.mcp.enable">>,
+                 #{<<"serverId">> => ServerId}).
+
+-spec mcp_disable(pid(), binary()) -> {ok, term()} | {error, term()}.
+mcp_disable(Session, ServerId) when is_binary(ServerId) ->
+    send_command(Session, <<"session.mcp.disable">>,
+                 #{<<"serverId">> => ServerId}).
+
+-spec mcp_reload(pid()) -> {ok, term()} | {error, term()}.
+mcp_reload(Session) ->
+    send_command(Session, <<"session.mcp.reload">>, #{}).
+
+%% Fleet, plugins, compaction
+-spec fleet_start(pid(), map()) -> {ok, term()} | {error, term()}.
+fleet_start(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.fleet.start">>, Params).
+
+-spec plugins_list(pid()) -> {ok, term()} | {error, term()}.
+plugins_list(Session) ->
+    send_command(Session, <<"session.plugins.list">>, #{}).
+
+-spec compaction_compact(pid()) -> {ok, term()} | {error, term()}.
+compaction_compact(Session) ->
+    send_command(Session, <<"session.compaction.compact">>, #{}).
+
+%% Shell
+-spec shell_exec(pid(), binary()) -> {ok, term()} | {error, term()}.
+shell_exec(Session, Command) when is_binary(Command) ->
+    send_command(Session, <<"session.shell.exec">>,
+                 #{<<"command">> => Command}).
+
+-spec shell_kill(pid(), binary()) -> {ok, term()} | {error, term()}.
+shell_kill(Session, ProcessId) when is_binary(ProcessId) ->
+    send_command(Session, <<"session.shell.kill">>,
+                 #{<<"processId">> => ProcessId}).
+
+%% UI, tools, account
+-spec ui_elicitation(pid(), map()) -> {ok, term()} | {error, term()}.
+ui_elicitation(Session, Params) when is_map(Params) ->
+    send_command(Session, <<"session.ui.elicitation">>, Params).
+
+-spec tools_list(pid()) -> {ok, term()} | {error, term()}.
+tools_list(Session) ->
+    send_command(Session, <<"tools.list">>, #{}).
+
+-spec account_quota(pid()) -> {ok, term()} | {error, term()}.
+account_quota(Session) ->
+    send_command(Session, <<"account.getQuota">>, #{}).
+
+%%====================================================================
+%% Internal helpers
+%%====================================================================
+
 -spec get_session_id(pid()) -> binary().
 get_session_id(Session) ->
     case session_info(Session) of

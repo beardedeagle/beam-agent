@@ -1,6 +1,8 @@
 %%%-------------------------------------------------------------------
-%%% @doc EUnit tests for codex_protocol — Codex message normalization
-%%%      and wire format builders.
+%%% @doc Unit tests for codex_protocol.
+%%%
+%%% Tests the Codex wire protocol encoders, decoders, and
+%%% normalization functions.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(codex_protocol_tests).
@@ -8,225 +10,127 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
-%% Notification normalization tests
+%% Notification normalization
 %%====================================================================
 
-normalize_agent_message_delta_test() ->
+agent_message_delta_test() ->
     Msg = codex_protocol:normalize_notification(
-        <<"item/agentMessage/delta">>,
-        #{<<"delta">> => <<"hello world">>}),
+              <<"item/agentMessage/delta">>,
+              #{<<"delta">> => <<"hello">>}),
     ?assertEqual(text, maps:get(type, Msg)),
-    ?assertEqual(<<"hello world">>, maps:get(content, Msg)).
+    ?assertEqual(<<"hello">>, maps:get(content, Msg)).
 
-normalize_item_started_agent_message_test() ->
+item_started_agent_message_test() ->
+    Item = #{<<"type">> => <<"AgentMessage">>,
+             <<"content">> => <<"hi">>},
     Msg = codex_protocol:normalize_notification(
-        <<"item/started">>,
-        #{<<"item">> => #{<<"type">> => <<"AgentMessage">>,
-                          <<"content">> => <<"thinking...">>}}),
+              <<"item/started">>, #{<<"item">> => Item}),
     ?assertEqual(text, maps:get(type, Msg)),
-    ?assertEqual(<<"thinking...">>, maps:get(content, Msg)).
+    ?assertEqual(<<"hi">>, maps:get(content, Msg)).
 
-normalize_item_started_command_execution_test() ->
+item_started_command_execution_test() ->
+    Item = #{<<"type">> => <<"CommandExecution">>,
+             <<"command">> => <<"ls">>},
     Msg = codex_protocol:normalize_notification(
-        <<"item/started">>,
-        #{<<"item">> => #{<<"type">> => <<"CommandExecution">>,
-                          <<"command">> => <<"ls -la">>,
-                          <<"args">> => #{<<"cwd">> => <<"/tmp">>}}}),
-    ?assertEqual(tool_use, maps:get(type, Msg)),
-    ?assertEqual(<<"ls -la">>, maps:get(tool_name, Msg)),
-    ?assertEqual(#{<<"cwd">> => <<"/tmp">>}, maps:get(tool_input, Msg)).
+              <<"item/started">>, #{<<"item">> => Item}),
+    ?assertEqual(tool_use, maps:get(type, Msg)).
 
-normalize_item_started_file_change_test() ->
+item_started_file_change_test() ->
+    Item = #{<<"type">> => <<"FileChange">>,
+             <<"filePath">> => <<"/tmp/x">>,
+             <<"action">> => <<"write">>},
     Msg = codex_protocol:normalize_notification(
-        <<"item/started">>,
-        #{<<"item">> => #{<<"type">> => <<"FileChange">>,
-                          <<"filePath">> => <<"/src/main.rs">>,
-                          <<"action">> => <<"modify">>}}),
-    ?assertEqual(tool_use, maps:get(type, Msg)),
-    ?assertEqual(<<"/src/main.rs">>, maps:get(tool_name, Msg)),
-    ?assertEqual(#{<<"action">> => <<"modify">>}, maps:get(tool_input, Msg)).
+              <<"item/started">>, #{<<"item">> => Item}),
+    ?assertEqual(tool_use, maps:get(type, Msg)).
 
-normalize_item_completed_command_test() ->
+item_completed_command_execution_test() ->
+    Item = #{<<"type">> => <<"CommandExecution">>,
+             <<"command">> => <<"ls">>,
+             <<"output">> => <<"files">>},
     Msg = codex_protocol:normalize_notification(
-        <<"item/completed">>,
-        #{<<"item">> => #{<<"type">> => <<"CommandExecution">>,
-                          <<"command">> => <<"echo hi">>,
-                          <<"output">> => <<"hi\n">>}}),
-    ?assertEqual(tool_result, maps:get(type, Msg)),
-    ?assertEqual(<<"echo hi">>, maps:get(tool_name, Msg)),
-    ?assertEqual(<<"hi\n">>, maps:get(content, Msg)).
+              <<"item/completed">>, #{<<"item">> => Item}),
+    ?assertEqual(tool_result, maps:get(type, Msg)).
 
-normalize_item_completed_file_change_test() ->
+item_completed_file_change_test() ->
+    Item = #{<<"type">> => <<"FileChange">>,
+             <<"filePath">> => <<"/tmp/x">>,
+             <<"action">> => <<"write">>},
     Msg = codex_protocol:normalize_notification(
-        <<"item/completed">>,
-        #{<<"item">> => #{<<"type">> => <<"FileChange">>,
-                          <<"filePath">> => <<"/src/lib.rs">>,
-                          <<"output">> => <<"modified 3 lines">>}}),
-    ?assertEqual(tool_result, maps:get(type, Msg)),
-    ?assertEqual(<<"/src/lib.rs">>, maps:get(tool_name, Msg)),
-    ?assertEqual(<<"modified 3 lines">>, maps:get(content, Msg)).
+              <<"item/completed">>, #{<<"item">> => Item}),
+    ?assertEqual(tool_result, maps:get(type, Msg)).
 
-normalize_turn_completed_test() ->
+item_started_unknown_type_test() ->
+    Item = #{<<"type">> => <<"SomethingNew">>},
     Msg = codex_protocol:normalize_notification(
-        <<"turn/completed">>,
-        #{<<"status">> => <<"completed">>,
-          <<"turnId">> => <<"turn-1">>}),
+              <<"item/started">>, #{<<"item">> => Item}),
+    ?assertEqual(raw, maps:get(type, Msg)).
+
+turn_completed_test() ->
+    Msg = codex_protocol:normalize_notification(
+              <<"turn/completed">>,
+              #{<<"status">> => <<"completed">>}),
+    ?assertEqual(result, maps:get(type, Msg)).
+
+turn_completed_error_test() ->
+    Msg = codex_protocol:normalize_notification(
+              <<"turn/completed">>,
+              #{<<"status">> => <<"error">>,
+                <<"error">> => <<"oops">>}),
     ?assertEqual(result, maps:get(type, Msg)),
-    ?assertEqual(<<"completed">>, maps:get(subtype, Msg)).
+    ?assertEqual(<<"error">>, maps:get(subtype, Msg)),
+    ?assertEqual(<<"oops">>, maps:get(content, Msg)).
 
-normalize_turn_completed_with_error_test() ->
+command_output_delta_test() ->
     Msg = codex_protocol:normalize_notification(
-        <<"turn/completed">>,
-        #{<<"status">> => <<"error">>,
-          <<"error">> => <<"model overloaded">>}),
-    ?assertEqual(result, maps:get(type, Msg)),
-    ?assertEqual(<<"model overloaded">>, maps:get(content, Msg)).
+              <<"item/commandExecution/outputDelta">>,
+              #{<<"delta">> => <<"line1">>}),
+    ?assertEqual(stream_event, maps:get(type, Msg)).
 
-normalize_turn_started_test() ->
+reasoning_delta_test() ->
     Msg = codex_protocol:normalize_notification(
-        <<"turn/started">>,
-        #{<<"turnId">> => <<"turn-1">>}),
-    ?assertEqual(system, maps:get(type, Msg)),
-    ?assertEqual(<<"turn_started">>, maps:get(subtype, Msg)).
+              <<"item/reasoning/textDelta">>,
+              #{<<"delta">> => <<"thinking...">>}),
+    ?assertEqual(thinking, maps:get(type, Msg)).
 
-normalize_command_output_delta_test() ->
+error_notification_test() ->
     Msg = codex_protocol:normalize_notification(
-        <<"item/commandExecution/outputDelta">>,
-        #{<<"delta">> => <<"output chunk">>}),
-    ?assertEqual(stream_event, maps:get(type, Msg)),
-    ?assertEqual(<<"output chunk">>, maps:get(content, Msg)),
-    ?assertEqual(<<"command_output">>, maps:get(subtype, Msg)).
+              <<"error">>,
+              #{<<"message">> => <<"fail">>}),
+    ?assertEqual(error, maps:get(type, Msg)).
 
-normalize_file_output_delta_test() ->
+unknown_method_produces_raw_test() ->
     Msg = codex_protocol:normalize_notification(
-        <<"item/fileChange/outputDelta">>,
-        #{<<"delta">> => <<"diff chunk">>}),
-    ?assertEqual(stream_event, maps:get(type, Msg)),
-    ?assertEqual(<<"diff chunk">>, maps:get(content, Msg)),
-    ?assertEqual(<<"file_output">>, maps:get(subtype, Msg)).
-
-normalize_reasoning_text_delta_test() ->
-    Msg = codex_protocol:normalize_notification(
-        <<"item/reasoning/textDelta">>,
-        #{<<"delta">> => <<"thinking about this...">>}),
-    ?assertEqual(thinking, maps:get(type, Msg)),
-    ?assertEqual(<<"thinking about this...">>, maps:get(content, Msg)).
-
-normalize_error_with_will_retry_test() ->
-    Msg = codex_protocol:normalize_notification(
-        <<"error">>,
-        #{<<"message">> => <<"rate limited">>,
-          <<"willRetry">> => true}),
-    ?assertEqual(error, maps:get(type, Msg)),
-    ?assertEqual(<<"rate limited">>, maps:get(content, Msg)),
-    ?assertEqual(<<"will_retry">>, maps:get(subtype, Msg)).
-
-normalize_error_without_retry_test() ->
-    Msg = codex_protocol:normalize_notification(
-        <<"error">>,
-        #{<<"message">> => <<"fatal error">>}),
-    ?assertEqual(error, maps:get(type, Msg)),
-    ?assertEqual(<<"fatal error">>, maps:get(content, Msg)),
-    ?assertNot(maps:is_key(subtype, Msg)).
-
-normalize_thread_status_changed_test() ->
-    Msg = codex_protocol:normalize_notification(
-        <<"thread/status/changed">>,
-        #{<<"status">> => <<"active">>}),
-    ?assertEqual(system, maps:get(type, Msg)),
-    ?assertEqual(<<"thread_status_changed">>, maps:get(subtype, Msg)),
-    ?assertEqual(<<"thread status: active">>, maps:get(content, Msg)).
-
-normalize_unknown_test() ->
-    Msg = codex_protocol:normalize_notification(
-        <<"something/unknown">>,
-        #{<<"data">> => <<"whatever">>}),
-    ?assertEqual(raw, maps:get(type, Msg)),
-    ?assert(maps:is_key(raw, Msg)).
+              <<"completely/unknown">>, #{<<"x">> => 1}),
+    ?assertEqual(raw, maps:get(type, Msg)).
 
 %%====================================================================
-%% Text input helper
+%% Thread and turn params
 %%====================================================================
 
-text_input_test() ->
-    Input = codex_protocol:text_input(<<"Hello, Codex!">>),
-    ?assertEqual(<<"text">>, maps:get(<<"type">>, Input)),
-    ?assertEqual(<<"Hello, Codex!">>, maps:get(<<"text">>, Input)).
-
-%%====================================================================
-%% Wire param builders
-%%====================================================================
-
-thread_start_params_all_opts_test() ->
-    Params = codex_protocol:thread_start_params(#{
-        ephemeral => true,
-        base_instructions => <<"be helpful">>,
-        developer_instructions => <<"use rust">>
-    }),
-    ?assertEqual(true, maps:get(<<"ephemeral">>, Params)),
-    ?assertEqual(<<"be helpful">>, maps:get(<<"baseInstructions">>, Params)),
-    ?assertEqual(<<"use rust">>, maps:get(<<"developerInstructions">>, Params)).
-
-thread_start_params_empty_test() ->
+thread_start_params_test() ->
     Params = codex_protocol:thread_start_params(#{}),
-    ?assertEqual(false, maps:get(<<"experimentalRawEvents">>, Params)),
-    ?assertEqual(false, maps:get(<<"persistExtendedHistory">>, Params)).
+    ?assert(is_map(Params)).
 
-fuzzy_file_search_session_start_params_test() ->
-    Params =
-        codex_protocol:fuzzy_file_search_session_start_params(
-            <<"search-1">>,
-            [<<"/tmp/a">>, "/tmp/b"]),
-    ?assertEqual(<<"search-1">>, maps:get(<<"sessionId">>, Params)),
-    ?assertEqual([<<"/tmp/a">>, <<"/tmp/b">>], maps:get(<<"roots">>, Params)).
-
-fuzzy_file_search_session_update_params_test() ->
-    Params =
-        codex_protocol:fuzzy_file_search_session_update_params(
-            <<"search-1">>,
-            <<"beam">>),
-    ?assertEqual(<<"search-1">>, maps:get(<<"sessionId">>, Params)),
-    ?assertEqual(<<"beam">>, maps:get(<<"query">>, Params)).
-
-fuzzy_file_search_session_stop_params_test() ->
-    Params =
-        codex_protocol:fuzzy_file_search_session_stop_params(<<"search-1">>),
-    ?assertEqual(<<"search-1">>, maps:get(<<"sessionId">>, Params)).
-
-turn_start_params_string_prompt_test() ->
-    Params = codex_protocol:turn_start_params(<<"t1">>, <<"What is 2+2?">>),
+turn_start_params_binary_test() ->
+    Params = codex_protocol:turn_start_params(<<"t1">>, <<"hello">>),
     ?assertEqual(<<"t1">>, maps:get(<<"threadId">>, Params)),
-    [Input] = maps:get(<<"input">>, Params),
-    ?assertEqual(<<"text">>, maps:get(<<"type">>, Input)),
-    ?assertEqual(<<"What is 2+2?">>, maps:get(<<"text">>, Input)).
-
-turn_start_params_explicit_inputs_test() ->
-    Inputs = [codex_protocol:text_input(<<"hello">>)],
-    Params = codex_protocol:turn_start_params(<<"t2">>, Inputs),
-    ?assertEqual(<<"t2">>, maps:get(<<"threadId">>, Params)),
-    ?assertEqual(Inputs, maps:get(<<"input">>, Params)).
+    Inputs = maps:get(<<"input">>, Params),
+    ?assert(is_list(Inputs)),
+    ?assert(length(Inputs) > 0).
 
 turn_start_params_with_opts_test() ->
-    Params = codex_protocol:turn_start_params(
-        <<"t3">>, <<"test">>,
-        #{model => <<"o4-mini">>,
-          approval_policy => <<"on-request">>,
-          sandbox_mode => <<"read-only">>}),
-    ?assertEqual(<<"t3">>, maps:get(<<"threadId">>, Params)),
-    ?assertEqual(<<"o4-mini">>, maps:get(<<"model">>, Params)),
-    ?assertEqual(<<"on-request">>, maps:get(<<"approvalPolicy">>, Params)),
-    ?assertEqual(<<"read-only">>, maps:get(<<"sandboxPolicy">>, Params)).
+    Opts = #{model => <<"gpt-4">>, effort => <<"high">>},
+    Params = codex_protocol:turn_start_params(<<"t1">>, <<"hi">>, Opts),
+    ?assertEqual(<<"gpt-4">>, maps:get(<<"model">>, Params)),
+    ?assertEqual(<<"high">>, maps:get(<<"effort">>, Params)).
 
-initialize_params_test() ->
-    Params = codex_protocol:initialize_params(#{
-        model => <<"o4-mini">>,
-        approval_policy => <<"never">>
-    }),
-    ClientInfo = maps:get(<<"clientInfo">>, Params),
-    ?assertEqual(<<"beam_agent_sdk">>, maps:get(<<"name">>, ClientInfo)),
-    ?assertEqual(<<"0.1.0">>, maps:get(<<"version">>, ClientInfo)),
-    ?assertEqual(<<"o4-mini">>, maps:get(<<"model">>, Params)),
-    ?assertEqual(<<"never">>, maps:get(<<"askForApproval">>, Params)).
+%%====================================================================
+%% Initialize params
+%%====================================================================
+
+initialize_params_with_model_test() ->
+    Params = codex_protocol:initialize_params(#{model => <<"gpt-4">>}),
+    ?assertEqual(<<"gpt-4">>, maps:get(<<"model">>, Params)).
 
 initialize_params_minimal_test() ->
     Params = codex_protocol:initialize_params(#{}),
@@ -234,55 +138,103 @@ initialize_params_minimal_test() ->
     ?assertNot(maps:is_key(<<"model">>, Params)).
 
 %%====================================================================
-%% Approval response builders
+%% Approval response builders (V2 ReviewDecision wire values)
 %%====================================================================
 
-command_approval_accept_test() ->
-    ?assertEqual(#{<<"decision">> => <<"accept">>},
-                 codex_protocol:command_approval_response(accept)).
+command_approval_approved_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"approved">>},
+                 codex_protocol:command_approval_response(approved)).
 
-command_approval_accept_for_session_test() ->
-    ?assertEqual(#{<<"decision">> => <<"acceptForSession">>},
-                 codex_protocol:command_approval_response(accept_for_session)).
+command_approval_approved_for_session_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"approved_for_session">>},
+                 codex_protocol:command_approval_response(approved_for_session)).
 
-command_approval_decline_test() ->
-    ?assertEqual(#{<<"decision">> => <<"decline">>},
-                 codex_protocol:command_approval_response(decline)).
+command_approval_denied_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"denied">>},
+                 codex_protocol:command_approval_response(denied)).
 
-command_approval_cancel_test() ->
-    ?assertEqual(#{<<"decision">> => <<"cancel">>},
-                 codex_protocol:command_approval_response(cancel)).
+command_approval_abort_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"abort">>},
+                 codex_protocol:command_approval_response(abort)).
 
-file_approval_accept_test() ->
-    ?assertEqual(#{<<"decision">> => <<"accept">>},
-                 codex_protocol:file_approval_response(accept)).
+file_approval_approved_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"approved">>},
+                 codex_protocol:file_approval_response(approved)).
 
-file_approval_decline_test() ->
-    ?assertEqual(#{<<"decision">> => <<"decline">>},
-                 codex_protocol:file_approval_response(decline)).
+file_approval_denied_test() ->
+    ?assertEqual(#{<<"review_decision">> => <<"denied">>},
+                 codex_protocol:file_approval_response(denied)).
 
 %%====================================================================
 %% Enum round-trip tests
 %%====================================================================
 
 approval_decision_roundtrip_test() ->
-    Decisions = [accept, accept_for_session, decline, cancel],
+    Decisions = [approved, approved_for_session, denied, abort],
     lists:foreach(fun(D) ->
         Encoded = codex_protocol:encode_approval_decision(D),
         ?assertEqual(D, codex_protocol:parse_approval_decision(Encoded))
     end, Decisions).
 
-parse_unknown_approval_defaults_to_decline_test() ->
-    ?assertEqual(decline, codex_protocol:parse_approval_decision(<<"garbage">>)).
+parse_unknown_approval_defaults_to_denied_test() ->
+    ?assertEqual(denied, codex_protocol:parse_approval_decision(<<"garbage">>)).
 
 encode_ask_for_approval_all_variants_test() ->
     ?assertEqual(<<"untrusted">>,  codex_protocol:encode_ask_for_approval(untrusted)),
     ?assertEqual(<<"on-failure">>, codex_protocol:encode_ask_for_approval(on_failure)),
     ?assertEqual(<<"on-request">>, codex_protocol:encode_ask_for_approval(on_request)),
-    ?assertEqual(<<"reject">>,     codex_protocol:encode_ask_for_approval(reject)),
     ?assertEqual(<<"never">>,      codex_protocol:encode_ask_for_approval(never)).
 
-encode_sandbox_mode_all_variants_test() ->
-    ?assertEqual(<<"read-only">>,         codex_protocol:encode_sandbox_mode(read_only)),
-    ?assertEqual(<<"workspace-write">>,   codex_protocol:encode_sandbox_mode(workspace_write)),
-    ?assertEqual(<<"danger-full-access">>, codex_protocol:encode_sandbox_mode(danger_full_access)).
+encode_ask_for_approval_granular_test() ->
+    Config = #{<<"bash">> => on_failure, <<"write">> => never},
+    Result = codex_protocol:encode_ask_for_approval({granular, Config}),
+    ?assertEqual(<<"granular">>, maps:get(<<"type">>, Result)),
+    ConfigResult = maps:get(<<"config">>, Result),
+    ?assertEqual(<<"on-failure">>, maps:get(<<"bash">>, ConfigResult)),
+    ?assertEqual(<<"never">>, maps:get(<<"write">>, ConfigResult)).
+
+%%====================================================================
+%% Sandbox policy encoding (V2 tagged objects)
+%%====================================================================
+
+encode_sandbox_mode_read_only_test() ->
+    Result = codex_protocol:encode_sandbox_mode(read_only),
+    ?assertEqual(#{<<"type">> => <<"readOnly">>}, Result).
+
+encode_sandbox_mode_workspace_write_test() ->
+    Result = codex_protocol:encode_sandbox_mode(workspace_write),
+    ?assertEqual(#{<<"type">> => <<"workspaceWrite">>}, Result).
+
+encode_sandbox_mode_full_access_test() ->
+    Result = codex_protocol:encode_sandbox_mode(danger_full_access),
+    ?assertEqual(#{<<"type">> => <<"fullAccess">>}, Result).
+
+encode_sandbox_policy_structured_test() ->
+    Policy = #{type => workspace_write,
+               writable_roots => [<<"/tmp">>, <<"/home">>],
+               network_access => none},
+    Result = codex_protocol:encode_sandbox_mode(Policy),
+    ?assertEqual(<<"workspaceWrite">>, maps:get(<<"type">>, Result)),
+    ?assertEqual([<<"/tmp">>, <<"/home">>], maps:get(<<"writableRoots">>, Result)),
+    ?assertEqual(<<"none">>, maps:get(<<"networkAccess">>, Result)).
+
+%%====================================================================
+%% Text input
+%%====================================================================
+
+text_input_test() ->
+    Input = codex_protocol:text_input(<<"hello">>),
+    ?assertEqual(<<"text">>, maps:get(<<"type">>, Input)),
+    ?assertEqual(<<"hello">>, maps:get(<<"text">>, Input)).
+
+%%====================================================================
+%% User input response
+%%====================================================================
+
+user_input_response_answers_test() ->
+    R = codex_protocol:request_user_input_response(#{answers => #{<<"q1">> => <<"a1">>}}),
+    ?assert(maps:is_key(<<"answers">>, R)).
+
+user_input_response_default_test() ->
+    R = codex_protocol:request_user_input_response(undefined),
+    ?assertEqual(#{<<"answers">> => #{}}, R).

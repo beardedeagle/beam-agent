@@ -276,7 +276,7 @@ do_exec_query(From, Prompt, Params, Data) ->
     end.
 -spec build_port_opts(string(), binary(), map()) -> {string(), list()}.
 build_port_opts(CliPath, Prompt, Opts) ->
-    Env = [{"CODEX_SDK_VERSION", "0.1.0"}],
+    Env = [{"CODEX_SDK_VERSION", "0.14.0"}],
     Args = build_exec_args(Prompt, Opts),
     {CliPath,
      [{args, Args},

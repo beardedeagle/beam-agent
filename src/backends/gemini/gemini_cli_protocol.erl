@@ -184,12 +184,29 @@ authenticate_params(Opts, Methods)
                 ensure_binary(Method)
         end,
     ApiKey = maps:get(api_key, Opts, undefined),
+    Gateway = maps:get(gateway, Opts, undefined),
     Base = #{<<"methodId">> => MethodId},
-    case ApiKey of
-        undefined ->
-            Base;
+    Meta0 = case ApiKey of
+        undefined -> #{};
+        _ -> #{<<"api-key">> => ensure_binary(ApiKey)}
+    end,
+    Meta1 = case Gateway of
+        #{base_url := GwUrl} ->
+            GwHeaders = maps:get(headers, Gateway, #{}),
+            Meta0#{<<"gateway">> =>
+                #{<<"baseUrl">> => ensure_binary(GwUrl),
+                  <<"headers">> => maps:map(
+                      fun(_K, V) -> ensure_binary(V) end, GwHeaders)}};
+        #{<<"baseUrl">> := GwUrl} ->
+            GwHeaders = maps:get(<<"headers">>, Gateway, #{}),
+            Meta0#{<<"gateway">> =>
+                #{<<"baseUrl">> => GwUrl, <<"headers">> => GwHeaders}};
         _ ->
-            Base#{<<"_meta">> => #{<<"api-key">> => ensure_binary(ApiKey)}}
+            Meta0
+    end,
+    case map_size(Meta1) of
+        0 -> Base;
+        _ -> Base#{<<"_meta">> => Meta1}
     end.
 
 -spec start_session_method(map()) -> binary().

@@ -20,6 +20,8 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_control/4,
+    handle_set_model/2,
+    handle_set_permission_mode/2,
     on_state_enter/3,
     is_query_complete/2
 ]).
@@ -125,6 +127,16 @@ handle_data(Buffer, #hstate{pending = Pending} = HState) ->
     %% handle internal control traffic, return deliverable messages.
     extract_messages(Buffer, HState, Pending, [], []).
 
+-doc """
+Encode an outgoing query as a JSONL user message.
+
+Wire-honored params: system_prompt, allowed_tools, disallowed_tools,
+max_tokens, max_turns, output_format, effort, agent, max_budget_usd.
+
+The `model` key is serialized but the Claude CLI ignores per-query model
+overrides — model is a session-level setting. Use `set_model/2` to change
+the active model before querying.
+""".
 -spec encode_query(binary(), beam_agent_core:query_opts(), #hstate{}) ->
     {ok, iodata(), #hstate{}} | {error, term()}.
 encode_query(Prompt, Params, #hstate{sdk_hook_registry = HookReg,
@@ -246,6 +258,32 @@ on_state_enter(_State, _OldState, HState) ->
 is_query_complete(#{type := result}, _HState) -> true;
 is_query_complete(#{type := error}, _HState) -> true;
 is_query_complete(_Msg, _HState) -> false.
+
+-doc "Send a setModel control_request to the Claude CLI (optimistic update).".
+-spec handle_set_model(binary(), #hstate{}) ->
+    {ok, binary(), [beam_agent_session_handler:handler_action()], #hstate{}}.
+handle_set_model(Model, #hstate{} = HState) ->
+    ReqId = beam_agent_core:make_request_id(),
+    Request = #{<<"subtype">> => <<"setModel">>,
+                <<"model">> => Model},
+    ControlMsg = #{<<"type">> => <<"control_request">>,
+                   <<"request_id">> => ReqId,
+                   <<"request">> => Request},
+    Encoded = beam_agent_jsonl:encode_line(ControlMsg),
+    {ok, Model, [{send, Encoded}], HState}.
+
+-doc "Send a set_permission_mode control_request to the Claude CLI.".
+-spec handle_set_permission_mode(binary(), #hstate{}) ->
+    {ok, binary(), [beam_agent_session_handler:handler_action()], #hstate{}}.
+handle_set_permission_mode(Mode, #hstate{} = HState) ->
+    ReqId = beam_agent_core:make_request_id(),
+    Request = #{<<"subtype">> => <<"set_permission_mode">>,
+                <<"permission_mode">> => Mode},
+    ControlMsg = #{<<"type">> => <<"control_request">>,
+                   <<"request_id">> => ReqId,
+                   <<"request">> => Request},
+    Encoded = beam_agent_jsonl:encode_line(ControlMsg),
+    {ok, Mode, [{send, Encoded}], HState}.
 
 %%====================================================================
 %% Internal: initializing handshake
@@ -369,6 +407,16 @@ classify_and_handle(#{type := control_response, request_id := ReqId} = CtrlResp,
             extract_messages(Rest, HState, Pending1, MsgsAcc, ActionsAcc);
         error ->
             %% Orphaned response — discard
+            extract_messages(Rest, HState, Pending, MsgsAcc, ActionsAcc)
+    end;
+classify_and_handle(#{type := control_cancel_request, request_id := ReqId},
+                    _RawMsg, Rest, HState, Pending, MsgsAcc, ActionsAcc) ->
+    %% CLI cancelled a pending hook callback — remove from pending
+    case maps:take(ReqId, Pending) of
+        {From, Pending1} ->
+            gen_statem:reply(From, {error, cancelled}),
+            extract_messages(Rest, HState, Pending1, MsgsAcc, ActionsAcc);
+        error ->
             extract_messages(Rest, HState, Pending, MsgsAcc, ActionsAcc)
     end;
 classify_and_handle(Msg, _RawMsg, Rest, HState, Pending, MsgsAcc, ActionsAcc) ->

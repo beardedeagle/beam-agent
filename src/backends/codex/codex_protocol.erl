@@ -22,11 +22,23 @@
          parse_approval_decision/1,
          encode_approval_decision/1,
          encode_ask_for_approval/1,
-         encode_sandbox_mode/1]).
+         encode_sandbox_mode/1,
+         %% CDX-5: client request method builders
+         elicitation_increment_params/1,
+         elicitation_decrement_params/1,
+         shell_command_params/3,
+         background_terminals_clean_params/1,
+         command_write_params/2,
+         command_terminate_params/2,
+         command_resize_params/3,
+         %% CDX-6: OverrideTurnContext
+         override_turn_context_params/1]).
 -export_type([approval_decision/0,
               file_approval_decision/0,
               ask_for_approval/0,
               sandbox_mode/0,
+              sandbox_policy/0,
+              granular_approval_config/0,
               user_input/0]).
 -dialyzer({nowarn_function, [{normalize_notification, 2}]}).
 -dialyzer({no_underspecs,
@@ -54,12 +66,26 @@
             {maybe_put, 3},
             {maybe_put_opt, 4}]}).
 -type approval_decision() ::
-          accept | accept_for_session | decline | cancel.
+          approved | approved_for_session | denied | abort |
+          approved_exec_policy_amendment | network_policy_amendment.
 -type file_approval_decision() ::
-          accept | accept_for_session | decline | cancel.
+          approved | approved_for_session | denied | abort.
 -type ask_for_approval() ::
-          untrusted | on_failure | on_request | reject | never.
--type sandbox_mode() :: read_only | workspace_write | danger_full_access.
+          untrusted | on_failure | on_request | never |
+          {granular, granular_approval_config()}.
+-type granular_approval_config() :: #{
+    binary() => on_failure | on_request | never
+}.
+-type sandbox_policy() :: #{
+    type := read_only | workspace_write | full_access,
+    writable_roots => [binary()],
+    read_only_access => all | none,
+    network_access => full | none | firewall,
+    network_firewall_rules => [map()],
+    exclude_tmpdir_env_var => boolean(),
+    exclude_slash_tmp => boolean()
+}.
+-type sandbox_mode() :: sandbox_policy() | read_only | workspace_write | danger_full_access.
 -type user_input() :: #{binary() => term()}.
 -spec normalize_notification(binary(), map()) -> beam_agent_core:message().
 normalize_notification(<<"item/agentMessage/delta">>, Params) ->
@@ -320,10 +346,21 @@ normalize_notification(<<"account/login/completed">>, Params) ->
       subtype => <<"account_login_completed">>,
       timestamp => erlang:system_time(millisecond),
       raw => Params};
-normalize_notification(_Method, Params) ->
-    #{type => raw,
+normalize_notification(Method, Params) ->
+    #{type => categorize_notification(Method),
+      subtype => Method,
+      content => Params,
       raw => Params,
       timestamp => erlang:system_time(millisecond)}.
+
+-spec categorize_notification(binary()) -> beam_agent_core:message_type().
+categorize_notification(<<"thread/", _/binary>>)               -> system;
+categorize_notification(<<"hook/", _/binary>>)                  -> system;
+categorize_notification(<<"skills/", _/binary>>)                -> system;
+categorize_notification(<<"mcpServer/", _/binary>>)             -> system;
+categorize_notification(<<"item/autoApprovalReview/", _/binary>>) -> system;
+categorize_notification(<<"command/exec/outputDelta">>)         -> stream_event;
+categorize_notification(_)                                      -> raw.
 -spec normalize_item_started(binary(), map(), map()) ->
                                 beam_agent_core:message().
 normalize_item_started(<<"AgentMessage">>, Item, Params) ->
@@ -349,8 +386,10 @@ normalize_item_started(<<"FileChange">>, Item, Params) ->
           #{<<"action">> => maps:get(<<"action">>, Item, <<>>)},
       timestamp => erlang:system_time(millisecond),
       raw => Params};
-normalize_item_started(_Type, _Item, Params) ->
-    #{type => raw,
+normalize_item_started(Type, Item, Params) ->
+    #{type => categorize_item_type(Type),
+      subtype => Type,
+      content => Item,
       raw => Params,
       timestamp => erlang:system_time(millisecond)}.
 -spec normalize_item_completed(binary(), map(), map()) ->
@@ -372,10 +411,37 @@ normalize_item_completed(<<"FileChange">>, Item, Params) ->
       content => Output,
       timestamp => erlang:system_time(millisecond),
       raw => Params};
-normalize_item_completed(_Type, _Item, Params) ->
-    #{type => raw,
+normalize_item_completed(Type, Item, Params) ->
+    #{type => categorize_item_type(Type),
+      subtype => Type,
+      content => Item,
       raw => Params,
       timestamp => erlang:system_time(millisecond)}.
+
+-spec categorize_item_type(binary()) -> beam_agent_core:message_type().
+categorize_item_type(<<"AgentReasoning", _/binary>>)     -> thinking;
+categorize_item_type(<<"WebSearch", _/binary>>)           -> system;
+categorize_item_type(<<"ImageGeneration", _/binary>>)     -> system;
+categorize_item_type(<<"PatchApply", _/binary>>)          -> system;
+categorize_item_type(<<"ViewImageToolCall">>)             -> tool_use;
+categorize_item_type(<<"Undo", _/binary>>)                -> system;
+categorize_item_type(<<"StreamError">>)                   -> error;
+categorize_item_type(<<"BackgroundEvent">>)               -> system;
+categorize_item_type(<<"TurnAborted">>)                   -> system;
+categorize_item_type(<<"ShutdownComplete">>)              -> system;
+categorize_item_type(<<"EnteredReviewMode">>)             -> system;
+categorize_item_type(<<"ExitedReviewMode">>)              -> system;
+categorize_item_type(<<"SkillsUpdateAvailable">>)         -> system;
+categorize_item_type(<<"PlanUpdate">>)                    -> system;
+categorize_item_type(<<"TokenCount">>)                    -> system;
+categorize_item_type(<<"McpStartup", _/binary>>)          -> system;
+categorize_item_type(<<"ApplyPatchApprovalRequest">>)     -> control_request;
+categorize_item_type(<<"Spawn">>)                         -> system;
+categorize_item_type(<<"Interaction">>)                   -> system;
+categorize_item_type(<<"Waiting">>)                       -> system;
+categorize_item_type(<<"Close">>)                         -> system;
+categorize_item_type(<<"Resume", _/binary>>)              -> system;
+categorize_item_type(_)                                   -> raw.
 -spec thread_start_params(map()) -> map().
 thread_start_params(Opts) ->
     M0 = #{},
@@ -604,10 +670,10 @@ command_write_stdin_params(ProcessId, Stdin, Opts)
     maybe_put_opt(<<"maxOutputTokens">>, max_output_tokens, Opts, M4).
 -spec command_approval_response(approval_decision()) -> map().
 command_approval_response(Decision) ->
-    #{<<"decision">> => encode_approval_decision(Decision)}.
+    #{<<"review_decision">> => encode_approval_decision(Decision)}.
 -spec file_approval_response(file_approval_decision()) -> map().
 file_approval_response(Decision) ->
-    #{<<"decision">> => encode_approval_decision(Decision)}.
+    #{<<"review_decision">> => encode_approval_decision(Decision)}.
 -spec text_input(binary()) -> user_input().
 text_input(Text) when is_binary(Text) ->
     #{<<"type">> => <<"text">>, <<"text">> => Text}.
@@ -621,43 +687,88 @@ request_user_input_response(Answers) when is_map(Answers) ->
 request_user_input_response(_) ->
     #{<<"answers">> => #{}}.
 -spec parse_approval_decision(binary()) -> approval_decision().
-parse_approval_decision(<<"accept">>) ->
-    accept;
-parse_approval_decision(<<"acceptForSession">>) ->
-    accept_for_session;
-parse_approval_decision(<<"decline">>) ->
-    decline;
-parse_approval_decision(<<"cancel">>) ->
-    cancel;
+parse_approval_decision(<<"approved">>) ->
+    approved;
+parse_approval_decision(<<"approved_for_session">>) ->
+    approved_for_session;
+parse_approval_decision(<<"denied">>) ->
+    denied;
+parse_approval_decision(<<"abort">>) ->
+    abort;
+parse_approval_decision(<<"approved_exec_policy_amendment">>) ->
+    approved_exec_policy_amendment;
+parse_approval_decision(<<"network_policy_amendment">>) ->
+    network_policy_amendment;
 parse_approval_decision(_) ->
-    decline.
+    denied.
 -spec encode_approval_decision(approval_decision()) -> binary().
-encode_approval_decision(accept) ->
-    <<"accept">>;
-encode_approval_decision(accept_for_session) ->
-    <<"acceptForSession">>;
-encode_approval_decision(decline) ->
-    <<"decline">>;
-encode_approval_decision(cancel) ->
-    <<"cancel">>.
--spec encode_ask_for_approval(ask_for_approval()) -> binary().
+encode_approval_decision(approved) ->
+    <<"approved">>;
+encode_approval_decision(approved_for_session) ->
+    <<"approved_for_session">>;
+encode_approval_decision(denied) ->
+    <<"denied">>;
+encode_approval_decision(abort) ->
+    <<"abort">>;
+encode_approval_decision(approved_exec_policy_amendment) ->
+    <<"approved_exec_policy_amendment">>;
+encode_approval_decision(network_policy_amendment) ->
+    <<"network_policy_amendment">>.
+-spec encode_ask_for_approval(ask_for_approval()) -> binary() | map().
 encode_ask_for_approval(untrusted) ->
     <<"untrusted">>;
 encode_ask_for_approval(on_failure) ->
     <<"on-failure">>;
 encode_ask_for_approval(on_request) ->
     <<"on-request">>;
-encode_ask_for_approval(reject) ->
-    <<"reject">>;
 encode_ask_for_approval(never) ->
-    <<"never">>.
--spec encode_sandbox_mode(sandbox_mode()) -> binary().
+    <<"never">>;
+encode_ask_for_approval({granular, Config}) when is_map(Config) ->
+    #{<<"type">> => <<"granular">>,
+      <<"config">> => maps:map(
+          fun(_ToolName, Policy) ->
+              encode_ask_for_approval(Policy)
+          end,
+          Config)}.
+-spec encode_sandbox_mode(sandbox_mode()) -> map().
+encode_sandbox_mode(#{type := Type} = Policy) ->
+    Base = #{<<"type">> => encode_sandbox_type(Type)},
+    M1 = case maps:find(writable_roots, Policy) of
+        {ok, Roots} -> Base#{<<"writableRoots">> => Roots};
+        error -> Base
+    end,
+    M2 = case maps:find(read_only_access, Policy) of
+        {ok, Access} -> M1#{<<"readOnlyAccess">> => atom_to_binary(Access)};
+        error -> M1
+    end,
+    M3 = case maps:find(network_access, Policy) of
+        {ok, Net} -> M2#{<<"networkAccess">> => atom_to_binary(Net)};
+        error -> M2
+    end,
+    M4 = case maps:find(network_firewall_rules, Policy) of
+        {ok, Rules} -> M3#{<<"networkFirewallRules">> => Rules};
+        error -> M3
+    end,
+    M5 = case maps:find(exclude_tmpdir_env_var, Policy) of
+        {ok, ExTmp} -> M4#{<<"excludeTmpdirEnvVar">> => ExTmp};
+        error -> M4
+    end,
+    case maps:find(exclude_slash_tmp, Policy) of
+        {ok, ExSlash} -> M5#{<<"excludeSlashTmp">> => ExSlash};
+        error -> M5
+    end;
 encode_sandbox_mode(read_only) ->
-    <<"read-only">>;
+    #{<<"type">> => <<"readOnly">>};
 encode_sandbox_mode(workspace_write) ->
-    <<"workspace-write">>;
+    #{<<"type">> => <<"workspaceWrite">>};
 encode_sandbox_mode(danger_full_access) ->
-    <<"danger-full-access">>.
+    #{<<"type">> => <<"fullAccess">>}.
+
+-dialyzer({no_underspecs, [{encode_sandbox_type, 1}]}).
+-spec encode_sandbox_type(read_only | workspace_write | full_access) -> binary().
+encode_sandbox_type(read_only) -> <<"readOnly">>;
+encode_sandbox_type(workspace_write) -> <<"workspaceWrite">>;
+encode_sandbox_type(full_access) -> <<"fullAccess">>.
 -spec maybe_put(term(), term(), map()) -> map().
 maybe_put(_Key, <<>>, Map) ->
     Map;
@@ -791,6 +902,94 @@ attachment_value(Attachment, [Key | Rest], Default) ->
     end;
 attachment_value(_Attachment, [], Default) ->
     Default.
+%%====================================================================
+%% CDX-5: Client request method param builders
+%%
+%% Each function builds params for the named JSON-RPC method, sent
+%% via beam_agent:send_control/3:
+%%   elicitation_increment_params/1  → thread/increment_elicitation
+%%   elicitation_decrement_params/1  → thread/decrement_elicitation
+%%   shell_command_params/3          → thread/shellCommand
+%%   background_terminals_clean_params/1 → thread/backgroundTerminals/clean
+%%   command_write_params/2          → command/exec/write
+%%   command_terminate_params/2      → command/exec/terminate
+%%   command_resize_params/3         → command/exec/resize
+%%====================================================================
+
+-spec elicitation_increment_params(binary()) -> map().
+elicitation_increment_params(ThreadId) ->
+    #{<<"threadId">> => ThreadId}.
+
+-spec elicitation_decrement_params(binary()) -> map().
+elicitation_decrement_params(ThreadId) ->
+    #{<<"threadId">> => ThreadId}.
+
+-spec shell_command_params(binary(), binary() | [binary()], map()) -> map().
+shell_command_params(ThreadId, Command, Opts) when is_map(Opts) ->
+    Cmd = case Command of
+        C when is_list(C) -> [ensure_binary(P) || P <- C];
+        C when is_binary(C) -> [C]
+    end,
+    M0 = #{<<"threadId">> => ThreadId, <<"command">> => Cmd},
+    M1 = maybe_put_opt(<<"cwd">>, cwd, Opts, M0),
+    maybe_put_opt(<<"timeoutMs">>, timeout_ms, Opts, M1).
+
+-spec background_terminals_clean_params(binary()) -> map().
+background_terminals_clean_params(ThreadId) ->
+    #{<<"threadId">> => ThreadId}.
+
+-spec command_write_params(binary(), binary()) ->
+    #{<<_:40, _:_*32>> => binary()}.
+command_write_params(ProcessId, Input)
+  when is_binary(ProcessId), is_binary(Input) ->
+    #{<<"processId">> => ProcessId, <<"input">> => Input}.
+
+-spec command_terminate_params(binary(), map()) -> map().
+command_terminate_params(ProcessId, Opts) when is_map(Opts) ->
+    M0 = #{<<"processId">> => ProcessId},
+    maybe_put_opt(<<"signal">>, signal, Opts, M0).
+
+-spec command_resize_params(binary(), pos_integer(), pos_integer()) -> map().
+command_resize_params(ProcessId, Cols, Rows)
+  when is_binary(ProcessId), is_integer(Cols), is_integer(Rows) ->
+    #{<<"processId">> => ProcessId,
+      <<"cols">> => Cols,
+      <<"rows">> => Rows}.
+
+%%====================================================================
+%% CDX-6: OverrideTurnContext
+%%
+%% Builds params for thread/overrideTurnContext — changes model,
+%% approval_policy, sandbox_policy, effort, etc. at runtime.
+%%====================================================================
+
+-dialyzer({no_underspecs, [{override_turn_context_params, 1}]}).
+-spec override_turn_context_params(map()) -> map().
+override_turn_context_params(Opts) when is_map(Opts) ->
+    M0 = #{},
+    M1 = maybe_put_opt(<<"model">>, model, Opts, M0),
+    M2 = maybe_put_opt(<<"effort">>, effort, Opts, M1),
+    M3 = maybe_put_opt(<<"cwd">>, cwd, Opts, M2),
+    M4 = maybe_put_opt(<<"summary">>, summary, Opts, M3),
+    M5 = maybe_put_opt(<<"serviceTier">>, service_tier, Opts, M4),
+    M6 = maybe_put_opt(<<"collaborationMode">>,
+                        collaboration_mode, Opts, M5),
+    M7 = maybe_put_opt(<<"personality">>, personality, Opts, M6),
+    M8 = case maps:find(approval_policy, Opts) of
+        {ok, Ap} ->
+            M7#{<<"askForApproval">> => encode_ask_for_approval(Ap)};
+        error -> M7
+    end,
+    case maps:find(sandbox_mode, Opts) of
+        {ok, Sp} ->
+            M8#{<<"sandboxMode">> => encode_sandbox_mode(Sp)};
+        error -> M8
+    end.
+
+%%====================================================================
+%% Internal: binary conversion
+%%====================================================================
+
 -spec ensure_binary(term()) -> binary().
 ensure_binary(Value) when is_binary(Value) ->
     Value;

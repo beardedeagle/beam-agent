@@ -160,6 +160,9 @@ query(Pid, Prompt)     -> {ok, [Message]} | {error, Reason}
 query(Pid, Prompt, Params) -> {ok, [Message]} | {error, Reason}
 health(Pid)            -> ready | connecting | initializing | active_query | error
 session_info(Pid)      -> {ok, Map} | {error, Reason}
+set_model(Pid, Model)  -> {ok, term()} | {error, term()}
+set_permission_mode(Pid, Mode) -> {ok, term()} | {error, term()}
+session_capabilities(Pid) -> {ok, [Capability]} | {error, term()}
 child_spec(Opts)       -> supervisor:child_spec()
 ```
 

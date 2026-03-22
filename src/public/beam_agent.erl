@@ -64,7 +64,10 @@ ok = beam_agent:stop(Session).
     parse_stop_reason/1,
     parse_permission_mode/1,
     collect_messages/4,
-    collect_messages/5
+    collect_messages/5,
+    set_model/2,
+    set_permission_mode/2,
+    session_capabilities/1
 ]).
 
 -export_type([
@@ -511,6 +514,43 @@ build of the SDK (e.g., [claude, codex, gemini, opencode, copilot]).
 """.
 -spec list_backends() -> [backend()].
 list_backends() -> beam_agent_core:list_backends().
+
+-doc """
+Change the model at runtime for a live session.
+
+Sends a model-change request through the session engine to the backend
+handler. Returns `{ok, Model}` on success or `{error, Reason}` if the
+backend does not support runtime model switching.
+""".
+-spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+set_model(Session, Model) -> beam_agent_core:set_model(Session, Model).
+
+-doc """
+Change the permission mode at runtime for a live session.
+
+Sends a permission-mode-change request through the session engine to the
+backend handler. Returns `{ok, Mode}` on success or `{error, Reason}` if
+the backend does not support runtime permission mode changes.
+""".
+-spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+set_permission_mode(Session, Mode) ->
+    beam_agent_core:set_permission_mode(Session, Mode).
+
+-doc """
+Return the projected capabilities for a live session.
+
+Resolves the backend from the running session process and returns the full
+capability list. This is a convenience wrapper around
+`beam_agent_capabilities:for_session/1`.
+""".
+-spec session_capabilities(pid()) ->
+    {ok, [map()]} |
+    {error, backend_not_present |
+            {unknown_backend, term()} |
+            {invalid_session_info, term()} |
+            {session_backend_lookup_failed, term()}}.
+session_capabilities(Session) ->
+    beam_agent_capabilities:for_session(Session).
 
 -doc """
 Normalize a raw wire-format message into the SDK message format.

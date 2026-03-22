@@ -50,7 +50,19 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
     agent => binary(),
     mode => binary(),
     system => binary() | map(),
-    tools => map() | list()
+    tools => map() | list(),
+    max_tokens => pos_integer(),
+    max_turns => pos_integer(),
+    allowed_tools => [binary()],
+    disallowed_tools => [binary()],
+    permission_mode => binary(),
+    output_format => map() | text | json_schema | binary(),
+    thinking => map(),
+    effort => binary(),
+    max_budget_usd => number(),
+    sandbox_mode => binary(),
+    cwd => binary(),
+    approval_policy => binary()
 }.
 
 -type provider_entry() :: #{
@@ -88,7 +100,10 @@ transport options remain outside this table.
 """.
 -spec register_session(pid() | binary(), map()) -> ok.
 register_session(Session, Opts) when is_map(Opts) ->
-    Defaults = maps:with([provider_id, provider, model_id, agent, mode, system, tools], Opts),
+    Defaults = maps:with([provider_id, provider, model_id, agent, mode, system, tools,
+                          max_tokens, max_turns, allowed_tools, disallowed_tools,
+                          permission_mode, output_format, thinking, effort,
+                          max_budget_usd, sandbox_mode, cwd, approval_policy], Opts),
     case map_size(defaulted_state(Defaults)) of
         0 ->
             ok;
@@ -351,11 +366,20 @@ Merge runtime defaults into query params.
 
 Explicit query params always win over stored runtime defaults.
 Nested provider config maps are merged shallowly.
+
+Per-query `model` overrides: the `model` key flows through to each
+backend's `encode_query/3`, but whether the underlying CLI honors it
+varies by backend. Claude, Copilot, Gemini, and Codex ignore per-query
+model — use `set_model/2` to switch models at the session level.
+OpenCode may honor per-prompt model via its REST API.
 """.
 -spec merge_query_opts(pid() | binary(), map()) -> map().
 merge_query_opts(Session, Params) when is_map(Params) ->
     {ok, State} = get_raw_state(Session),
-    Defaults = maps:with([provider_id, provider, model_id, agent, mode, system, tools], State),
+    Defaults = maps:with([provider_id, provider, model_id, agent, mode, system, tools,
+                          max_tokens, max_turns, allowed_tools, disallowed_tools,
+                          permission_mode, output_format, thinking, effort,
+                          max_budget_usd, sandbox_mode, cwd, approval_policy], State),
     Merged0 = maps:merge(Defaults, Params),
     case {maps:get(provider, Defaults, undefined), maps:get(provider, Params, undefined)} of
         {ProviderDefault, ProviderParams}

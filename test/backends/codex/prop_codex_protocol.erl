@@ -74,13 +74,15 @@ prop_output_always_has_type() ->
 
 %% Property 3: parse_approval_decision/1 always returns a valid atom
 prop_parse_approval_valid() ->
-    ValidAtoms = [accept, accept_for_session, decline, cancel],
+    ValidAtoms = [approved, approved_for_session, denied, abort,
+                  approved_exec_policy_amendment, network_policy_amendment],
     ?FORALL(Input, gen_approval_input(),
         lists:member(codex_protocol:parse_approval_decision(Input), ValidAtoms)).
 
 %% Property 4: encode then parse is identity for known decisions
 prop_approval_roundtrip() ->
-    ?FORALL(Decision, oneof([accept, accept_for_session, decline, cancel]),
+    ?FORALL(Decision, oneof([approved, approved_for_session, denied, abort,
+                             approved_exec_policy_amendment, network_policy_amendment]),
         begin
             Encoded = codex_protocol:encode_approval_decision(Decision),
             Decoded = codex_protocol:parse_approval_decision(Encoded),
@@ -154,8 +156,9 @@ gen_item() ->
 
 gen_approval_input() ->
     oneof([
-        <<"accept">>, <<"acceptForSession">>, <<"decline">>, <<"cancel">>,
-        binary()  %% random -> decline
+        <<"approved">>, <<"approved_for_session">>, <<"denied">>, <<"abort">>,
+        <<"approved_exec_policy_amendment">>, <<"network_policy_amendment">>,
+        binary()  %% random -> denied
     ]).
 
 gen_method_type_pair() ->

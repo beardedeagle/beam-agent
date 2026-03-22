@@ -94,9 +94,9 @@ cancel(Pid, Ref) ->
     gen_statem:call(Pid, {cancel, Ref}, 5_000).
 
 -spec rewind_files(pid(), binary()) -> {ok, term()} | {error, term()}.
-rewind_files(Pid, CheckpointUuid) ->
+rewind_files(Pid, UserMessageId) ->
     send_control(Pid, <<"rewind_files">>,
-                 #{<<"checkpoint_uuid">> => CheckpointUuid}).
+                 #{<<"user_message_id">> => UserMessageId}).
 
 -spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
 stop_task(Pid, TaskId) ->

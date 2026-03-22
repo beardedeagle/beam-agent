@@ -21,6 +21,7 @@
     encode_interrupt/1,
     handle_control/4,
     handle_set_model/2,
+    handle_set_permission_mode/2,
     on_state_enter/3,
     is_query_complete/2
 ]).
@@ -150,7 +151,12 @@ handle_data(Buffer, HState) ->
         process_normalized_messages(Messages, HState1, [], []),
     {ok, DeliverMsgs, RestBuf, Actions, HState2}.
 
--doc "Encode an outgoing query — fire hook, build session.send request.".
+-doc """
+Encode an outgoing query — fire hook, build session.send request.
+
+Model is a session-level setting — per-query model overrides in params are
+not honored by the Copilot CLI. Use `set_model/2` to switch models.
+""".
 -spec encode_query(binary(), beam_agent_core:query_opts(), #hstate{}) ->
     {ok, iodata(), #hstate{}} | {error, term()}.
 encode_query(_Prompt, _Params,
@@ -312,15 +318,30 @@ handle_control(Method, Params, From, HState) ->
     },
     {noreply, [{send, Encoded}], HState1}.
 
--doc "Handle set_model/2 — send session.model.switchTo request with pending tracking.".
--spec handle_set_model(binary(), #hstate{}) ->
+-doc """
+Handle set_model/2 — send session.model.switchTo request with pending tracking.
+
+Accepts either a binary model ID or a map with model and optional
+reasoningEffort: `#{model => <<"model-id">>, reasoning_effort => <<"high">>}`.
+""".
+-spec handle_set_model(binary() | map(), #hstate{}) ->
     {ok, term(), [beam_agent_session_handler:handler_action()], #hstate{}} |
     {error, term()}.
 handle_set_model(_Model, #hstate{copilot_session_id = undefined}) ->
     {error, no_session};
-handle_set_model(Model, #hstate{copilot_session_id = SessionId} = HState) ->
+handle_set_model(ModelSpec, #hstate{copilot_session_id = SessionId} = HState)
+  when is_map(ModelSpec) ->
+    ModelId = maps:get(model, ModelSpec, maps:get(<<"model">>, ModelSpec, <<>>)),
     ReqId = make_request_id(HState),
-    Params = #{<<"sessionId">> => SessionId, <<"modelId">> => Model},
+    Base = #{<<"sessionId">> => SessionId, <<"modelId">> => ModelId},
+    Params = case maps:find(reasoning_effort, ModelSpec) of
+        {ok, Effort} -> Base#{<<"reasoningEffort">> => Effort};
+        error ->
+            case maps:find(<<"reasoningEffort">>, ModelSpec) of
+                {ok, Effort} -> Base#{<<"reasoningEffort">> => Effort};
+                error -> Base
+            end
+    end,
     Msg = copilot_protocol:encode_request(
               ReqId, <<"session.model.switchTo">>, Params),
     Encoded = copilot_frame:encode_message(Msg),
@@ -328,9 +349,30 @@ handle_set_model(Model, #hstate{copilot_session_id = SessionId} = HState) ->
         next_id = HState#hstate.next_id + 1,
         pending = maps:put(ReqId, {internal, undefined},
                            HState#hstate.pending),
-        model = Model
+        model = ModelId
     },
-    {ok, Model, [{send, Encoded}], HState1}.
+    {ok, ModelId, [{send, Encoded}], HState1};
+handle_set_model(Model, HState) when is_binary(Model) ->
+    handle_set_model(#{model => Model}, HState).
+
+-doc "Handle set_permission_mode/2 — send session.mode.set request with pending tracking.".
+-spec handle_set_permission_mode(binary(), #hstate{}) ->
+    {ok, binary(), [beam_agent_session_handler:handler_action()], #hstate{}} |
+    {error, term()}.
+handle_set_permission_mode(_Mode, #hstate{copilot_session_id = undefined}) ->
+    {error, no_session};
+handle_set_permission_mode(Mode, #hstate{copilot_session_id = SessionId} = HState) ->
+    ReqId = make_request_id(HState),
+    Params = #{<<"sessionId">> => SessionId, <<"mode">> => Mode},
+    Msg = copilot_protocol:encode_request(
+              ReqId, <<"session.mode.set">>, Params),
+    Encoded = copilot_frame:encode_message(Msg),
+    HState1 = HState#hstate{
+        next_id = HState#hstate.next_id + 1,
+        pending = maps:put(ReqId, {internal, undefined},
+                           HState#hstate.pending)
+    },
+    {ok, Mode, [{send, Encoded}], HState1}.
 
 -doc """
 Handle state enter events.
@@ -519,6 +561,14 @@ handle_server_request(ReqId, <<"hooks.invoke">>, Params, HState) ->
     call_hook_handler(ReqId, HookType, Input, HState);
 handle_server_request(ReqId, <<"user_input.request">>, Params, HState) ->
     call_user_input_handler(ReqId, Params, HState);
+handle_server_request(ReqId, <<"userInput.request">>, Params, HState) ->
+    call_user_input_handler(ReqId, Params, HState);
+handle_server_request(ReqId, <<"systemMessage.transform">>, Params, HState) ->
+    Sections = maps:get(<<"sections">>, Params, []),
+    Response = copilot_protocol:encode_response(
+                   ReqId, #{<<"sections">> => Sections}),
+    send_via_port(Response, HState),
+    HState;
 handle_server_request(ReqId, Method, _Params, HState) ->
     logger:warning("Unknown Copilot server request: ~s", [Method]),
     Response = copilot_protocol:encode_error_response(
@@ -536,7 +586,9 @@ handle_server_request(ReqId, Method, _Params, HState) ->
 call_permission_handler(ReqId, Request, HState) ->
     Result = case HState#hstate.permission_handler of
         undefined ->
-            copilot_protocol:build_permission_result(undefined);
+            copilot_protocol:build_permission_result(
+                #{<<"kind">> =>
+                    <<"denied-no-approval-rule-and-could-not-request-from-user">>});
         Handler ->
             try
                 Invocation = #{session_id => HState#hstate.copilot_session_id},
@@ -546,7 +598,9 @@ call_permission_handler(ReqId, Request, HState) ->
                 end
             catch
                 _:_ ->
-                    copilot_protocol:build_permission_result(undefined)
+                    copilot_protocol:build_permission_result(
+                #{<<"kind">> =>
+                    <<"denied-no-approval-rule-and-could-not-request-from-user">>})
             end
     end,
     Response = copilot_protocol:encode_response(ReqId, Result),
@@ -651,10 +705,103 @@ call_user_input_handler(ReqId, Params, HState) ->
      #hstate{}}.
 process_normalized_messages([], HState, MsgsAcc, ActionsAcc) ->
     {lists:reverse(MsgsAcc), lists:reverse(ActionsAcc), HState};
+%% v3 broadcast: external_tool.requested — dispatch tool call, send response RPC
+process_normalized_messages(
+    [#{type := tool_use, request_id := ReqId} = Msg | Rest],
+    HState, MsgsAcc, ActionsAcc)
+  when ReqId =/= undefined ->
+    HState1 = handle_v3_tool_call(ReqId, Msg, HState),
+    HState2 = maybe_fire_message_hooks(Msg, HState1),
+    _ = track_message(Msg, HState2),
+    process_normalized_messages(Rest, HState2, [Msg | MsgsAcc], ActionsAcc);
+%% v3 broadcast: permission.requested — dispatch permission, send response RPC
+process_normalized_messages(
+    [#{type := control_request, subtype := <<"permission">>,
+       request_id := ReqId} = Msg | Rest],
+    HState, MsgsAcc, ActionsAcc)
+  when ReqId =/= undefined ->
+    HState1 = handle_v3_permission_request(ReqId, Msg, HState),
+    HState2 = maybe_fire_message_hooks(Msg, HState1),
+    _ = track_message(Msg, HState2),
+    process_normalized_messages(Rest, HState2, [Msg | MsgsAcc], ActionsAcc);
+%% All other messages — hooks + tracking only
 process_normalized_messages([Msg | Rest], HState, MsgsAcc, ActionsAcc) ->
     HState1 = maybe_fire_message_hooks(Msg, HState),
     _ = track_message(Msg, HState1),
     process_normalized_messages(Rest, HState1, [Msg | MsgsAcc], ActionsAcc).
+
+%%====================================================================
+%% Internal: v3 broadcast response RPCs
+%%====================================================================
+
+-spec handle_v3_tool_call(binary(), beam_agent_core:message(), #hstate{}) ->
+    #hstate{}.
+handle_v3_tool_call(ToolReqId, Msg,
+                    #hstate{sdk_mcp_registry = Registry} = HState)
+  when is_map(Registry) ->
+    ToolName = maps:get(tool_name, Msg, <<>>),
+    ToolInput = maps:get(tool_input, Msg, #{}),
+    Result = beam_agent_tool_registry:call_tool_by_name(
+                 ToolName, ToolInput, Registry),
+    ResultParams = case Result of
+        {ok, Content} ->
+            WireContent = [format_mcp_content(C) || C <- Content],
+            #{<<"toolCallId">> => ToolReqId,
+              <<"resultType">> => <<"success">>,
+              <<"content">> => WireContent};
+        {error, ErrMsg} ->
+            #{<<"toolCallId">> => ToolReqId,
+              <<"resultType">> => <<"failure">>,
+              <<"error">> => ErrMsg}
+    end,
+    send_v3_rpc(<<"session.tools.handlePendingToolCall">>,
+                ResultParams, HState);
+handle_v3_tool_call(_ToolReqId, _Msg, HState) ->
+    %% No MCP registry registered — nothing to dispatch
+    HState.
+
+-spec handle_v3_permission_request(binary(), beam_agent_core:message(),
+                                   #hstate{}) -> #hstate{}.
+handle_v3_permission_request(PermReqId, Msg, HState) ->
+    Request = maps:get(request, Msg, #{}),
+    PermResult = case HState#hstate.permission_handler of
+        undefined ->
+            copilot_protocol:build_permission_result(
+                #{<<"kind">> =>
+                    <<"denied-no-approval-rule-and-could-not-request-from-user">>});
+        Handler ->
+            try
+                Invocation = #{session_id =>
+                                   HState#hstate.copilot_session_id},
+                case Handler(Request, Invocation) of
+                    R -> copilot_protocol:build_permission_result(R)
+                end
+            catch
+                _:_ ->
+                    copilot_protocol:build_permission_result(
+                #{<<"kind">> =>
+                    <<"denied-no-approval-rule-and-could-not-request-from-user">>})
+            end
+    end,
+    Params = PermResult#{<<"permissionRequestId">> => PermReqId},
+    send_v3_rpc(
+        <<"session.permissions.handlePendingPermissionRequest">>,
+        Params, HState).
+
+-spec send_v3_rpc(binary(), map(), #hstate{}) -> #hstate{}.
+send_v3_rpc(Method, Params, HState) ->
+    ReqId = make_request_id(HState),
+    Request = copilot_protocol:encode_request(ReqId, Method, Params),
+    send_via_port(Request, HState),
+    HState#hstate{
+        next_id = HState#hstate.next_id + 1,
+        pending = maps:put(ReqId, {internal, undefined},
+                           HState#hstate.pending)
+    }.
+
+%%====================================================================
+%% Internal: message hooks
+%%====================================================================
 
 -spec maybe_fire_message_hooks(beam_agent_core:message(), #hstate{}) ->
     #hstate{}.

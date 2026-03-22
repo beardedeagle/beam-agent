@@ -38,7 +38,12 @@ session_update_messages(SessionId, Update) when is_map(Update) ->
 -spec prompt_result_message(binary(), map()) -> beam_agent_core:message().
 prompt_result_message(SessionId, Result) when is_binary(SessionId), is_map(Result) ->
     StopReason = maps:get(<<"stopReason">>, Result, <<>>),
-    #{
+    Meta = maps:get(<<"_meta">>, Result, #{}),
+    Quota = maps:get(<<"quota">>, Meta, #{}),
+    TokenCount = maps:get(<<"token_count">>, Quota, #{}),
+    InputTokens = maps:get(<<"input_tokens">>, TokenCount, undefined),
+    OutputTokens = maps:get(<<"output_tokens">>, TokenCount, undefined),
+    Base = #{
         type => result,
         session_id => SessionId,
         content => <<>>,
@@ -46,7 +51,8 @@ prompt_result_message(SessionId, Result) when is_binary(SessionId), is_map(Resul
         stop_reason_atom => beam_agent_core:parse_stop_reason(StopReason),
         raw => Result,
         timestamp => erlang:system_time(millisecond)
-    }.
+    },
+    maybe_add_token_usage(Base, InputTokens, OutputTokens).
 
 %%--------------------------------------------------------------------
 %% Internal helpers
@@ -161,6 +167,16 @@ update_text(Update) ->
         _ ->
             iolist_to_binary(io_lib:format("~tp", [maps:without([<<"sessionUpdate">>], Update)]))
     end.
+
+-spec maybe_add_token_usage(map(), integer() | undefined,
+                            integer() | undefined) -> map().
+maybe_add_token_usage(Msg, undefined, undefined) ->
+    Msg;
+maybe_add_token_usage(Msg, Input, Output) ->
+    Usage = maps:from_list(
+        [{input_tokens, Input} || Input =/= undefined] ++
+        [{output_tokens, Output} || Output =/= undefined]),
+    Msg#{token_usage => Usage}.
 
 -spec nonempty_or_default(binary(), binary()) -> binary().
 nonempty_or_default(<<>>, Default) ->

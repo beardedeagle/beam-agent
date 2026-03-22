@@ -52,8 +52,8 @@ build_prompt_input(Prompt, Opts) ->
     M5 = maybe_add_tools(M4, Opts),
     maybe_add_output_format(M5, Opts).
 -spec build_permission_reply(binary(), binary()) -> map().
-build_permission_reply(PermId, Decision) ->
-    #{<<"id">> => PermId, <<"decision">> => Decision}.
+build_permission_reply(_PermId, Decision) ->
+    #{<<"response">> => Decision}.
 -spec build_session_init_input(map()) ->
                                   {ok, map()} |
                                   {error, invalid_init_opts}.
@@ -109,6 +109,9 @@ parse_session(Raw) when is_map(Raw) ->
                         beam_agent_core:message() | skip.
 dispatch_event(<<"message.part.updated">>, Payload, Now) ->
     normalize_part_updated(Payload, Now);
+dispatch_event(<<"message.part.delta">>, Payload, Now) ->
+    Part = maps:get(<<"part">>, Payload, #{}),
+    normalize_part_delta(Part, Payload, Now);
 dispatch_event(<<"message.updated">>, Payload, Now) ->
     case maps:get(<<"error">>, Payload, undefined) of
         undefined ->
@@ -160,14 +163,26 @@ dispatch_event(<<"session.error">>, Payload, Now) ->
       content => Content,
       raw => Payload,
       timestamp => Now};
-dispatch_event(<<"permission.updated">>, Payload, Now) ->
-    PermId = maps:get(<<"id">>, Payload, undefined),
-    ReqInfo = maps:get(<<"request">>, Payload, Payload),
+dispatch_event(<<"question.asked">>, Payload, Now) ->
     #{type => control_request,
-      request_id => to_binary(PermId),
-      request => ReqInfo,
-      raw => Payload,
+      subtype => <<"question">>,
+      request_id => maps:get(<<"id">>, Payload, undefined),
+      request => Payload,
       timestamp => Now};
+dispatch_event(<<"question.replied">>, Payload, Now) ->
+    #{type => system,
+      subtype => <<"question_replied">>,
+      content => Payload,
+      timestamp => Now};
+dispatch_event(<<"question.rejected">>, Payload, Now) ->
+    #{type => system,
+      subtype => <<"question_rejected">>,
+      content => Payload,
+      timestamp => Now};
+dispatch_event(<<"permission.asked">>, Payload, Now) ->
+    normalize_permission_event(Payload, Now);
+dispatch_event(<<"permission.updated">>, Payload, Now) ->
+    normalize_permission_event(Payload, Now);
 dispatch_event(<<"server.heartbeat">>, _Payload, _Now) ->
     skip;
 dispatch_event(<<"server.connected">>, Payload, Now) ->
@@ -176,14 +191,55 @@ dispatch_event(<<"server.connected">>, Payload, Now) ->
       content => <<>>,
       raw => Payload,
       timestamp => Now};
-dispatch_event(_Other, Payload, Now) ->
-    #{type => raw, raw => Payload, timestamp => Now}.
+dispatch_event(Other, Payload, Now) ->
+    #{type => categorize_sse_event(Other),
+      subtype => Other,
+      content => Payload,
+      raw => Payload,
+      timestamp => Now}.
+
+-spec categorize_sse_event(binary()) -> atom().
+categorize_sse_event(<<"session.", _/binary>>)      -> system;
+categorize_sse_event(<<"message.", _/binary>>)      -> system;
+categorize_sse_event(<<"permission.", _/binary>>)   -> system;
+categorize_sse_event(<<"question.", _/binary>>)     -> system;
+categorize_sse_event(<<"server.", _/binary>>)       -> system;
+categorize_sse_event(<<"pty.", _/binary>>)          -> system;
+categorize_sse_event(<<"worktree.", _/binary>>)     -> system;
+categorize_sse_event(<<"mcp.", _/binary>>)          -> system;
+categorize_sse_event(<<"config.", _/binary>>)       -> system;
+categorize_sse_event(<<"project.", _/binary>>)      -> system;
+categorize_sse_event(_)                             -> raw.
+
+-spec normalize_permission_event(map(), integer()) -> beam_agent_core:message().
+normalize_permission_event(Payload, Now) ->
+    PermId = maps:get(<<"id">>, Payload, undefined),
+    ReqInfo = maps:get(<<"request">>, Payload, Payload),
+    #{type => control_request,
+      request_id => to_binary(PermId),
+      request => ReqInfo,
+      raw => Payload,
+      timestamp => Now}.
 -spec normalize_part_updated(map(), integer()) ->
                                 beam_agent_core:message() | skip.
 normalize_part_updated(Payload, Now) ->
     Part = maps:get(<<"part">>, Payload, Payload),
     PartType = maps:get(<<"type">>, Part, <<>>),
     dispatch_part_type(PartType, Part, Payload, Now).
+-spec normalize_part_delta(map(), map(), integer()) ->
+                              beam_agent_core:message().
+normalize_part_delta(#{<<"type">> := <<"text">>} = Part, Payload, Now) ->
+    Content = maps:get(<<"delta">>, Part,
+                  maps:get(<<"text">>, Part, <<>>)),
+    #{type => text,
+      content => to_binary(Content),
+      raw => Payload,
+      timestamp => Now};
+normalize_part_delta(Part, Payload, Now) ->
+    #{type => stream_event,
+      content => Part,
+      raw => Payload,
+      timestamp => Now}.
 -spec dispatch_part_type(binary(), map(), map(), integer()) ->
                             beam_agent_core:message() | skip.
 dispatch_part_type(<<"text">>, Part, Payload, Now) ->
@@ -374,7 +430,7 @@ maybe_add_model_ref(Base, Opts) ->
     end.
 -spec normalize_parts([map()]) -> [map()].
 normalize_parts(Parts) ->
-    [ 
+    [
      normalize_part(Part) ||
          Part <- Parts
     ].
@@ -403,7 +459,7 @@ normalize_part(Part) when is_map(Part) ->
 normalize_attachments(undefined) ->
     [];
 normalize_attachments(Attachments) when is_list(Attachments) ->
-    [ 
+    [
      normalize_attachment(Attachment) ||
          Attachment <- Attachments
     ].

@@ -72,10 +72,7 @@
          mcp_server/2,
          sdk_hook/2,
          sdk_hook/3,
-         app_info/1,
-         app_init/1,
          app_log/2,
-         app_modes/1,
          list_server_sessions/1,
          get_server_session/2,
          delete_server_session/2,
@@ -171,7 +168,25 @@
          command_run/2,
          command_run/3,
          submit_feedback/2,
-         turn_respond/3]).
+         turn_respond/3,
+         session_abort/2,
+         session_status_list/1,
+         list_permissions/1,
+         list_skills/1,
+         pty_connect/2,
+         tui_control_next/1,
+         tui_control_response/2,
+         experimental_resources/1,
+         experimental_sessions/1,
+         experimental_tools/1,
+         experimental_tool_ids/1,
+         experimental_workspace_list/1,
+         experimental_workspace_create/2,
+         experimental_workspace_delete/2,
+         mcp_auth_start/3,
+         mcp_auth_remove/2,
+         mcp_auth_callback/3,
+         mcp_auth_authenticate/3]).
 
 %% Return shape is from universal core; map() is intentional.
 -dialyzer({nowarn_function,
@@ -315,12 +330,6 @@ sdk_hook(Event, Callback) ->
                   beam_agent_hooks_core:hook_def().
 sdk_hook(Event, Callback, Matcher) ->
     beam_agent_hooks_core:hook(Event, Callback, Matcher).
--spec app_info(pid()) -> {ok, map()} | {error, term()}.
-app_info(Session) ->
-    gen_statem:call(Session, app_info, 10000).
--spec app_init(pid()) -> {ok, term()} | {error, term()}.
-app_init(Session) ->
-    gen_statem:call(Session, app_init, 10000).
 -spec app_log(pid(), map()) -> {ok, term()} | {error, term()}.
 app_log(Session, Body) when is_map(Body) ->
     gen_statem:call(Session, {app_log, Body}, 10000).
@@ -335,9 +344,6 @@ get_server_session(Session, Id) ->
                                {ok, term()} | {error, term()}.
 delete_server_session(Session, Id) ->
     gen_statem:call(Session, {delete_session, Id}, 10000).
--spec app_modes(pid()) -> {ok, term()} | {error, term()}.
-app_modes(Session) ->
-    gen_statem:call(Session, app_modes, 10000).
 -spec config_read(pid()) -> {ok, map()} | {error, term()}.
 config_read(Session) ->
     gen_statem:call(Session, config_read, 10000).
@@ -572,6 +578,93 @@ summarize_session(Session, Opts) ->
         {error, _} = Err ->
             Err
     end.
+
+%% Session control
+-spec session_abort(pid(), binary()) -> {ok, term()} | {error, term()}.
+session_abort(Session, SessionId) when is_binary(SessionId) ->
+    gen_statem:call(Session, {session_abort, SessionId}, 10000).
+
+-spec session_status_list(pid()) -> {ok, term()} | {error, term()}.
+session_status_list(Session) ->
+    gen_statem:call(Session, session_status_list, 10000).
+
+%% Permission & skill listing
+-spec list_permissions(pid()) -> {ok, term()} | {error, term()}.
+list_permissions(Session) ->
+    gen_statem:call(Session, list_permissions, 10000).
+
+-spec list_skills(pid()) -> {ok, term()} | {error, term()}.
+list_skills(Session) ->
+    gen_statem:call(Session, list_skills, 10000).
+
+%% PTY
+-spec pty_connect(pid(), binary()) -> {ok, term()} | {error, term()}.
+pty_connect(Session, PtyId) when is_binary(PtyId) ->
+    gen_statem:call(Session, {pty_connect, PtyId}, 10000).
+
+%% TUI control
+-spec tui_control_next(pid()) -> {ok, term()} | {error, term()}.
+tui_control_next(Session) ->
+    gen_statem:call(Session, tui_control_next, 10000).
+
+-spec tui_control_response(pid(), map()) -> {ok, term()} | {error, term()}.
+tui_control_response(Session, Body) when is_map(Body) ->
+    gen_statem:call(Session, {tui_control_response, Body}, 10000).
+
+%% MCP auth
+-spec mcp_auth_start(pid(), binary(), map()) ->
+    {ok, term()} | {error, term()}.
+mcp_auth_start(Session, ServerId, Body)
+  when is_binary(ServerId), is_map(Body) ->
+    gen_statem:call(Session, {mcp_auth_start, ServerId, Body}, 10000).
+
+-spec mcp_auth_remove(pid(), binary()) -> {ok, term()} | {error, term()}.
+mcp_auth_remove(Session, ServerId) when is_binary(ServerId) ->
+    gen_statem:call(Session, {mcp_auth_remove, ServerId}, 10000).
+
+-spec mcp_auth_callback(pid(), binary(), map()) ->
+    {ok, term()} | {error, term()}.
+mcp_auth_callback(Session, ServerId, Body)
+  when is_binary(ServerId), is_map(Body) ->
+    gen_statem:call(Session, {mcp_auth_callback, ServerId, Body}, 10000).
+
+-spec mcp_auth_authenticate(pid(), binary(), map()) ->
+    {ok, term()} | {error, term()}.
+mcp_auth_authenticate(Session, ServerId, Body)
+  when is_binary(ServerId), is_map(Body) ->
+    gen_statem:call(Session, {mcp_auth_authenticate, ServerId, Body}, 10000).
+
+%% Experimental endpoints
+-spec experimental_resources(pid()) -> {ok, term()} | {error, term()}.
+experimental_resources(Session) ->
+    gen_statem:call(Session, experimental_resources, 10000).
+
+-spec experimental_sessions(pid()) -> {ok, term()} | {error, term()}.
+experimental_sessions(Session) ->
+    gen_statem:call(Session, experimental_sessions, 10000).
+
+-spec experimental_tools(pid()) -> {ok, term()} | {error, term()}.
+experimental_tools(Session) ->
+    gen_statem:call(Session, experimental_tools, 10000).
+
+-spec experimental_tool_ids(pid()) -> {ok, term()} | {error, term()}.
+experimental_tool_ids(Session) ->
+    gen_statem:call(Session, experimental_tool_ids, 10000).
+
+-spec experimental_workspace_list(pid()) -> {ok, term()} | {error, term()}.
+experimental_workspace_list(Session) ->
+    gen_statem:call(Session, experimental_workspace_list, 10000).
+
+-spec experimental_workspace_create(pid(), map()) ->
+    {ok, term()} | {error, term()}.
+experimental_workspace_create(Session, Body) when is_map(Body) ->
+    gen_statem:call(Session, {experimental_workspace_create, Body}, 10000).
+
+-spec experimental_workspace_delete(pid(), binary()) ->
+    {ok, term()} | {error, term()}.
+experimental_workspace_delete(Session, Id) when is_binary(Id) ->
+    gen_statem:call(Session, {experimental_workspace_delete, Id}, 10000).
+
 -spec thread_start(pid(), map()) -> {ok, map()}.
 thread_start(Session, Opts) ->
     SessionId = get_session_id(Session),

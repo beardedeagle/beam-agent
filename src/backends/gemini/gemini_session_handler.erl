@@ -18,6 +18,7 @@
     transport_started/2,
     handle_initializing/2,
     encode_interrupt/1,
+    handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3,
     is_query_complete/2
@@ -33,7 +34,8 @@
   | session_start
   | prompt
   | {set_mode, gen_statem:from() | undefined, binary()}
-  | {set_mode_auto, binary()}.
+  | {set_mode_auto, binary()}
+  | {set_model, gen_statem:from() | undefined, binary()}.
 
 -record(hstate, {
     %% Transport ref (stored via transport_started/2 for SIGINT)
@@ -66,6 +68,9 @@
 
     %% Init response (from initialize request)
     init_response = #{}   :: map(),
+
+    %% Agent capabilities (from initialize response)
+    agent_capabilities = #{} :: map(),
 
     %% SDK registries
     sdk_mcp_registry      :: beam_agent_tool_registry:mcp_registry() | undefined,
@@ -129,7 +134,12 @@ init_handler(Opts) ->
 handle_data(Buffer, HState) ->
     extract_messages(Buffer, HState, [], []).
 
--doc "Encode a query as a session/prompt JSON-RPC request.".
+-doc """
+Encode a query as a session/prompt JSON-RPC request.
+
+Model is a session-level setting — per-query model overrides in params are
+not honored by the Gemini CLI. Use `set_model/2` to switch models.
+""".
 -spec encode_query(binary(), beam_agent_core:query_opts(), #hstate{}) ->
     {ok, iodata(), #hstate{}} | {error, term()}.
 encode_query(Prompt, Params,
@@ -166,6 +176,7 @@ encode_query(Prompt, Params,
 -spec build_session_info(#hstate{}) -> map().
 build_session_info(#hstate{session_id = SessionId,
                             init_response = InitResponse,
+                            agent_capabilities = AgentCaps,
                             available_modes = AvailModes,
                             current_mode = CurMode,
                             available_models = AvailModels,
@@ -179,6 +190,7 @@ build_session_info(#hstate{session_id = SessionId,
       protocol => acp,
       gemini_session_id => SessionId,
       init_response => InitResponse,
+      agent_capabilities => AgentCaps,
       modes => #{available_modes => AvailModes,
                  current_mode_id => CurMode},
       models => #{available_models => AvailModels,
@@ -256,6 +268,29 @@ encode_interrupt(#hstate{session_id = SessionId,
 encode_interrupt(_HState) ->
     not_supported.
 
+-doc "Handle set_model/2 — send session/set_model JSON-RPC request.".
+-spec handle_set_model(binary(), #hstate{}) ->
+    {ok, binary(), [beam_agent_session_handler:handler_action()], #hstate{}}.
+handle_set_model(Model, HState) ->
+    case HState#hstate.session_id of
+        undefined ->
+            %% No session yet — store locally for use at session start
+            HState1 = HState#hstate{model = Model},
+            {ok, Model, [], update_session_meta(HState1)};
+        SessionId ->
+            Id = beam_agent_jsonrpc:next_id(),
+            Encoded = beam_agent_jsonrpc:encode_request(
+                          Id,
+                          <<"session/setModel">>,
+                          beam_agent_gemini_wire:set_model_params(
+                              SessionId, Model)),
+            Pending = (HState#hstate.pending)#{
+                          Id => {set_model, undefined, Model}},
+            HState1 = HState#hstate{pending = Pending, model = Model},
+            HState2 = update_session_meta(HState1),
+            {ok, Model, [{send, Encoded}], HState2}
+    end.
+
 -doc """
 Handle set_permission_mode — send session/set_mode JSON-RPC request.
 
@@ -282,7 +317,7 @@ handle_set_permission_mode(Mode, HState) ->
             Id = beam_agent_jsonrpc:next_id(),
             Encoded = beam_agent_jsonrpc:encode_request(
                           Id,
-                          <<"session/set_mode">>,
+                          <<"session/setMode">>,
                           beam_agent_gemini_wire:set_mode_params(
                               SessionId, RequestedMode)),
             Pending = (HState#hstate.pending)#{
@@ -401,8 +436,10 @@ handle_init_frame({response, Id, Result}, HState) ->
     case maps:take(Id, HState#hstate.pending) of
         {init, Pending1} ->
             InitResponse = normalize_map(Result),
+            AgentCaps = parse_agent_capabilities(InitResponse),
             HState1 = HState#hstate{pending = Pending1,
-                                    init_response = InitResponse},
+                                    init_response = InitResponse,
+                                    agent_capabilities = AgentCaps},
             {Actions, HState2} = maybe_send_auth_or_start(HState1),
             {continue, Actions, HState2};
         {auth, Pending1} ->
@@ -590,6 +627,16 @@ handle_response(Id, Result, HState) ->
                                         approval_mode = RequestedMode,
                                         current_mode = RequestedMode}),
             {[], [], HState1};
+        {{set_model, From, RequestedModel}, Pending1} ->
+            HState1 = update_session_meta(
+                          HState#hstate{pending = Pending1,
+                                        model = RequestedModel,
+                                        current_model = RequestedModel}),
+            case From of
+                undefined -> ok;
+                _ -> gen_statem:reply(From, {ok, RequestedModel})
+            end,
+            {[], [], HState1};
         error ->
             {[], [], HState}
     end.
@@ -614,6 +661,13 @@ handle_error_response(Id, Code, Message, ErrData, HState) ->
             end,
             {[], [], HState#hstate{pending = Pending1}};
         {{set_mode_auto, _RequestedMode}, Pending1} ->
+            {[], [], HState#hstate{pending = Pending1}};
+        {{set_model, From, _RequestedModel}, Pending1} ->
+            case From of
+                undefined -> ok;
+                _ -> gen_statem:reply(
+                         From, {error, {set_model_failed, Code, Message}})
+            end,
             {[], [], HState#hstate{pending = Pending1}};
         error ->
             {[], [], HState}
@@ -801,8 +855,21 @@ effective_mode(#hstate{approval_mode = Mode}) ->
 prompt_blocks(_Prompt, #{beam_agent_prompt_blocks := Blocks})
   when is_list(Blocks) ->
     Blocks;
-prompt_blocks(Prompt, _Params) ->
-    [#{<<"type">> => <<"text">>, <<"text">> => Prompt}].
+prompt_blocks(Prompt, Params) ->
+    TextBlock = #{<<"type">> => <<"text">>, <<"text">> => Prompt},
+    ImageBlocks = [#{<<"type">> => <<"image">>,
+                     <<"data">> => maps:get(data, I, maps:get(<<"data">>, I, <<>>)),
+                     <<"mimeType">> => maps:get(mime_type, I, maps:get(<<"mimeType">>, I, <<"image/png">>))}
+                   || I <- maps:get(images, Params, [])],
+    AudioBlocks = [#{<<"type">> => <<"audio">>,
+                     <<"data">> => maps:get(data, A, maps:get(<<"data">>, A, <<>>)),
+                     <<"mimeType">> => maps:get(mime_type, A, maps:get(<<"mimeType">>, A, <<"audio/wav">>))}
+                   || A <- maps:get(audio, Params, [])],
+    CtxBlocks = [#{<<"type">> => <<"embeddedContext">>,
+                   <<"uri">> => maps:get(uri, C, maps:get(<<"uri">>, C, <<>>)),
+                   <<"content">> => maps:get(content, C, maps:get(<<"content">>, C, <<>>))}
+                 || C <- maps:get(embedded_context, Params, [])],
+    [TextBlock | ImageBlocks ++ AudioBlocks ++ CtxBlocks].
 
 -spec maybe_apply_query_mode(map(), #hstate{}) ->
     {iodata(), #hstate{}}.
@@ -823,7 +890,7 @@ maybe_apply_query_mode(Params, HState) ->
             Id = beam_agent_jsonrpc:next_id(),
             ModeEncoded = beam_agent_jsonrpc:encode_request(
                               Id,
-                              <<"session/set_mode">>,
+                              <<"session/setMode">>,
                               beam_agent_gemini_wire:set_mode_params(
                                   SessionId, RequestedMode)),
             Pending = (HState#hstate.pending)#{
@@ -877,6 +944,13 @@ extract_current_model(#{<<"currentModelId">> := Model}, _Default) ->
     Model;
 extract_current_model(_, Default) ->
     Default.
+
+-spec parse_agent_capabilities(map()) -> #{prompt := map(), mcp := map()}.
+parse_agent_capabilities(InitResponse) ->
+    AgentCaps = maps:get(<<"agentCapabilities">>, InitResponse, #{}),
+    PromptCaps = maps:get(<<"promptCapabilities">>, AgentCaps, #{}),
+    McpCaps = maps:get(<<"mcpCapabilities">>, AgentCaps, #{}),
+    #{prompt => PromptCaps, mcp => McpCaps}.
 
 %%====================================================================
 %% Internal: CLI args building
