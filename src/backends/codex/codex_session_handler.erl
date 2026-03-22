@@ -19,6 +19,8 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_control/4,
+    handle_set_model/2,
+    handle_set_permission_mode/2,
     on_state_enter/3,
     is_query_complete/2,
     handle_custom_call/3
@@ -110,7 +112,7 @@ init_handler(Opts) ->
     TransportOpts = #{
         executable  => CliPath,
         args        => ["--app-server"],
-        env         => [{"CODEX_SDK_VERSION", "0.1.0"}
+        env         => [{"CODEX_SDK_VERSION", "0.14.0"}
                         | maps:get(env, Opts, [])],
         cd          => maps:get(work_dir, Opts, undefined),
         mode        => line,
@@ -151,6 +153,10 @@ Encode a query for the Codex backend.
 Fires the `user_prompt_submit` hook, then encodes either a
 `thread/start` + `turn/start` pair (new thread) or just `turn/start`
 (existing thread) as JSON-RPC requests.
+
+Model is a session/thread-level setting — per-query model overrides are
+not honored directly. Use `set_model/2` or `override_turn_context_params/1`
+to change the active model before querying.
 """.
 -spec encode_query(binary(), beam_agent_core:query_opts(), #hstate{}) ->
     {ok, iodata(), #hstate{}} | {error, term()}.
@@ -264,6 +270,30 @@ handle_control(Method, Params, From,
     TimerRef = erlang:send_after(35000, self(), {pending_timeout, Id}),
     Pending1 = Pending#{Id => {From, TimerRef}},
     {noreply, [{send, Encoded}], HState#hstate{pending = Pending1}}.
+
+-doc """
+Store model override for the next turn's TurnStartParams.
+
+Codex applies model overrides per-turn via the `model` field in
+TurnStartParams. The value is stored in handler state and merged
+into the next turn by `merge_turn_opts/2`.
+""".
+-spec handle_set_model(binary(), #hstate{}) ->
+    {ok, binary(), [], #hstate{}}.
+handle_set_model(Model, #hstate{} = HState) ->
+    {ok, Model, [], HState#hstate{model = Model}}.
+
+-doc """
+Store sandbox policy override for the next turn's TurnStartParams.
+
+Codex applies sandbox policy overrides per-turn via the
+`sandboxPolicy` field in TurnStartParams. The value is stored in
+handler state and merged into the next turn by `merge_turn_opts/2`.
+""".
+-spec handle_set_permission_mode(binary(), #hstate{}) ->
+    {ok, binary(), [], #hstate{}}.
+handle_set_permission_mode(Mode, #hstate{} = HState) ->
+    {ok, Mode, [], HState#hstate{sandbox_mode = Mode}}.
 
 -doc """
 Fire lifecycle hooks on state transitions.
@@ -623,6 +653,12 @@ handle_server_request(Id, <<"account/chatgptAuthTokens/refresh">>,
                 params => safe_params(Params),
                 kind => auth_refresh},
     queue_pending_server_request(Id, RequestId, Request, HState);
+handle_server_request(Id, <<"mcpServer/elicitation/request">>, Params,
+                      HState) ->
+    handle_elicitation_request(Id, safe_params(Params), HState);
+handle_server_request(Id, <<"item/permissions/requestApproval">>, Params,
+                      HState) ->
+    handle_approval_request(Id, safe_params(Params), HState);
 handle_server_request(Id, Method, Params, HState) ->
     SafeParams = safe_params(Params),
     HookCtx = #{event => pre_tool_use,
@@ -630,7 +666,7 @@ handle_server_request(Id, Method, Params, HState) ->
                 tool_input => SafeParams},
     case fire_hook(pre_tool_use, HookCtx, HState) of
         {deny, _Reason} ->
-            ResponseMap = #{<<"decision">> => <<"decline">>},
+            ResponseMap = #{<<"review_decision">> => <<"denied">>},
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
             {HState, Action, []};
@@ -652,16 +688,16 @@ call_approval_handler(_Method, _Params,
                       #hstate{approval_handler = undefined,
                               opts = Opts}) ->
     case maps:get(permission_default, Opts, deny) of
-        allow -> accept;
-        _     -> decline
+        allow -> approved;
+        _     -> denied
     end;
 call_approval_handler(Method, Params,
                       #hstate{approval_handler = Handler}) ->
     try Handler(Method, Params, #{}) of
         Decision when is_atom(Decision) -> Decision;
-        _                               -> accept
+        _                               -> approved
     catch
-        _:_ -> decline
+        _:_ -> denied
     end.
 
 -spec build_approval_response(binary(),
@@ -710,6 +746,66 @@ handle_user_input_request(Id, Params, HState) ->
                 params => Params,
                 kind => user_input},
     queue_pending_server_request(Id, RequestId, Request, HState).
+
+%%====================================================================
+%% Internal: elicitation request handling
+%%====================================================================
+
+-spec handle_elicitation_request(integer(), map(), #hstate{}) ->
+    {#hstate{}, [beam_agent_session_handler:handler_action()],
+     [beam_agent_core:message()]}.
+handle_elicitation_request(Id, Params,
+                           #hstate{user_input_handler = Handler} = HState)
+  when is_function(Handler, 2) ->
+    RequestId = integer_to_binary(Id),
+    SessionId = session_store_id(HState),
+    Request = #{method => <<"mcpServer/elicitation/request">>,
+                params => Params,
+                kind => elicitation},
+    Ctx = #{session_id => SessionId,
+            thread_id => HState#hstate.thread_id,
+            turn_id => HState#hstate.turn_id},
+    case safe_user_input_response(Handler, Params, Ctx) of
+        {ok, ResponseMap} ->
+            Action = [{send, beam_agent_jsonrpc:encode_response(
+                                 Id, ResponseMap)}],
+            {HState, Action, []};
+        {error, _Reason} ->
+            queue_pending_server_request(Id, RequestId, Request, HState)
+    end;
+handle_elicitation_request(Id, Params, HState) ->
+    RequestId = integer_to_binary(Id),
+    Request = #{method => <<"mcpServer/elicitation/request">>,
+                params => Params,
+                kind => elicitation},
+    queue_pending_server_request(Id, RequestId, Request, HState).
+
+%%====================================================================
+%% Internal: approval request handling
+%%====================================================================
+
+-spec handle_approval_request(integer(), map(), #hstate{}) ->
+    {#hstate{}, [beam_agent_session_handler:handler_action()],
+     [beam_agent_core:message()]}.
+handle_approval_request(Id, Params, HState) ->
+    HookCtx = #{event => pre_tool_use,
+                tool_name => <<"item/permissions/requestApproval">>,
+                tool_input => Params},
+    case fire_hook(pre_tool_use, HookCtx, HState) of
+        {deny, _Reason} ->
+            ResponseMap = codex_protocol:command_approval_response(denied),
+            Action = [{send, beam_agent_jsonrpc:encode_response(
+                                 Id, ResponseMap)}],
+            {HState, Action, []};
+        ok ->
+            Decision = call_approval_handler(
+                           <<"item/permissions/requestApproval">>,
+                           Params, HState),
+            ResponseMap = codex_protocol:command_approval_response(Decision),
+            Action = [{send, beam_agent_jsonrpc:encode_response(
+                                 Id, ResponseMap)}],
+            {HState, Action, []}
+    end.
 
 %%====================================================================
 %% Internal: dynamic tool call handling
@@ -770,12 +866,14 @@ queue_pending_server_request(Id, RequestId, Request, HState) ->
     _ = track_message(Msg, HState1),
     {HState1, [], [Msg]}.
 
--spec request_subtype(#{kind := auth_refresh | dynamic_tool_call | user_input,
+-spec request_subtype(#{kind := auth_refresh | dynamic_tool_call |
+                               elicitation | user_input,
                         method := <<_:64, _:_*8>>, params := map()}) ->
     <<_:64, _:_*8>>.
 request_subtype(#{kind := user_input}) -> <<"user_input">>;
 request_subtype(#{kind := dynamic_tool_call}) -> <<"dynamic_tool_call">>;
-request_subtype(#{kind := auth_refresh}) -> <<"auth_refresh">>.
+request_subtype(#{kind := auth_refresh}) -> <<"auth_refresh">>;
+request_subtype(#{kind := elicitation}) -> <<"elicitation">>.
 
 %%====================================================================
 %% Internal: notification side effects

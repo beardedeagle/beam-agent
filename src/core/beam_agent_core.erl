@@ -147,6 +147,7 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
                       | error
                       | user
                       | control_request
+                      | control_cancel_request
                       | control_response
                       | stream_event
                       | rate_limit_event
@@ -172,7 +173,8 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
                          | accept_edits
                          | bypass_permissions
                          | plan
-                         | dont_ask.
+                         | dont_ask
+                         | auto.
 
 -type backend() :: beam_agent_backend:backend().
 
@@ -894,6 +896,7 @@ parse_permission_mode(<<"acceptEdits">>)       -> accept_edits;
 parse_permission_mode(<<"bypassPermissions">>) -> bypass_permissions;
 parse_permission_mode(<<"plan">>)              -> plan;
 parse_permission_mode(<<"dontAsk">>)           -> dont_ask;
+parse_permission_mode(<<"auto">>)              -> auto;
 parse_permission_mode(_)                       -> default.
 
 %%--------------------------------------------------------------------
@@ -998,8 +1001,9 @@ parse_type(<<"system">>)           -> system;
 parse_type(<<"result">>)           -> result;
 parse_type(<<"error">>)            -> error;
 parse_type(<<"user">>)             -> user;
-parse_type(<<"control_request">>)  -> control_request;
-parse_type(<<"control_response">>) -> control_response;
+parse_type(<<"control_request">>)        -> control_request;
+parse_type(<<"control_cancel_request">>) -> control_cancel_request;
+parse_type(<<"control_response">>)       -> control_response;
 parse_type(<<"stream_event">>)     -> stream_event;
 parse_type(<<"rate_limit_event">>) -> rate_limit_event;
 parse_type(<<"tool_progress">>)    -> tool_progress;
@@ -1107,6 +1111,10 @@ add_fields(control_request, Raw, Base) ->
     M0 = Base#{raw => Raw},
     M1 = maybe_add(<<"request_id">>, request_id, Raw, M0),
     maybe_add(<<"request">>, request, Raw, M1);
+
+add_fields(control_cancel_request, Raw, Base) ->
+    M0 = Base#{raw => Raw},
+    maybe_add(<<"request_id">>, request_id, Raw, M0);
 
 add_fields(control_response, Raw, Base) ->
     M0 = Base#{raw => Raw},

@@ -97,13 +97,12 @@ prop_prompt_input_always_has_parts() ->
             is_list(maps:get(<<"parts">>, Result))
         end).
 
-%% Property 5: build_permission_reply/2 always has id and decision
+%% Property 5: build_permission_reply/2 always has response key
 prop_permission_reply_shape() ->
-    ?FORALL({PermId, Decision}, {binary(), oneof([<<"allow">>, <<"deny">>])},
+    ?FORALL({PermId, Decision}, {binary(), oneof([<<"once">>, <<"always">>, <<"reject">>])},
         begin
             Result = opencode_protocol:build_permission_reply(PermId, Decision),
-            maps:get(<<"id">>, Result) =:= PermId andalso
-            maps:get(<<"decision">>, Result) =:= Decision
+            maps:get(<<"response">>, Result) =:= Decision
         end).
 
 %% Property 6: Tool part status dispatch produces correct types
@@ -151,7 +150,8 @@ gen_event_type_pair() ->
         {<<"session.error">>, error},
         {<<"server.heartbeat">>, skip},
         {<<"server.connected">>, system},
-        {<<"permission.updated">>, control_request}
+        {<<"permission.updated">>, control_request},
+        {<<"permission.asked">>, control_request}
     ]).
 
 gen_sse_event_for_type(<<"session.idle">>) ->
@@ -164,7 +164,10 @@ gen_sse_event_for_type(<<"server.connected">>) ->
     #{event => <<"server.connected">>, data => #{}};
 gen_sse_event_for_type(<<"permission.updated">>) ->
     #{event => <<"permission.updated">>,
-      data => #{<<"id">> => <<"perm1">>, <<"request">> => #{}}}.
+      data => #{<<"id">> => <<"perm1">>, <<"request">> => #{}}};
+gen_sse_event_for_type(<<"permission.asked">>) ->
+    #{event => <<"permission.asked">>,
+      data => #{<<"id">> => <<"perm2">>, <<"request">> => #{}}}.
 
 gen_prompt_opts() ->
     oneof([

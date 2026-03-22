@@ -741,6 +741,63 @@ defmodule BeamAgent do
     to: :beam_agent
 
   # ---------------------------------------------------------------------------
+  # Runtime model / permission mode switching
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Change the model at runtime for a live session.
+
+  Sends a model-change request through the session engine to the backend
+  handler. Returns `{:ok, model}` on success or `{:error, reason}` if the
+  backend does not support runtime model switching.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `model` -- the model identifier binary (e.g., `"claude-sonnet-4-6"`).
+
+  ## Returns
+
+  - `{:ok, model}` or `{:error, reason}`.
+  """
+  defdelegate set_model(session, model), to: :beam_agent
+
+  @doc """
+  Change the permission mode at runtime for a live session.
+
+  Sends a permission-mode-change request through the session engine to the
+  backend handler. Returns `{:ok, mode}` on success or `{:error, reason}` if
+  the backend does not support runtime permission mode changes.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `mode` -- the permission mode binary (e.g., `"auto"`, `"acceptEdits"`).
+
+  ## Returns
+
+  - `{:ok, mode}` or `{:error, reason}`.
+  """
+  defdelegate set_permission_mode(session, mode), to: :beam_agent
+
+  @doc """
+  Return the projected capabilities for a live session.
+
+  Resolves the backend from the running session process and returns the full
+  capability list. This is a convenience wrapper around
+  `BeamAgent.Capabilities.for_session/1`.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, caps}` or `{:error, reason}`.
+  """
+  defdelegate session_capabilities(session), to: :beam_agent
+
+  # ---------------------------------------------------------------------------
   # Streaming (Elixir-only convenience functions)
   # ---------------------------------------------------------------------------
 

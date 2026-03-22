@@ -299,14 +299,14 @@ build_prompt_input_with_model_test() ->
 %% build_permission_reply
 %%====================================================================
 
-build_permission_reply_allow_test() ->
-    Body = opencode_protocol:build_permission_reply(<<"perm-1">>, <<"allow">>),
-    ?assertEqual(<<"perm-1">>, maps:get(<<"id">>, Body)),
-    ?assertEqual(<<"allow">>, maps:get(<<"decision">>, Body)).
+build_permission_reply_once_test() ->
+    Body = opencode_protocol:build_permission_reply(<<"perm-1">>, <<"once">>),
+    ?assertEqual(<<"once">>, maps:get(<<"response">>, Body)),
+    ?assertNot(maps:is_key(<<"id">>, Body)).
 
-build_permission_reply_deny_test() ->
-    Body = opencode_protocol:build_permission_reply(<<"perm-2">>, <<"deny">>),
-    ?assertEqual(<<"deny">>, maps:get(<<"decision">>, Body)).
+build_permission_reply_reject_test() ->
+    Body = opencode_protocol:build_permission_reply(<<"perm-2">>, <<"reject">>),
+    ?assertEqual(<<"reject">>, maps:get(<<"response">>, Body)).
 
 %%====================================================================
 %% parse_session
@@ -343,3 +343,90 @@ timestamp_always_present_test() ->
             Msg  -> ?assert(is_integer(maps:get(timestamp, Msg)))
         end
     end, Events).
+
+%%====================================================================
+%% question.asked → control_request with subtype question
+%%====================================================================
+
+question_asked_test() ->
+    Event = #{
+        event => <<"question.asked">>,
+        data  => #{<<"id">> => <<"q-001">>,
+                   <<"text">> => <<"Continue?">>}
+    },
+    Msg = opencode_protocol:normalize_event(Event),
+    ?assertEqual(control_request, maps:get(type, Msg)),
+    ?assertEqual(<<"question">>, maps:get(subtype, Msg)),
+    ?assertEqual(<<"q-001">>, maps:get(request_id, Msg)),
+    ?assert(is_map(maps:get(request, Msg))),
+    ?assert(is_integer(maps:get(timestamp, Msg))).
+
+%%====================================================================
+%% question.replied → system with subtype question_replied
+%%====================================================================
+
+question_replied_test() ->
+    Event = #{
+        event => <<"question.replied">>,
+        data  => #{<<"id">> => <<"q-001">>,
+                   <<"answer">> => <<"yes">>}
+    },
+    Msg = opencode_protocol:normalize_event(Event),
+    ?assertEqual(system, maps:get(type, Msg)),
+    ?assertEqual(<<"question_replied">>, maps:get(subtype, Msg)),
+    ?assert(is_map(maps:get(content, Msg))),
+    ?assert(is_integer(maps:get(timestamp, Msg))).
+
+%%====================================================================
+%% question.rejected → system with subtype question_rejected
+%%====================================================================
+
+question_rejected_test() ->
+    Event = #{
+        event => <<"question.rejected">>,
+        data  => #{<<"id">> => <<"q-002">>}
+    },
+    Msg = opencode_protocol:normalize_event(Event),
+    ?assertEqual(system, maps:get(type, Msg)),
+    ?assertEqual(<<"question_rejected">>, maps:get(subtype, Msg)),
+    ?assert(is_map(maps:get(content, Msg))),
+    ?assert(is_integer(maps:get(timestamp, Msg))).
+
+%%====================================================================
+%% message.part.delta — text delta → text
+%%====================================================================
+
+message_part_delta_text_test() ->
+    Event = #{
+        event => <<"message.part.delta">>,
+        data  => #{<<"part">> => #{<<"type">> => <<"text">>,
+                                   <<"delta">> => <<"chunk1">>}}
+    },
+    Msg = opencode_protocol:normalize_event(Event),
+    ?assertEqual(text, maps:get(type, Msg)),
+    ?assertEqual(<<"chunk1">>, maps:get(content, Msg)),
+    ?assert(is_integer(maps:get(timestamp, Msg))).
+
+%%====================================================================
+%% message.part.delta — non-text → stream_event
+%%====================================================================
+
+message_part_delta_nontext_test() ->
+    Event = #{
+        event => <<"message.part.delta">>,
+        data  => #{<<"part">> => #{<<"type">> => <<"tool">>,
+                                   <<"delta">> => <<"output chunk">>}}
+    },
+    Msg = opencode_protocol:normalize_event(Event),
+    ?assertEqual(stream_event, maps:get(type, Msg)),
+    ?assert(is_map(maps:get(content, Msg))),
+    ?assert(is_integer(maps:get(timestamp, Msg))).
+
+%%====================================================================
+%% handle_set_permission_mode returns {error, not_supported}
+%%====================================================================
+
+handle_set_permission_mode_test() ->
+    ?assertEqual({error, not_supported},
+                 opencode_session_handler:handle_set_permission_mode(
+                     <<"auto">>, dummy_state)).

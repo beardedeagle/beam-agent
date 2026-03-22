@@ -75,6 +75,13 @@ BeamAgent.set_agent(session, "architect")
 {:ok, tools} = BeamAgent.list_tools(session)
 {:ok, skills} = BeamAgent.Catalog.list_skills(session)
 {:ok, caps} = BeamAgent.Capabilities.for_backend(:codex)
+
+# Per-session model and permission mode
+BeamAgent.set_model(session, "o3")
+BeamAgent.set_permission_mode(session, "bypassPermissions")
+
+# Runtime capability discovery (22-capability matrix)
+{:ok, caps} = BeamAgent.session_capabilities(session)
 ```
 
 ### Backend Event Streaming

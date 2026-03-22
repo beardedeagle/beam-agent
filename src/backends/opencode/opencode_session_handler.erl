@@ -19,6 +19,7 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_set_model/2,
+    handle_set_permission_mode/2,
     on_state_enter/3,
     is_query_complete/2,
     handle_custom_call/3,
@@ -31,7 +32,7 @@
 
 -type rest_purpose() ::
     create_session | send_message | abort_query | permission_reply |
-    app_info | app_init | app_log | app_modes |
+    app_log |
     list_sessions | get_session | delete_session |
     config_read | config_update | config_providers |
     find_text | find_files | find_symbols |
@@ -43,7 +44,29 @@
     summarize_session | session_init | session_messages |
     prompt_async | shell_command |
     tui_append_prompt | tui_open_help |
-    send_command | server_health.
+    send_command | server_health |
+    question_reply | question_reject | list_questions |
+    session_update | session_children | session_status | session_fork |
+    session_diff | session_todo | get_message | delete_message |
+    delete_part | update_part |
+    pty_list | pty_create | pty_get | pty_update | pty_remove |
+    worktree_create | worktree_list | worktree_remove | worktree_reset |
+    global_event | global_config_get | global_config_update |
+    global_dispose | instance_dispose |
+    mcp_auth_start | mcp_auth_remove | mcp_auth_callback |
+    mcp_auth_authenticate | mcp_connect | mcp_disconnect |
+    auth_set | auth_remove |
+    project_list | project_current | project_init_git | project_update |
+    tool_ids | tool_list |
+    path_get | vcs_get | app_skills | lsp_status | formatter_status |
+    tui_clear_prompt | tui_execute_command | tui_open_models |
+    tui_open_sessions | tui_open_themes | tui_show_toast | tui_submit_prompt |
+    publish_session | select_session | control_next | control_response |
+    session_abort | session_status_list | list_permissions | list_skills |
+    pty_connect | tui_control_next | tui_control_response |
+    experimental_resources | experimental_sessions | experimental_tools |
+    experimental_tool_ids | experimental_workspace_list |
+    experimental_workspace_create | experimental_workspace_delete.
 
 -record(hstate, {
     %% HTTP client (stored from transport_started)
@@ -264,6 +287,12 @@ encode_interrupt(_HState) ->
     {ok, 'undefined' | binary() | map(), [], #hstate{}}.
 handle_set_model(Model, #hstate{} = HState) ->
     {ok, Model, [], HState#hstate{model = Model}}.
+
+-doc "OpenCode does not support native permission mode switching.".
+-spec handle_set_permission_mode(binary(), #hstate{}) ->
+    {error, not_supported}.
+handle_set_permission_mode(_Mode, _HState) ->
+    {error, not_supported}.
 
 -spec on_state_enter(beam_agent_session_handler:state_name(),
                      beam_agent_session_handler:state_name() | undefined,
@@ -503,6 +532,10 @@ complete_rest(abort_query, _From, _Body, HState) ->
     {keep_state, [], HState};
 complete_rest(permission_reply, _From, _Body, HState) ->
     {keep_state, [], HState};
+complete_rest(question_reply, _From, _Body, HState) ->
+    {keep_state, [], HState};
+complete_rest(question_reject, _From, _Body, HState) ->
+    {keep_state, [], HState};
 
 %% Special reply formats
 complete_rest(delete_session, From, _Body, HState) ->
@@ -663,19 +696,29 @@ enqueue_event(Msg, #hstate{event_consumer = From} = HState) ->
 handle_permission(PermId, Metadata, #hstate{} = HState) ->
     Decision = case HState#hstate.permission_handler of
         undefined ->
-            <<"deny">>;
+            <<"reject">>;
         Handler ->
             try Handler(PermId, Metadata, #{}) of
-                {allow, _}    -> <<"allow">>;
-                {allow, _, _} -> <<"allow">>;
-                {deny, _}     -> <<"deny">>;
-                _Other        -> <<"deny">>
+                {allow, _}         -> <<"once">>;
+                {allow, _, _}      -> <<"once">>;
+                {allow_always, _}  -> <<"always">>;
+                {deny, _}          -> <<"reject">>;
+                once               -> <<"once">>;
+                always             -> <<"always">>;
+                reject             -> <<"reject">>;
+                _Other             -> <<"reject">>
             catch
-                _:_ -> <<"deny">>
+                _:_ -> <<"reject">>
             end
     end,
     Body = opencode_protocol:build_permission_reply(PermId, Decision),
-    Path = <<"/permission/", PermId/binary, "/reply">>,
+    Path = case HState#hstate.session_id of
+        SessionId when is_binary(SessionId), byte_size(SessionId) > 0 ->
+            <<"/session/", SessionId/binary,
+              "/permissions/", PermId/binary>>;
+        _ ->
+            <<"/permission/", PermId/binary, "/reply">>
+    end,
     do_post_json(Path, Body, permission_reply, undefined, HState).
 
 %%====================================================================
@@ -748,16 +791,9 @@ do_delete_request(EndpointPath, Purpose, From,
     beam_agent_session_handler:control_result().
 
 %% App operations
-dispatch_rest_endpoint(app_info, From, HState) ->
-    {noreply, [], do_get_request(<<"/app">>, app_info, From, HState)};
-dispatch_rest_endpoint(app_init, From, HState) ->
-    {noreply, [], do_post_json(<<"/app/init">>, #{}, app_init,
-                               From, HState)};
 dispatch_rest_endpoint({app_log, Body}, From, HState)
   when is_map(Body) ->
     {noreply, [], do_post_json(<<"/log">>, Body, app_log, From, HState)};
-dispatch_rest_endpoint(app_modes, From, HState) ->
-    {noreply, [], do_get_request(<<"/mode">>, app_modes, From, HState)};
 
 %% Session operations
 dispatch_rest_endpoint(list_sessions, From, HState) ->
@@ -946,8 +982,310 @@ dispatch_rest_endpoint({send_command, Command, Params}, From,
 
 %% Server health
 dispatch_rest_endpoint(server_health, From, HState) ->
-    {noreply, [], do_get_request(<<"/health">>, server_health,
+    {noreply, [], do_get_request(<<"/global/health">>, server_health,
                                  From, HState)};
+
+%% Question operations
+dispatch_rest_endpoint({question_reply, QuestionId, Response}, _From, HState) ->
+    Path = <<"/question/", QuestionId/binary, "/reply">>,
+    HState1 = do_post_json(Path, Response, question_reply, undefined, HState),
+    {reply, ok, [], HState1};
+dispatch_rest_endpoint({question_reject, QuestionId}, _From, HState) ->
+    Path = <<"/question/", QuestionId/binary, "/reject">>,
+    HState1 = do_post_json(Path, #{}, question_reject, undefined, HState),
+    {reply, ok, [], HState1};
+dispatch_rest_endpoint(list_questions, From, HState) ->
+    {noreply, [], do_get_request(<<"/question">>, list_questions,
+                                 From, HState)};
+
+%% Session management (new)
+dispatch_rest_endpoint({session_update, Body}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_map(Body) ->
+    Path = <<"/session/", SessionId/binary>>,
+    {noreply, [], do_patch_json(Path, Body, session_update, From, HState)};
+dispatch_rest_endpoint(session_children, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId) ->
+    Path = <<"/session/", SessionId/binary, "/children">>,
+    {noreply, [], do_get_request(Path, session_children, From, HState)};
+dispatch_rest_endpoint(session_status, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId) ->
+    Path = <<"/session/", SessionId/binary, "/status">>,
+    {noreply, [], do_get_request(Path, session_status, From, HState)};
+dispatch_rest_endpoint({session_fork, Opts}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_map(Opts) ->
+    Path = <<"/session/", SessionId/binary, "/fork">>,
+    {noreply, [], do_post_json(Path, Opts, session_fork, From, HState)};
+dispatch_rest_endpoint(session_diff, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId) ->
+    Path = <<"/session/", SessionId/binary, "/diff">>,
+    {noreply, [], do_get_request(Path, session_diff, From, HState)};
+dispatch_rest_endpoint({session_todo, Opts}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_map(Opts) ->
+    Path0 = <<"/session/", SessionId/binary, "/todo">>,
+    Path = build_query_path(Path0, Opts),
+    {noreply, [], do_get_request(Path, session_todo, From, HState)};
+dispatch_rest_endpoint({get_message, MessageId}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_binary(MessageId) ->
+    Path = <<"/session/", SessionId/binary, "/message/", MessageId/binary>>,
+    {noreply, [], do_get_request(Path, get_message, From, HState)};
+dispatch_rest_endpoint({delete_message, MessageId}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_binary(MessageId) ->
+    Path = <<"/session/", SessionId/binary, "/message/", MessageId/binary>>,
+    {noreply, [], do_delete_request(Path, delete_message, From, HState)};
+dispatch_rest_endpoint({delete_part, MessageId, PartIdx}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_binary(MessageId), is_integer(PartIdx) ->
+    IdxBin = integer_to_binary(PartIdx),
+    Path = <<"/session/", SessionId/binary, "/message/", MessageId/binary,
+             "/part/", IdxBin/binary>>,
+    {noreply, [], do_delete_request(Path, delete_part, From, HState)};
+dispatch_rest_endpoint({update_part, MessageId, PartIdx, Body}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_binary(MessageId), is_integer(PartIdx),
+       is_map(Body) ->
+    IdxBin = integer_to_binary(PartIdx),
+    Path = <<"/session/", SessionId/binary, "/message/", MessageId/binary,
+             "/part/", IdxBin/binary>>,
+    {noreply, [], do_patch_json(Path, Body, update_part, From, HState)};
+
+%% PTY subsystem
+dispatch_rest_endpoint(pty_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/pty">>, pty_list, From, HState)};
+dispatch_rest_endpoint({pty_create, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_post_json(<<"/pty">>, Body, pty_create, From, HState)};
+dispatch_rest_endpoint({pty_get, PtyId}, From, HState)
+  when is_binary(PtyId) ->
+    Path = <<"/pty/", PtyId/binary>>,
+    {noreply, [], do_get_request(Path, pty_get, From, HState)};
+dispatch_rest_endpoint({pty_update, PtyId, Body}, From, HState)
+  when is_binary(PtyId), is_map(Body) ->
+    Path = <<"/pty/", PtyId/binary>>,
+    {noreply, [], do_patch_json(Path, Body, pty_update, From, HState)};
+dispatch_rest_endpoint({pty_remove, PtyId}, From, HState)
+  when is_binary(PtyId) ->
+    Path = <<"/pty/", PtyId/binary>>,
+    {noreply, [], do_delete_request(Path, pty_remove, From, HState)};
+
+%% Worktree subsystem
+dispatch_rest_endpoint({worktree_create, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_post_json(<<"/worktree">>, Body, worktree_create,
+                               From, HState)};
+dispatch_rest_endpoint(worktree_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/worktree">>, worktree_list, From, HState)};
+dispatch_rest_endpoint({worktree_remove, WorktreeId}, From, HState)
+  when is_binary(WorktreeId) ->
+    Path = <<"/worktree/", WorktreeId/binary>>,
+    {noreply, [], do_delete_request(Path, worktree_remove, From, HState)};
+dispatch_rest_endpoint({worktree_reset, WorktreeId}, From, HState)
+  when is_binary(WorktreeId) ->
+    Path = <<"/worktree/", WorktreeId/binary, "/reset">>,
+    {noreply, [], do_post_json(Path, #{}, worktree_reset, From, HState)};
+
+%% Global management
+dispatch_rest_endpoint(global_event, From, HState) ->
+    {noreply, [], do_get_request(<<"/global/event">>, global_event, From, HState)};
+dispatch_rest_endpoint(global_config_get, From, HState) ->
+    {noreply, [], do_get_request(<<"/global/config">>, global_config_get,
+                                 From, HState)};
+dispatch_rest_endpoint({global_config_update, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_patch_json(<<"/global/config">>, Body, global_config_update,
+                                From, HState)};
+dispatch_rest_endpoint(global_dispose, From, HState) ->
+    {noreply, [], do_post_json(<<"/global/dispose">>, #{}, global_dispose,
+                               From, HState)};
+dispatch_rest_endpoint(instance_dispose, From, HState) ->
+    {noreply, [], do_post_json(<<"/instance/dispose">>, #{}, instance_dispose,
+                               From, HState)};
+
+%% MCP auth and connection
+dispatch_rest_endpoint({mcp_auth_start, ServerId, Body}, From, HState)
+  when is_binary(ServerId), is_map(Body) ->
+    Path = <<"/mcp/", ServerId/binary, "/auth">>,
+    {noreply, [], do_post_json(Path, Body, mcp_auth_start, From, HState)};
+dispatch_rest_endpoint({mcp_auth_remove, ServerId}, From, HState)
+  when is_binary(ServerId) ->
+    Path = <<"/mcp/", ServerId/binary, "/auth">>,
+    {noreply, [], do_delete_request(Path, mcp_auth_remove, From, HState)};
+dispatch_rest_endpoint({mcp_auth_callback, ServerId, Body}, From, HState)
+  when is_binary(ServerId), is_map(Body) ->
+    Path = <<"/mcp/", ServerId/binary, "/auth/callback">>,
+    {noreply, [], do_post_json(Path, Body, mcp_auth_callback, From, HState)};
+dispatch_rest_endpoint({mcp_auth_authenticate, ServerId, Body}, From, HState)
+  when is_binary(ServerId), is_map(Body) ->
+    Path = <<"/mcp/", ServerId/binary, "/auth/authenticate">>,
+    {noreply, [], do_post_json(Path, Body, mcp_auth_authenticate,
+                               From, HState)};
+dispatch_rest_endpoint({mcp_connect, ServerId}, From, HState)
+  when is_binary(ServerId) ->
+    Path = <<"/mcp/", ServerId/binary, "/connect">>,
+    {noreply, [], do_post_json(Path, #{}, mcp_connect, From, HState)};
+dispatch_rest_endpoint({mcp_disconnect, ServerId}, From, HState)
+  when is_binary(ServerId) ->
+    Path = <<"/mcp/", ServerId/binary, "/disconnect">>,
+    {noreply, [], do_post_json(Path, #{}, mcp_disconnect, From, HState)};
+
+%% Auth
+dispatch_rest_endpoint({auth_set, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_post_json(<<"/auth">>, Body, auth_set, From, HState)};
+dispatch_rest_endpoint({auth_remove, ProviderId}, From, HState)
+  when is_binary(ProviderId) ->
+    Path = <<"/auth/", ProviderId/binary>>,
+    {noreply, [], do_delete_request(Path, auth_remove, From, HState)};
+
+%% Project
+dispatch_rest_endpoint(project_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/project">>, project_list, From, HState)};
+dispatch_rest_endpoint(project_current, From, HState) ->
+    {noreply, [], do_get_request(<<"/project/current">>, project_current,
+                                 From, HState)};
+dispatch_rest_endpoint(project_init_git, From, HState) ->
+    {noreply, [], do_post_json(<<"/project/init-git">>, #{}, project_init_git,
+                               From, HState)};
+dispatch_rest_endpoint({project_update, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_patch_json(<<"/project">>, Body, project_update,
+                                From, HState)};
+
+%% Tools
+dispatch_rest_endpoint(tool_ids, From, HState) ->
+    {noreply, [], do_get_request(<<"/tool/ids">>, tool_ids, From, HState)};
+dispatch_rest_endpoint(tool_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/tool">>, tool_list, From, HState)};
+
+%% Info endpoints
+dispatch_rest_endpoint(path_get, From, HState) ->
+    {noreply, [], do_get_request(<<"/path">>, path_get, From, HState)};
+dispatch_rest_endpoint(vcs_get, From, HState) ->
+    {noreply, [], do_get_request(<<"/vcs">>, vcs_get, From, HState)};
+dispatch_rest_endpoint(app_skills, From, HState) ->
+    {noreply, [], do_get_request(<<"/app/skills">>, app_skills, From, HState)};
+dispatch_rest_endpoint(lsp_status, From, HState) ->
+    {noreply, [], do_get_request(<<"/lsp/status">>, lsp_status, From, HState)};
+dispatch_rest_endpoint(formatter_status, From, HState) ->
+    {noreply, [], do_get_request(<<"/formatter/status">>, formatter_status,
+                                 From, HState)};
+
+%% TUI extensions
+dispatch_rest_endpoint(tui_clear_prompt, From, HState) ->
+    {noreply, [], do_post_json(<<"/tui/clear-prompt">>, #{}, tui_clear_prompt,
+                               From, HState)};
+dispatch_rest_endpoint({tui_execute_command, Command}, From, HState)
+  when is_binary(Command) ->
+    {noreply, [], do_post_json(<<"/tui/execute-command">>,
+                               #{<<"command">> => Command},
+                               tui_execute_command, From, HState)};
+dispatch_rest_endpoint(tui_open_models, From, HState) ->
+    {noreply, [], do_post_json(<<"/tui/open-models">>, #{}, tui_open_models,
+                               From, HState)};
+dispatch_rest_endpoint(tui_open_sessions, From, HState) ->
+    {noreply, [], do_post_json(<<"/tui/open-sessions">>, #{}, tui_open_sessions,
+                               From, HState)};
+dispatch_rest_endpoint(tui_open_themes, From, HState) ->
+    {noreply, [], do_post_json(<<"/tui/open-themes">>, #{}, tui_open_themes,
+                               From, HState)};
+dispatch_rest_endpoint({tui_show_toast, Message}, From, HState)
+  when is_binary(Message) ->
+    {noreply, [], do_post_json(<<"/tui/show-toast">>,
+                               #{<<"message">> => Message},
+                               tui_show_toast, From, HState)};
+dispatch_rest_endpoint({tui_submit_prompt, Text}, From, HState)
+  when is_binary(Text) ->
+    {noreply, [], do_post_json(<<"/tui/submit-prompt">>,
+                               #{<<"text">> => Text},
+                               tui_submit_prompt, From, HState)};
+
+%% Publish / Select / Control
+dispatch_rest_endpoint({publish_session, Body}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_map(Body) ->
+    Path = <<"/session/", SessionId/binary, "/publish">>,
+    {noreply, [], do_post_json(Path, Body, publish_session, From, HState)};
+dispatch_rest_endpoint({select_session, TargetId}, From, HState)
+  when is_binary(TargetId) ->
+    {noreply, [], do_post_json(<<"/session/select">>,
+                               #{<<"sessionId">> => TargetId},
+                               select_session, From, HState)};
+dispatch_rest_endpoint(control_next, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId) ->
+    Path = <<"/session/", SessionId/binary, "/control/next">>,
+    {noreply, [], do_post_json(Path, #{}, control_next, From, HState)};
+dispatch_rest_endpoint({control_response, Body}, From,
+                       #hstate{session_id = SessionId} = HState)
+  when is_binary(SessionId), is_map(Body) ->
+    Path = <<"/session/", SessionId/binary, "/control/response">>,
+    {noreply, [], do_post_json(Path, Body, control_response, From, HState)};
+
+%% Session extended operations
+dispatch_rest_endpoint({session_abort, SessionId}, From, HState)
+  when is_binary(SessionId) ->
+    Path = <<"/session/", SessionId/binary, "/abort">>,
+    {noreply, [], do_post_json(Path, #{}, session_abort, From, HState)};
+dispatch_rest_endpoint(session_status_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/session/status">>, session_status_list,
+                                 From, HState)};
+
+%% Permission operations
+dispatch_rest_endpoint(list_permissions, From, HState) ->
+    {noreply, [], do_get_request(<<"/permission">>, list_permissions,
+                                 From, HState)};
+
+%% Skill operations
+dispatch_rest_endpoint(list_skills, From, HState) ->
+    {noreply, [], do_get_request(<<"/skill">>, list_skills, From, HState)};
+
+%% PTY connect (WebSocket upgrade endpoint — dispatches GET)
+dispatch_rest_endpoint({pty_connect, PtyId}, From, HState)
+  when is_binary(PtyId) ->
+    Path = <<"/pty/", PtyId/binary, "/connect">>,
+    {noreply, [], do_get_request(Path, pty_connect, From, HState)};
+
+%% TUI control operations
+dispatch_rest_endpoint(tui_control_next, From, HState) ->
+    {noreply, [], do_get_request(<<"/tui/control/next">>, tui_control_next,
+                                 From, HState)};
+dispatch_rest_endpoint({tui_control_response, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_post_json(<<"/tui/control/response">>, Body,
+                               tui_control_response, From, HState)};
+
+%% Experimental endpoints
+dispatch_rest_endpoint(experimental_resources, From, HState) ->
+    {noreply, [], do_get_request(<<"/experimental/resource">>,
+                                 experimental_resources, From, HState)};
+dispatch_rest_endpoint(experimental_sessions, From, HState) ->
+    {noreply, [], do_get_request(<<"/experimental/session">>,
+                                 experimental_sessions, From, HState)};
+dispatch_rest_endpoint(experimental_tools, From, HState) ->
+    {noreply, [], do_get_request(<<"/experimental/tool">>,
+                                 experimental_tools, From, HState)};
+dispatch_rest_endpoint(experimental_tool_ids, From, HState) ->
+    {noreply, [], do_get_request(<<"/experimental/tool/ids">>,
+                                 experimental_tool_ids, From, HState)};
+dispatch_rest_endpoint(experimental_workspace_list, From, HState) ->
+    {noreply, [], do_get_request(<<"/experimental/workspace">>,
+                                 experimental_workspace_list, From, HState)};
+dispatch_rest_endpoint({experimental_workspace_create, Body}, From, HState)
+  when is_map(Body) ->
+    {noreply, [], do_post_json(<<"/experimental/workspace">>, Body,
+                               experimental_workspace_create, From, HState)};
+dispatch_rest_endpoint({experimental_workspace_delete, Id}, From, HState)
+  when is_binary(Id) ->
+    Path = <<"/experimental/workspace/", Id/binary>>,
+    {noreply, [], do_delete_request(Path, experimental_workspace_delete,
+                                    From, HState)};
 
 %% Unknown request
 dispatch_rest_endpoint(_Unknown, _From, _HState) ->

@@ -425,8 +425,8 @@ handle_common_call(From, {set_model, Model},
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
             end;
         false ->
-            {keep_state, Data#engine{model = Model},
-             [{reply, From, {ok, Model}}]}
+            {keep_state_and_data,
+             [{reply, From, {error, not_supported}}]}
     end;
 handle_common_call(From, {set_permission_mode, Mode},
                    _StateName,
@@ -444,8 +444,8 @@ handle_common_call(From, {set_permission_mode, Mode},
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
             end;
         false ->
-            {keep_state, Data#engine{permission_mode = Mode},
-             [{reply, From, {ok, Mode}}]}
+            {keep_state_and_data,
+             [{reply, From, {error, not_supported}}]}
     end;
 handle_common_call(From, Request, _StateName,
                    #engine{handler_mod = H, handler_state = HState} = Data) ->
