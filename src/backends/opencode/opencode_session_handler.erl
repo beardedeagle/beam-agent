@@ -729,11 +729,11 @@ enqueue_event(Msg, #hstate{event_consumer = From} = HState) ->
 
 %% @doc M5: Reject auth over plaintext HTTP to remote hosts by default.
 %%
-%% Returns `ok` when the connection is safe (HTTPS, localhost, or no auth).
-%% Returns `{error, plaintext_auth}` when auth credentials would be sent
-%% over plaintext HTTP to a non-loopback host and `allow_insecure_http`
+%% Returns ok when the connection is safe (HTTPS, localhost, or no auth).
+%% Returns {error, plaintext_auth} when auth credentials would be sent
+%% over plaintext HTTP to a non-loopback host and allow_insecure_http
 %% is not set.  Callers that intentionally route through VPN tunnels or
-%% local TLS-terminating proxies can set `allow_insecure_http => true`
+%% local TLS-terminating proxies can set allow_insecure_http => true
 %% in session opts to downgrade the error to a warning.
 -spec check_transport_security(Auth, BaseUrl, Opts) -> ok | {error, plaintext_auth} when
       Auth    :: {basic, binary()} | none,
