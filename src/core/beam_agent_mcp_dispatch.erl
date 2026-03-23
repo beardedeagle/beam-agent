@@ -528,25 +528,36 @@ dispatch_notification_inner(_Method, _Params, State) ->
 -spec handle_initialize(beam_agent_mcp_protocol:request_id(), map(),
                         dispatch_state()) -> dispatch_result().
 handle_initialize(Id, Params,
-                  #{server_info := ServerInfo,
-                    server_capabilities := ServerCaps} = State) ->
+                  #{server_info := _ServerInfo,
+                    server_capabilities := _ServerCaps} = State) ->
     %% M8: Validate and negotiate protocolVersion.
-    %% Warn on mismatch; we continue but store the negotiated version.
+    %% Reject unsupported versions; accept missing version leniently.
     OurVersion = beam_agent_mcp_protocol:protocol_version(),
     PeerVersion = maps:get(<<"protocolVersion">>, Params, undefined),
     case PeerVersion of
-        OurVersion -> ok;
         undefined ->
             logger:warning("MCP initialize: client did not send "
-                           "protocolVersion; assuming ~s", [OurVersion]);
-        Other ->
-            logger:warning("MCP initialize: client protocolVersion ~s "
-                           "differs from server ~s; proceeding with ~s",
-                           [Other, OurVersion, OurVersion])
-    end,
-    NegotiatedVersion = OurVersion,
+                           "protocolVersion; assuming ~s", [OurVersion]),
+            do_initialize(Id, Params, OurVersion, State);
+        _ ->
+            case beam_agent_mcp_protocol:is_supported_protocol_version(PeerVersion) of
+                true ->
+                    do_initialize(Id, Params, OurVersion, State);
+                false ->
+                    ErrMsg = iolist_to_binary(io_lib:format(
+                        "Unsupported protocol version: ~s", [PeerVersion])),
+                    Resp = beam_agent_mcp_protocol:error_response(
+                        Id,
+                        beam_agent_mcp_protocol:error_invalid_request(),
+                        ErrMsg),
+                    {Resp, State#{error_info => {unsupported_protocol_version,
+                                                 PeerVersion}}}
+            end
+    end.
 
-    %% Extract client info for capability negotiation
+do_initialize(Id, Params,  NegotiatedVersion,
+              #{server_info := ServerInfo,
+                server_capabilities := ServerCaps} = State) ->
     ClientCaps = decode_client_capabilities(
                      maps:get(<<"capabilities">>, Params, #{})),
     SessionCaps = beam_agent_mcp_protocol:negotiate_capabilities(

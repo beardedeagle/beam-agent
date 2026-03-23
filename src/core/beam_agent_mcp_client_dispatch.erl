@@ -807,26 +807,36 @@ handle_error_response(Id, Code, Msg, #{pending := Pending} = State) ->
                                  map(), client_state()) -> client_result().
 handle_initialize_response(Id, Result,
                            #{client_capabilities := ClientCaps} = State) ->
-    %% M8: Validate server's protocolVersion against our own.
-    %% Warn on mismatch; always proceed (the MCP spec says clients should
-    %% handle minor version differences gracefully).
+    %% M8: Validate server's protocolVersion.
+    %% Reject unsupported versions; accept missing version leniently.
     OurVersion = beam_agent_mcp_protocol:protocol_version(),
     ServerVersion = maps:get(<<"protocolVersion">>, Result, undefined),
     case ServerVersion of
-        OurVersion -> ok;
         undefined ->
             logger:warning("MCP initialize response: server did not include "
-                           "protocolVersion; assuming ~s", [OurVersion]);
-        Other ->
-            logger:warning("MCP initialize response: server protocolVersion ~s "
-                           "differs from client ~s; proceeding",
-                           [Other, OurVersion])
-    end,
-    NegotiatedVersion = case ServerVersion of
-        undefined -> OurVersion;
-        _         -> ServerVersion
-    end,
+                           "protocolVersion; assuming ~s", [OurVersion]),
+            do_initialize_response(Id, Result, OurVersion, ClientCaps, State);
+        _ ->
+            case beam_agent_mcp_protocol:is_supported_protocol_version(ServerVersion) of
+                true ->
+                    do_initialize_response(Id, Result, ServerVersion,
+                                           ClientCaps, State);
+                false ->
+                    ErrMsg = iolist_to_binary(io_lib:format(
+                        "Unsupported server protocol version: ~s",
+                        [ServerVersion])),
+                    ErrorState = State#{
+                        lifecycle => error,
+                        error_info => {unsupported_protocol_version,
+                                       ServerVersion}
+                    },
+                    {error_response, Id,
+                     beam_agent_mcp_protocol:error_invalid_request(),
+                     ErrMsg, ErrorState}
+            end
+    end.
 
+do_initialize_response(Id, Result, NegotiatedVersion, ClientCaps, State) ->
     ServerCaps = decode_server_capabilities(
                      maps:get(<<"capabilities">>, Result, #{})),
     SessionCaps = beam_agent_mcp_protocol:negotiate_capabilities(

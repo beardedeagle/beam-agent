@@ -43,6 +43,8 @@ resolves advertised capabilities into a session capability set.
 -export([
     %% Protocol metadata
     protocol_version/0,
+    supported_protocol_versions/0,
+    is_supported_protocol_version/1,
 
     %% JSON-RPC 2.0 envelope constructors
     request/3,
@@ -534,6 +536,15 @@ error_resource_not_found() -> -32002.
 -doc "Return the MCP protocol version this module implements.".
 -spec protocol_version() -> protocol_version().
 protocol_version() -> <<"2025-06-18">>.
+
+-doc "Return the list of MCP protocol versions this module accepts.".
+-spec supported_protocol_versions() -> [protocol_version(), ...].
+supported_protocol_versions() -> [<<"2025-06-18">>].
+
+-doc "Check whether `Version` is in the supported protocol version list.".
+-spec is_supported_protocol_version(binary()) -> boolean().
+is_supported_protocol_version(Version) when is_binary(Version) ->
+    lists:member(Version, supported_protocol_versions()).
 
 %%====================================================================
 %% JSON-RPC 2.0 Envelope Constructors

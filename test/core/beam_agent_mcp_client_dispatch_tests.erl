@@ -142,6 +142,54 @@ initialize_response_transitions_to_ready_test() ->
     ?assertEqual(0, beam_agent_mcp_client_dispatch:pending_count(State2)).
 
 %%====================================================================
+%% M8: Protocol version validation in initialize response
+%%====================================================================
+
+initialize_rejects_unsupported_server_version_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    %% Craft response with unsupported protocol version
+    Response = #{<<"jsonrpc">> => <<"2.0">>,
+                 <<"id">> => 1,
+                 <<"result">> => #{
+                     <<"protocolVersion">> => <<"2024-11-05">>,
+                     <<"capabilities">> => #{},
+                     <<"serverInfo">> => #{<<"name">> => <<"old-server">>,
+                                           <<"version">> => <<"0.1">>}}},
+    {error_response, 1, -32600, _ErrMsg, ErrState} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ErrState)),
+    ?assertEqual({unsupported_protocol_version, <<"2024-11-05">>},
+                 maps:get(error_info, ErrState)).
+
+initialize_accepts_missing_server_version_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    %% Response omits protocolVersion — accepted leniently
+    Response = #{<<"jsonrpc">> => <<"2.0">>,
+                 <<"id">> => 1,
+                 <<"result">> => #{
+                     <<"capabilities">> => #{},
+                     <<"serverInfo">> => #{<<"name">> => <<"minimal">>,
+                                           <<"version">> => <<"1.0">>}}},
+    {response, 1, _Result, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(ready,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, State2)).
+
+initialize_stores_server_version_when_supported_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    Response = make_initialize_response(1),
+    {response, 1, _Result, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, State2)).
+
+%%====================================================================
 %% Lifecycle Gating
 %%====================================================================
 

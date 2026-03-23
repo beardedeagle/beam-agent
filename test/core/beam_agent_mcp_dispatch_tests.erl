@@ -651,9 +651,8 @@ initialize_stores_negotiated_version_test() ->
     ?assertEqual(<<"2025-06-18">>,
                  maps:get(negotiated_protocol_version, NewState)).
 
-initialize_accepts_mismatched_version_with_warning_test() ->
-    %% A client sending a different version should still succeed (server
-    %% logs a warning but proceeds), using its own version.
+initialize_rejects_unsupported_version_test() ->
+    %% A client sending an unsupported version gets an error response.
     State = make_state(),
     InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 101,
                 <<"method">> => <<"initialize">>,
@@ -664,14 +663,14 @@ initialize_accepts_mismatched_version_with_warning_test() ->
                                           <<"version">> => <<"0.9">>}}},
     {Resp, NewState} = beam_agent_mcp_dispatch:handle_message(
                            InitMsg, State),
-    %% Response is still valid (server doesn't reject on mismatch)
-    ?assert(maps:is_key(<<"result">>, Resp)),
-    %% Negotiated version is always the server's own version
-    ?assertEqual(<<"2025-06-18">>,
-                 maps:get(negotiated_protocol_version, NewState)).
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    ?assertEqual(-32600, maps:get(<<"code">>,
+                                   maps:get(<<"error">>, Resp))),
+    ?assertEqual({unsupported_protocol_version, <<"2024-11-05">>},
+                 maps:get(error_info, NewState)).
 
 initialize_accepts_missing_version_test() ->
-    %% A client that omits protocolVersion should still succeed.
+    %% A client that omits protocolVersion should still succeed (lenient).
     State = make_state(),
     InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 102,
                 <<"method">> => <<"initialize">>,
@@ -679,9 +678,11 @@ initialize_accepts_missing_version_test() ->
                     <<"capabilities">> => #{},
                     <<"clientInfo">> => #{<<"name">> => <<"legacy">>,
                                           <<"version">> => <<"1.0">>}}},
-    {Resp, _NewState} = beam_agent_mcp_dispatch:handle_message(
+    {Resp, NewState} = beam_agent_mcp_dispatch:handle_message(
                             InitMsg, State),
-    ?assert(maps:is_key(<<"result">>, Resp)).
+    ?assert(maps:is_key(<<"result">>, Resp)),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, NewState)).
 
 %%====================================================================
 %% M10: Cursor type validation
