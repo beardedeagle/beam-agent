@@ -167,14 +167,16 @@ defmodule BeamAgent.MCP do
 
   @typedoc "Opaque state record for the MCP server-side dispatch state machine."
   @type dispatch_state() :: %{
-          required(:lifecycle) => :uninitialized | :initializing | :ready,
+          required(:lifecycle) =>
+            :uninitialized | :initializing | :ready | :error | :shutting_down,
           required(:server_info) => implementation_info(),
           required(:server_capabilities) => map(),
           optional(:session_capabilities) => map(),
           optional(:tool_registry) => mcp_registry(),
           optional(:handler_timeout) => pos_integer(),
           optional(:provider) => module(),
-          optional(:provider_state) => term()
+          optional(:provider_state) => term(),
+          optional(:error_info) => term()
         }
 
   @typedoc """
@@ -188,7 +190,8 @@ defmodule BeamAgent.MCP do
 
   @typedoc "Opaque state record for the MCP client-side dispatch state machine."
   @type client_state() :: %{
-          required(:lifecycle) => :uninitialized | :initializing | :ready,
+          required(:lifecycle) =>
+            :uninitialized | :initializing | :ready | :error | :disconnected | :shutting_down,
           required(:client_info) => implementation_info(),
           required(:client_capabilities) => map(),
           optional(:server_capabilities) => map(),
@@ -197,7 +200,8 @@ defmodule BeamAgent.MCP do
           required(:pending) => %{request_id() => pending_request()},
           required(:default_timeout) => pos_integer(),
           optional(:handler) => module(),
-          optional(:handler_state) => term()
+          optional(:handler_state) => term(),
+          optional(:error_info) => term()
         }
 
   @typedoc """
@@ -612,9 +616,11 @@ defmodule BeamAgent.MCP do
   @doc """
   Return the current lifecycle state of the server dispatch state machine.
 
-  Returns an atom such as `:uninitialized`, `:initializing`, or `:ready`.
+  Returns one of `:uninitialized`, `:initializing`, `:ready`, `:error`, or
+  `:shutting_down`.
   """
-  @spec dispatch_lifecycle_state(dispatch_state()) :: :uninitialized | :initializing | :ready
+  @spec dispatch_lifecycle_state(dispatch_state()) ::
+          :uninitialized | :initializing | :ready | :error | :shutting_down
   defdelegate dispatch_lifecycle_state(state), to: :beam_agent_mcp
 
   @doc """
@@ -624,6 +630,46 @@ defmodule BeamAgent.MCP do
   """
   @spec dispatch_session_capabilities(dispatch_state()) :: map()
   defdelegate dispatch_session_capabilities(state), to: :beam_agent_mcp
+
+  @doc """
+  Transition the server dispatch state to `:error`.
+
+  Stores `reason` for later retrieval via `dispatch_error_info/1`. In `:error`
+  state, only `ping` and `initialize` (re-init) requests are accepted.
+  """
+  @spec dispatch_mark_error(term(), dispatch_state()) :: dispatch_state()
+  defdelegate dispatch_mark_error(reason, state), to: :beam_agent_mcp
+
+  @doc """
+  Transition the server dispatch state to `:shutting_down`.
+
+  This is a terminal state. Only `ping` requests are accepted.
+  """
+  @spec dispatch_mark_shutting_down(dispatch_state()) :: dispatch_state()
+  defdelegate dispatch_mark_shutting_down(state), to: :beam_agent_mcp
+
+  @doc """
+  Reset the server dispatch from `:error` back to `:uninitialized`.
+
+  Clears error info and session capabilities, allowing a fresh MCP handshake.
+  Raises on invalid state.
+  """
+  @spec dispatch_reset(dispatch_state()) :: dispatch_state()
+  defdelegate dispatch_reset(state), to: :beam_agent_mcp
+
+  @doc """
+  Return the error reason from the server dispatch state.
+
+  Returns `nil` if not in `:error` state.
+  """
+  @spec dispatch_error_info(dispatch_state()) :: term() | nil
+  defdelegate dispatch_error_info(state), to: :beam_agent_mcp
+
+  @doc """
+  Return `true` if the server dispatch is in the `:ready` state.
+  """
+  @spec dispatch_is_operational(dispatch_state()) :: boolean()
+  defdelegate dispatch_is_operational(state), to: :beam_agent_mcp
 
   # Client-side dispatch (beam_agent_mcp_client_dispatch)
 
@@ -654,9 +700,11 @@ defmodule BeamAgent.MCP do
   @doc """
   Return the current lifecycle state of the MCP client dispatch state machine.
 
-  Returns an atom such as `:uninitialized`, `:initializing`, or `:ready`.
+  Returns one of `:uninitialized`, `:initializing`, `:ready`, `:error`,
+  `:disconnected`, or `:shutting_down`.
   """
-  @spec client_lifecycle_state(client_state()) :: :uninitialized | :initializing | :ready
+  @spec client_lifecycle_state(client_state()) ::
+          :uninitialized | :initializing | :ready | :error | :disconnected | :shutting_down
   defdelegate client_lifecycle_state(state), to: :beam_agent_mcp
 
   @doc """
@@ -672,6 +720,55 @@ defmodule BeamAgent.MCP do
   """
   @spec client_session_capabilities(client_state()) :: map()
   defdelegate client_session_capabilities(state), to: :beam_agent_mcp
+
+  @doc """
+  Transition the client state to `:error`.
+
+  Stores `reason` for later retrieval via `client_error_info/1`. All `send_*`
+  calls will raise until `client_reset/1` is called.
+  """
+  @spec client_mark_error(term(), client_state()) :: client_state()
+  defdelegate client_mark_error(reason, state), to: :beam_agent_mcp
+
+  @doc """
+  Transition the client state to `:disconnected`.
+
+  Call when the transport signals loss of connection. Only valid from `:ready`
+  or `:initializing` state. Raises on invalid state.
+  """
+  @spec client_mark_disconnected(term(), client_state()) :: client_state()
+  defdelegate client_mark_disconnected(reason, state), to: :beam_agent_mcp
+
+  @doc """
+  Transition the client state to `:shutting_down`.
+
+  This is a terminal state. All `send_*` calls will raise.
+  """
+  @spec client_mark_shutting_down(client_state()) :: client_state()
+  defdelegate client_mark_shutting_down(state), to: :beam_agent_mcp
+
+  @doc """
+  Reset the client from `:error` or `:disconnected` back to `:uninitialized`.
+
+  Clears error info, pending requests, and server/session capabilities.
+  Raises on invalid state.
+  """
+  @spec client_reset(client_state()) :: client_state()
+  defdelegate client_reset(state), to: :beam_agent_mcp
+
+  @doc """
+  Return the error reason from the client state.
+
+  Returns `nil` if not in `:error` or `:disconnected` state.
+  """
+  @spec client_error_info(client_state()) :: term() | nil
+  defdelegate client_error_info(state), to: :beam_agent_mcp
+
+  @doc """
+  Return `true` if the client is in the `:ready` state.
+  """
+  @spec client_is_operational(client_state()) :: boolean()
+  defdelegate client_is_operational(state), to: :beam_agent_mcp
 
   @doc """
   Build and return an MCP `initialize` request message.

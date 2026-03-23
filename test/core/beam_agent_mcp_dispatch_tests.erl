@@ -2,8 +2,12 @@
 %%% @doc EUnit tests for beam_agent_mcp_dispatch.
 %%%
 %%% Tests cover:
-%%%   - Lifecycle state transitions (uninitialized → initializing → ready)
+%%%   - Lifecycle state transitions (uninitialized → initializing → ready
+%%%     → error | shutting_down, error → reset → uninitialized)
+%%%   - Lifecycle transitions (mark_error, mark_shutting_down, reset)
+%%%   - Lifecycle accessors (error_info, is_operational)
 %%%   - Lifecycle gating (requests rejected before ready)
+%%%   - Request/notification gating in error and shutting_down states
 %%%   - Ping in all states
 %%%   - Initialize handshake and capability negotiation
 %%%   - Tool dispatch (list, call, errors)
@@ -450,3 +454,247 @@ error_response_message_ignored_test() ->
     Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
             <<"error">> => #{<<"code">> => -1, <<"message">> => <<"err">>}},
     {noreply, _} = beam_agent_mcp_dispatch:handle_message(Msg, State).
+
+%%====================================================================
+%% Lifecycle Transition Tests — mark_error / mark_shutting_down / reset
+%%====================================================================
+
+mark_error_from_ready_test() ->
+    State = do_initialize(make_state()),
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(State)),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(protocol_violation, State),
+    ?assertEqual(error, beam_agent_mcp_dispatch:lifecycle_state(ErrorState)),
+    ?assertEqual(protocol_violation,
+                 beam_agent_mcp_dispatch:error_info(ErrorState)).
+
+mark_error_from_uninitialized_test() ->
+    State = make_state(),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(startup_failure, State),
+    ?assertEqual(error, beam_agent_mcp_dispatch:lifecycle_state(ErrorState)),
+    ?assertEqual(startup_failure,
+                 beam_agent_mcp_dispatch:error_info(ErrorState)).
+
+mark_error_from_initializing_test() ->
+    State = make_state(),
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{<<"protocolVersion">> => <<"2025-06-18">>,
+                                  <<"capabilities">> => #{},
+                                  <<"clientInfo">> => #{<<"name">> => <<"c">>,
+                                                         <<"version">> => <<"1">>}}},
+    {_Resp, InitializingState} = beam_agent_mcp_dispatch:handle_message(
+                                      InitMsg, State),
+    ?assertEqual(initializing,
+                 beam_agent_mcp_dispatch:lifecycle_state(InitializingState)),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(timeout, InitializingState),
+    ?assertEqual(error, beam_agent_mcp_dispatch:lifecycle_state(ErrorState)).
+
+mark_shutting_down_from_ready_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    ?assertEqual(shutting_down,
+                 beam_agent_mcp_dispatch:lifecycle_state(ShutState)).
+
+mark_shutting_down_from_uninitialized_test() ->
+    State = make_state(),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    ?assertEqual(shutting_down,
+                 beam_agent_mcp_dispatch:lifecycle_state(ShutState)).
+
+reset_from_error_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(some_reason, State),
+    ResetState = beam_agent_mcp_dispatch:reset(ErrorState),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_dispatch:lifecycle_state(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_dispatch:error_info(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_dispatch:session_capabilities(ResetState)).
+
+reset_from_ready_raises_test() ->
+    State = do_initialize(make_state()),
+    ?assertError({invalid_reset, ready},
+                 beam_agent_mcp_dispatch:reset(State)).
+
+reset_from_uninitialized_raises_test() ->
+    State = make_state(),
+    ?assertError({invalid_reset, uninitialized},
+                 beam_agent_mcp_dispatch:reset(State)).
+
+reset_from_shutting_down_raises_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    ?assertError({invalid_reset, shutting_down},
+                 beam_agent_mcp_dispatch:reset(ShutState)).
+
+%%====================================================================
+%% Accessor Tests — error_info / is_operational
+%%====================================================================
+
+error_info_undefined_when_not_error_test() ->
+    State = make_state(),
+    ?assertEqual(undefined, beam_agent_mcp_dispatch:error_info(State)),
+    ReadyState = do_initialize(State),
+    ?assertEqual(undefined, beam_agent_mcp_dispatch:error_info(ReadyState)).
+
+is_operational_ready_test() ->
+    State = do_initialize(make_state()),
+    ?assert(beam_agent_mcp_dispatch:is_operational(State)).
+
+is_operational_uninitialized_test() ->
+    State = make_state(),
+    ?assertNot(beam_agent_mcp_dispatch:is_operational(State)).
+
+is_operational_error_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(oops, State),
+    ?assertNot(beam_agent_mcp_dispatch:is_operational(ErrorState)).
+
+is_operational_shutting_down_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    ?assertNot(beam_agent_mcp_dispatch:is_operational(ShutState)).
+
+%%====================================================================
+%% Request Gating — Error State
+%%====================================================================
+
+ping_works_in_error_state_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(broken, State),
+    PingMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 20,
+                <<"method">> => <<"ping">>, <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(PingMsg, ErrorState),
+    ?assertEqual(#{}, maps:get(<<"result">>, Resp)).
+
+initialize_accepted_in_error_state_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(broken, State),
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 21,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{<<"protocolVersion">> => <<"2025-06-18">>,
+                                  <<"capabilities">> => #{},
+                                  <<"clientInfo">> => #{<<"name">> => <<"c">>,
+                                                         <<"version">> => <<"1">>}}},
+    {Resp, NewState} = beam_agent_mcp_dispatch:handle_message(
+                             InitMsg, ErrorState),
+    %% Should succeed (auto-reset then initialize)
+    ?assert(maps:is_key(<<"result">>, Resp)),
+    ?assertEqual(initializing,
+                 beam_agent_mcp_dispatch:lifecycle_state(NewState)),
+    %% error_info should be cleared by the reset
+    ?assertEqual(undefined,
+                 beam_agent_mcp_dispatch:error_info(NewState)).
+
+tools_list_rejected_in_error_state_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(broken, State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 22,
+            <<"method">> => <<"tools/list">>, <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, ErrorState),
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32603, maps:get(<<"code">>, Err)).
+
+%%====================================================================
+%% Request Gating — Shutting Down State
+%%====================================================================
+
+ping_works_in_shutting_down_state_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    PingMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 30,
+                <<"method">> => <<"ping">>, <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(PingMsg, ShutState),
+    ?assertEqual(#{}, maps:get(<<"result">>, Resp)).
+
+tools_list_rejected_in_shutting_down_state_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 31,
+            <<"method">> => <<"tools/list">>, <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, ShutState),
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32600, maps:get(<<"code">>, Err)).
+
+initialize_rejected_in_shutting_down_state_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 32,
+            <<"method">> => <<"initialize">>,
+            <<"params">> => #{<<"protocolVersion">> => <<"2025-06-18">>,
+                              <<"capabilities">> => #{},
+                              <<"clientInfo">> => #{<<"name">> => <<"c">>,
+                                                     <<"version">> => <<"1">>}}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, ShutState),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%%====================================================================
+%% Notification Gating — Error / Shutting Down States
+%%====================================================================
+
+notifications_ignored_in_error_state_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(broken, State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/progress">>,
+            <<"params">> => #{<<"progressToken">> => <<"t">>,
+                              <<"progress">> => 50}},
+    {noreply, ResultState} = beam_agent_mcp_dispatch:handle_message(
+                                  Msg, ErrorState),
+    ?assertEqual(error, beam_agent_mcp_dispatch:lifecycle_state(ResultState)).
+
+notifications_ignored_in_shutting_down_state_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/roots/list_changed">>},
+    {noreply, ResultState} = beam_agent_mcp_dispatch:handle_message(
+                                  Msg, ShutState),
+    ?assertEqual(shutting_down,
+                 beam_agent_mcp_dispatch:lifecycle_state(ResultState)).
+
+cancelled_notification_accepted_in_error_state_test() ->
+    State = do_initialize(make_state()),
+    ErrorState = beam_agent_mcp_dispatch:mark_error(broken, State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/cancelled">>,
+            <<"params">> => #{<<"requestId">> => 99}},
+    {noreply, _} = beam_agent_mcp_dispatch:handle_message(Msg, ErrorState).
+
+cancelled_notification_accepted_in_shutting_down_state_test() ->
+    State = do_initialize(make_state()),
+    ShutState = beam_agent_mcp_dispatch:mark_shutting_down(State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/cancelled">>,
+            <<"params">> => #{<<"requestId">> => 99}},
+    {noreply, _} = beam_agent_mcp_dispatch:handle_message(Msg, ShutState).
+
+%%====================================================================
+%% Full Lifecycle Round-Trip: ready → error → reset → re-initialize
+%%====================================================================
+
+full_error_recovery_round_trip_test() ->
+    %% Start fresh, get to ready
+    State0 = do_initialize(make_state()),
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(State0)),
+    ?assert(beam_agent_mcp_dispatch:is_operational(State0)),
+
+    %% Mark error
+    State1 = beam_agent_mcp_dispatch:mark_error(provider_crash, State0),
+    ?assertEqual(error, beam_agent_mcp_dispatch:lifecycle_state(State1)),
+    ?assertNot(beam_agent_mcp_dispatch:is_operational(State1)),
+    ?assertEqual(provider_crash, beam_agent_mcp_dispatch:error_info(State1)),
+
+    %% Reset back to uninitialized
+    State2 = beam_agent_mcp_dispatch:reset(State1),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_dispatch:lifecycle_state(State2)),
+    ?assertEqual(undefined, beam_agent_mcp_dispatch:error_info(State2)),
+
+    %% Re-initialize successfully
+    State3 = do_initialize(State2),
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(State3)),
+    ?assert(beam_agent_mcp_dispatch:is_operational(State3)).

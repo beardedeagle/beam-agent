@@ -195,12 +195,23 @@ application startup.
     dispatch_message/2,
     dispatch_lifecycle_state/1,
     dispatch_session_capabilities/1,
+    dispatch_mark_error/2,
+    dispatch_mark_shutting_down/1,
+    dispatch_reset/1,
+    dispatch_error_info/1,
+    dispatch_is_operational/1,
 
     %% Client-side dispatch (beam_agent_mcp_client_dispatch)
     new_client/3,
     client_lifecycle_state/1,
     client_server_capabilities/1,
     client_session_capabilities/1,
+    client_mark_error/2,
+    client_mark_disconnected/2,
+    client_mark_shutting_down/1,
+    client_reset/1,
+    client_error_info/1,
+    client_is_operational/1,
     client_send_initialize/1,
     client_send_initialized/1,
     client_send_ping/1,
@@ -882,7 +893,8 @@ dispatch_message(Msg, State) ->
 -doc """
 Return the current lifecycle state of the server dispatch state machine.
 
-Returns an atom such as `uninitialized`, `initializing`, or `ready`.
+Returns one of `uninitialized`, `initializing`, `ready`, `error`, or
+`shutting_down`.
 """.
 -spec dispatch_lifecycle_state(dispatch_state()) -> atom().
 dispatch_lifecycle_state(State) ->
@@ -897,6 +909,51 @@ handshake. Only meaningful after the handshake completes (lifecycle `ready`).
 -spec dispatch_session_capabilities(dispatch_state()) -> map().
 dispatch_session_capabilities(State) ->
     beam_agent_mcp_dispatch:session_capabilities(State).
+
+-doc """
+Transition the server dispatch state to `error`.
+
+Stores `Reason` for later retrieval via `dispatch_error_info/1`. In `error`
+state, only `ping` and `initialize` (re-init) requests are accepted.
+""".
+-spec dispatch_mark_error(term(), dispatch_state()) -> dispatch_state().
+dispatch_mark_error(Reason, State) ->
+    beam_agent_mcp_dispatch:mark_error(Reason, State).
+
+-doc """
+Transition the server dispatch state to `shutting_down`.
+
+This is a terminal state. Only `ping` requests are accepted.
+""".
+-spec dispatch_mark_shutting_down(dispatch_state()) -> dispatch_state().
+dispatch_mark_shutting_down(State) ->
+    beam_agent_mcp_dispatch:mark_shutting_down(State).
+
+-doc """
+Reset the server dispatch from `error` back to `uninitialized`.
+
+Clears error info and session capabilities, allowing a fresh MCP handshake.
+Raises `{invalid_reset, Lifecycle}` if not in `error` state.
+""".
+-spec dispatch_reset(dispatch_state()) -> dispatch_state().
+dispatch_reset(State) ->
+    beam_agent_mcp_dispatch:reset(State).
+
+-doc """
+Return the error reason from the server dispatch state.
+
+Returns `undefined` if not in `error` state.
+""".
+-spec dispatch_error_info(dispatch_state()) -> term() | undefined.
+dispatch_error_info(State) ->
+    beam_agent_mcp_dispatch:error_info(State).
+
+-doc """
+Return `true` if the server dispatch is in the `ready` state.
+""".
+-spec dispatch_is_operational(dispatch_state()) -> boolean().
+dispatch_is_operational(State) ->
+    beam_agent_mcp_dispatch:is_operational(State).
 
 %%====================================================================
 %% Client-side dispatch (beam_agent_mcp_client_dispatch)
@@ -929,7 +986,8 @@ new_client(ClientInfo, ClientCaps, Opts) ->
 -doc """
 Return the current lifecycle state of the MCP client dispatch state machine.
 
-Returns an atom such as `uninitialized`, `initializing`, or `ready`.
+Returns one of `uninitialized`, `initializing`, `ready`, `error`,
+`disconnected`, or `shutting_down`.
 """.
 -spec client_lifecycle_state(client_state()) -> atom().
 client_lifecycle_state(State) ->
@@ -952,6 +1010,62 @@ These are the capabilities agreed upon during the MCP handshake.
 -spec client_session_capabilities(client_state()) -> map().
 client_session_capabilities(State) ->
     beam_agent_mcp_client_dispatch:session_capabilities(State).
+
+-doc """
+Transition the client state to `error`.
+
+Stores `Reason` for later retrieval via `client_error_info/1`. All `send_*`
+calls will raise `{not_ready, error, _}` until `client_reset/1` is called.
+""".
+-spec client_mark_error(term(), client_state()) -> client_state().
+client_mark_error(Reason, State) ->
+    beam_agent_mcp_client_dispatch:mark_error(Reason, State).
+
+-doc """
+Transition the client state to `disconnected`.
+
+The owning process should call this when the transport layer signals loss
+of connection. Only valid from `ready` or `initializing` state. Raises
+`{invalid_disconnect, Lifecycle}` otherwise.
+""".
+-spec client_mark_disconnected(term(), client_state()) -> client_state().
+client_mark_disconnected(Reason, State) ->
+    beam_agent_mcp_client_dispatch:mark_disconnected(Reason, State).
+
+-doc """
+Transition the client state to `shutting_down`.
+
+This is a terminal state. All `send_*` calls will raise.
+""".
+-spec client_mark_shutting_down(client_state()) -> client_state().
+client_mark_shutting_down(State) ->
+    beam_agent_mcp_client_dispatch:mark_shutting_down(State).
+
+-doc """
+Reset the client from `error` or `disconnected` back to `uninitialized`.
+
+Clears error info, pending requests, and server/session capabilities.
+Raises `{invalid_reset, Lifecycle}` if not in `error` or `disconnected`.
+""".
+-spec client_reset(client_state()) -> client_state().
+client_reset(State) ->
+    beam_agent_mcp_client_dispatch:reset(State).
+
+-doc """
+Return the error reason from the client state.
+
+Returns `undefined` if not in `error` or `disconnected` state.
+""".
+-spec client_error_info(client_state()) -> term() | undefined.
+client_error_info(State) ->
+    beam_agent_mcp_client_dispatch:error_info(State).
+
+-doc """
+Return `true` if the client is in the `ready` state.
+""".
+-spec client_is_operational(client_state()) -> boolean().
+client_is_operational(State) ->
+    beam_agent_mcp_client_dispatch:is_operational(State).
 
 -doc """
 Build and return an MCP `initialize` request message.
