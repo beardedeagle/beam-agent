@@ -697,6 +697,123 @@ default_client_capabilities_test() ->
     Caps = beam_agent_mcp_protocol:default_client_capabilities(),
     ?assert(maps:is_key(roots, Caps)).
 
+%%====================================================================
+%% M7: JSON-RPC 2.0 version field validation
+%%====================================================================
+
+validate_message_jsonrpc_present_test() ->
+    %% Valid: jsonrpc 2.0 present — should parse normally.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({request, 1, <<"ping">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_jsonrpc_missing_accepted_test() ->
+    %% Lenient: missing jsonrpc field is accepted (some transports strip it).
+    Msg = #{<<"id">> => 2, <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({request, 2, <<"ping">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_jsonrpc_wrong_version_rejected_test() ->
+    %% Wrong version value must be rejected.
+    Msg = #{<<"jsonrpc">> => <<"1.0">>, <<"id">> => 3,
+            <<"method">> => <<"ping">>},
+    ?assertMatch({invalid, {unsupported_jsonrpc_version, <<"1.0">>}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_jsonrpc_wrong_version_integer_rejected_test() ->
+    %% Non-string version values are also wrong.
+    Msg = #{<<"jsonrpc">> => 2, <<"id">> => 4, <<"method">> => <<"ping">>},
+    Result = beam_agent_mcp_protocol:validate_message(Msg),
+    ?assertMatch({invalid, {unsupported_jsonrpc_version, 2}}, Result).
+
+%%====================================================================
+%% M9: Request ID type validation
+%%====================================================================
+
+validate_message_id_binary_test() ->
+    %% Binary (string) IDs are valid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => <<"req-1">>,
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({request, <<"req-1">>, <<"ping">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_integer_test() ->
+    %% Integer IDs are valid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 42,
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({request, 42, <<"ping">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_null_test() ->
+    %% null IDs are valid per JSON-RPC 2.0.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => null,
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({request, null, <<"ping">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_list_rejected_test() ->
+    %% List IDs are invalid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => [1, 2],
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({invalid, {bad_id_type, [1, 2]}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_map_rejected_test() ->
+    %% Map IDs are invalid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => #{},
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({invalid, {bad_id_type, #{}}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_tuple_rejected_test() ->
+    %% Tuple IDs are invalid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => {1, 2},
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({invalid, {bad_id_type, {1, 2}}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_id_atom_rejected_test() ->
+    %% Atom IDs are invalid.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => foo,
+            <<"method">> => <<"ping">>, <<"params">> => #{}},
+    ?assertMatch({invalid, {bad_id_type, foo}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_response_id_integer_test() ->
+    %% Response messages also validate id type.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 7,
+            <<"result">> => #{<<"ok">> => true}},
+    ?assertMatch({response, 7, #{<<"ok">> := true}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_response_id_bad_type_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => [bad],
+            <<"result">> => #{}},
+    ?assertMatch({invalid, {bad_id_type, [bad]}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_error_response_id_integer_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 9,
+            <<"error">> => #{<<"code">> => -32600,
+                             <<"message">> => <<"bad">>}},
+    ?assertMatch({error_response, 9, -32600, <<"bad">>, undefined},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_error_response_id_bad_type_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => {bad},
+            <<"error">> => #{<<"code">> => -32600,
+                             <<"message">> => <<"bad">>}},
+    ?assertMatch({invalid, {bad_id_type, {bad}}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
+validate_message_notification_no_id_test() ->
+    %% Notifications have no id — no id validation applies.
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/initialized">>},
+    ?assertMatch({notification, <<"notifications/initialized">>, #{}},
+                 beam_agent_mcp_protocol:validate_message(Msg)).
+
 capability_supported_server_side_test() ->
     Session = beam_agent_mcp_protocol:negotiate_capabilities(
                   #{tools => #{}, resources => #{}, logging => #{}},

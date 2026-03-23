@@ -190,6 +190,47 @@ session_stop_nonexistent_test() ->
     beam_agent_search_core:clear().
 
 %%====================================================================
+%% L9: clear_session/1
+%%====================================================================
+
+clear_session_removes_all_search_sessions_for_session_test() ->
+    beam_agent_search_core:ensure_tables(),
+    beam_agent_search_core:clear(),
+    Session = <<"sess_clear_search">>,
+    {ok, _} = beam_agent_search_core:session_start(Session, <<"s1">>, [<<"/tmp">>]),
+    {ok, _} = beam_agent_search_core:session_start(Session, <<"s2">>, [<<"/tmp">>]),
+    %% Both sessions exist
+    ?assertMatch({ok, _},
+        beam_agent_search_core:session_update(Session, <<"s1">>, <<"foo">>)),
+    ok = beam_agent_search_core:clear_session(Session),
+    %% Both should be gone
+    ?assertEqual({error, not_found},
+        beam_agent_search_core:session_update(Session, <<"s1">>, <<"foo">>)),
+    ?assertEqual({error, not_found},
+        beam_agent_search_core:session_update(Session, <<"s2">>, <<"foo">>)),
+    beam_agent_search_core:clear().
+
+clear_session_does_not_affect_other_sessions_test() ->
+    beam_agent_search_core:ensure_tables(),
+    beam_agent_search_core:clear(),
+    SessionA = <<"sess_clear_a">>,
+    SessionB = <<"sess_clear_b">>,
+    {ok, _} = beam_agent_search_core:session_start(SessionA, <<"sa1">>, [<<"/tmp">>]),
+    {ok, _} = beam_agent_search_core:session_start(SessionB, <<"sb1">>, [<<"/tmp">>]),
+    ok = beam_agent_search_core:clear_session(SessionA),
+    %% SessionA gone, SessionB intact
+    ?assertEqual({error, not_found},
+        beam_agent_search_core:session_update(SessionA, <<"sa1">>, <<"q">>)),
+    ?assertMatch({ok, _},
+        beam_agent_search_core:session_update(SessionB, <<"sb1">>, <<"q">>)),
+    beam_agent_search_core:clear().
+
+clear_session_nonexistent_is_ok_test() ->
+    beam_agent_search_core:ensure_tables(),
+    ?assertEqual(ok, beam_agent_search_core:clear_session(<<"no-such-session">>)),
+    beam_agent_search_core:clear().
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

@@ -152,7 +152,8 @@ ensure_tables() ->
         {read_concurrency, true}]),
     beam_agent_ets:ensure_table(?MESSAGES_TABLE, [ordered_set, named_table,
         {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?COUNTERS_TABLE, [set, named_table]),
+    beam_agent_ets:ensure_table(?COUNTERS_TABLE, [set, named_table,
+        {read_concurrency, true}]),
     ok.
 
 -doc "Clear all session data. Deletes all entries from both tables.".

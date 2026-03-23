@@ -104,6 +104,11 @@ encrypt_value(Value) ->
 -spec decrypt_value(binary(), binary(), binary()) -> term().
 decrypt_value(Nonce, Ciphertext, Tag) ->
     Key = derive_key(),
-    Plaintext = crypto:crypto_one_time_aead(
-        aes_256_gcm, Key, Nonce, Ciphertext, <<>>, Tag, false),
-    binary_to_term(Plaintext).
+    case crypto:crypto_one_time_aead(
+             aes_256_gcm, Key, Nonce, Ciphertext, <<>>, Tag, false) of
+        error ->
+            error(credential_decrypt_failed);
+        Plaintext ->
+            %% [safe] prevents atom-table exhaustion and lambda injection
+            binary_to_term(Plaintext, [safe])
+    end.

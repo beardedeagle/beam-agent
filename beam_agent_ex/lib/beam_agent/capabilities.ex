@@ -259,6 +259,35 @@ defmodule BeamAgent.Capabilities do
   defdelegate supports(capability, backend), to: :beam_agent_capabilities
 
   @doc """
+  Assert that a capability is supported for a given backend.
+
+  A pre-flight check wrapper around `supports/2`. Returns `:ok` when the
+  capability is supported, or `{:error, {:unsupported_capability, cap, backend}}`
+  when the capability is not available. Returns the underlying
+  `{:error, status_error()}` tuple for unknown capability or backend atoms.
+
+  Use this before calling a feature to produce a clear error at the call site
+  rather than a confusing failure inside the feature implementation.
+
+  ## Example
+
+  ```elixir
+  iex> BeamAgent.Capabilities.assert_capability(:checkpointing, :codex)
+  :ok
+
+  iex> BeamAgent.Capabilities.assert_capability(:bogus_feature, :claude)
+  {:error, {:unknown_capability, :bogus_feature}}
+  ```
+  """
+  @spec assert_capability(capability(), atom() | binary()) ::
+          :ok
+          | {:error,
+             {:unsupported_capability, capability(), atom()}
+             | {:unknown_capability, capability()}
+             | {:unknown_backend, term()}}
+  defdelegate assert_capability(capability, backend), to: :beam_agent_capabilities
+
+  @doc """
   Return the full capability matrix as a list of capability info maps.
 
   Each entry describes one capability with its support level across all five

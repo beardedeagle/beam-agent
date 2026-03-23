@@ -8,7 +8,7 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2]).
+         terminate/2, format_status/1]).
 
 %% Dialyzer: transport_send/3 uses gen_tcp:socket()/ssl:sslsocket()/iodata()
 %% which are the idiomatic Erlang types, broader than what dialyzer infers
@@ -255,6 +255,19 @@ terminate(_Reason, #state{socket = Socket, transport = Transport,
 terminate(_Reason, #state{socket = Socket, transport = Transport}) ->
     catch transport_close(Transport, Socket),
     ok.
+
+-doc "Redact sensitive fields from crash logs and sys:get_status output.".
+-spec format_status(gen_server:format_status()) -> gen_server:format_status().
+format_status(Status) ->
+    State = maps:get(state, Status, undefined),
+    Status#{state => redact_state(State)}.
+
+-spec redact_state(#state{} | term()) -> #state{} | term().
+redact_state(#state{} = State) ->
+    %% buffer may contain in-flight data including auth headers; redact it.
+    State#state{buffer = <<"[REDACTED]">>};
+redact_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: socket data handling

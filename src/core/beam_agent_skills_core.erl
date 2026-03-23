@@ -5,6 +5,7 @@
     %% Table lifecycle
     ensure_tables/0,
     clear/0,
+    clear_session/1,
     %% Skill registration
     register_skill/3,
     unregister_skill/2,
@@ -77,6 +78,16 @@ ensure_tables() ->
 clear() ->
     ensure_tables(),
     beam_agent_ets:delete_all_objects(?SKILLS_TABLE),
+    ok.
+
+-doc "Delete all skills and configs associated with a session pid or id.".
+-spec clear_session(pid() | binary()) -> ok.
+clear_session(Session) ->
+    ensure_tables(),
+    Key = beam_agent_ets:session_key(Session),
+    %% Skills are stored under {Key, skill, SkillId}; configs under
+    %% {Key, config, SkillId}. A single match on {Key, _, _} covers both.
+    ets:match_delete(?SKILLS_TABLE, {{Key, '_', '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------

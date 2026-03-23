@@ -98,6 +98,45 @@ cancel_cascades_to_active_descendants_only_test() ->
     ?assertEqual([completed, cancelled], ListedStatuses),
     reset().
 
+%%====================================================================
+%% M18: descriptive error on missing run_id in persist_child_run
+%%====================================================================
+
+%% Verify that spawning a child with a legitimate parent run works end-to-end —
+%% the maps:find guard in persist_child_run must not false-positive on valid runs.
+spawn_with_valid_parent_run_has_correct_lineage_test() ->
+    reset(),
+    SessionId = unique_binary("m18-parent-session"),
+    beam_agent_test_helpers:register_session(SessionId, gemini),
+    {ok, ParentRun} = beam_agent_runs:start_run(SessionId, #{kind => parent}),
+    ParentRunId = maps:get(run_id, ParentRun),
+    {ok, Child} = beam_agent_orchestrator_core:spawn(ParentRunId, #{
+        metadata => #{test => m18}
+    }),
+    ?assertEqual(ParentRunId, maps:get(parent_run_id, Child)),
+    ?assert(is_binary(maps:get(run_id, maps:get(run, Child)))),
+    reset().
+
+%% Verify that passing a run map without a run_id to the public spawn/2 API
+%% returns a descriptive {error, {invalid_parent, _}} — resolve_parent_run
+%% validates parent maps before persist_child_run is ever reached, so no crash.
+spawn_with_run_map_missing_run_id_returns_descriptive_error_test() ->
+    reset(),
+    SessionId = unique_binary("m18-bad-parent-session"),
+    beam_agent_test_helpers:register_session(SessionId, gemini),
+    {ok, ParentRun} = beam_agent_runs:start_run(SessionId, #{kind => parent}),
+    ParentRunId = maps:get(run_id, ParentRun),
+    %% Strip run_id from a valid run map — simulates a corrupt/partial run reference
+    BadRun = maps:remove(run_id, ParentRun),
+    Result = beam_agent_orchestrator_core:spawn(BadRun, #{
+        metadata => #{test => m18_bad}
+    }),
+    ?assertMatch({error, {invalid_parent, _}}, Result),
+    %% The parent run (by id) should still be accessible — no side effects
+    {ok, OrigRun} = beam_agent_runs:get_run(ParentRunId),
+    ?assertEqual(running, maps:get(status, OrigRun)),
+    reset().
+
 reset() ->
     ok = beam_agent_orchestrator_core:clear(),
     ok = beam_agent_runs_core:clear(),

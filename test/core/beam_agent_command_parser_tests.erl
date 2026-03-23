@@ -245,3 +245,34 @@ flatten_redirect_test() ->
     Cmd = beam_agent_command_parser:parse(<<"echo hello > file">>),
     Flat = beam_agent_command_parser:flatten_commands(Cmd),
     ?assert(length(Flat) >= 1).
+
+%%====================================================================
+%% M15: parse_list_form/1 empty-list guard and guard documentation
+%%====================================================================
+
+%% parse/1 already routes [] to the string clause which yields opaque.
+%% Verify the public parse/1 contract is unchanged.
+parse_empty_list_yields_opaque_test() ->
+    Result = beam_agent_command_parser:parse([]),
+    ?assertEqual(opaque, maps:get(type, Result)).
+
+%% A char-code string like "git" is routed to the string clause, not the
+%% list-form clause, because hd("git") is an integer (103).
+parse_charlist_string_routed_as_string_test() ->
+    Result = beam_agent_command_parser:parse("echo hello"),
+    %% Parsed as string form, not list form
+    ?assertEqual(string, maps:get(input_form, Result)),
+    ?assertEqual(simple, maps:get(type, Result)).
+
+%% A binary-segment list has a binary head, so it takes the list-form path.
+parse_binary_segment_list_routed_as_list_test() ->
+    Result = beam_agent_command_parser:parse([<<"echo">>, <<"hello">>]),
+    ?assertEqual(list, maps:get(input_form, Result)),
+    ?assertEqual(simple, maps:get(type, Result)).
+
+%% Single-element segment list works correctly.
+parse_single_segment_list_test() ->
+    Result = beam_agent_command_parser:parse([<<"ls">>]),
+    ?assertEqual(list, maps:get(input_form, Result)),
+    ?assertEqual(simple, maps:get(type, Result)),
+    ?assertEqual([], maps:get(args, Result)).

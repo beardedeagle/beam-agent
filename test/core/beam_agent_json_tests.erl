@@ -48,3 +48,22 @@ safe_decode_object_not_binary_test() ->
 safe_decode_object_not_binary_atom_test() ->
     ?assertEqual({error, {decode_failed, not_binary}},
                  beam_agent_json:safe_decode_object(hello)).
+
+safe_decode_object_too_large_test() ->
+    %% 50 MB limit = 52_428_800 bytes; exceed by 1 byte
+    OverSize = 52_428_800 + 1,
+    Bin = binary:copy(<<0>>, OverSize),
+    ?assertEqual({error, {json_too_large, OverSize}},
+                 beam_agent_json:safe_decode_object(Bin)).
+
+safe_decode_object_at_limit_test() ->
+    %% Exactly at the 50 MB boundary — should attempt decode, not reject
+    AtLimit = 52_428_800,
+    Bin = iolist_to_binary([<<"{\"k\":\"">>, binary:copy(<<"a">>, AtLimit - 8), <<"\"}">>]),
+    %% Will either succeed or fail JSON parse, but must NOT return json_too_large
+    Result = beam_agent_json:safe_decode_object(Bin),
+    case Result of
+        {ok, _} -> ok;
+        {error, {decode_failed, _}} -> ok;
+        {error, {json_too_large, _}} -> ?assert(false)
+    end.

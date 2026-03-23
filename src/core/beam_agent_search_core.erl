@@ -5,6 +5,7 @@
     %% Table lifecycle
     ensure_tables/0,
     clear/0,
+    clear_session/1,
     %% Search
     fuzzy_file_search/2,
     fuzzy_file_search/3,
@@ -65,6 +66,15 @@ ensure_tables() ->
 clear() ->
     ensure_tables(),
     beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
+    ok.
+
+-doc "Delete all search sessions associated with a session pid or id.".
+-spec clear_session(pid() | binary()) -> ok.
+clear_session(Session) ->
+    ensure_tables(),
+    SKey = beam_agent_ets:session_key(Session),
+    %% Search sessions are stored under {SKey, SearchSessionId}.
+    ets:match_delete(?SESSIONS_TABLE, {{SKey, '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------

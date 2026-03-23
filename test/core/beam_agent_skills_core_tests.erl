@@ -297,3 +297,51 @@ register_overwrites_existing_entry_test() ->
     ?assertEqual(1, length(List)),
     ?assertEqual(<<"Updated">>, maps:get(name, hd(List))),
     beam_agent_skills_core:clear().
+
+%%====================================================================
+%% L9: clear_session/1
+%%====================================================================
+
+clear_session_removes_all_skills_for_session_test() ->
+    beam_agent_skills_core:ensure_tables(),
+    beam_agent_skills_core:clear(),
+    Session = <<"skills_clear_sess">>,
+    {ok, _} = beam_agent_skills_core:register_skill(Session, <<"sk1">>, #{}),
+    {ok, _} = beam_agent_skills_core:register_skill(Session, <<"sk2">>, #{}),
+    {ok, List1} = beam_agent_skills_core:skills_list(Session),
+    ?assertEqual(2, length(List1)),
+    ok = beam_agent_skills_core:clear_session(Session),
+    {ok, List2} = beam_agent_skills_core:skills_list(Session),
+    ?assertEqual([], List2),
+    beam_agent_skills_core:clear().
+
+clear_session_removes_configs_for_session_test() ->
+    beam_agent_skills_core:ensure_tables(),
+    beam_agent_skills_core:clear(),
+    Session = <<"skills_clear_cfg_sess">>,
+    ok = beam_agent_skills_core:skills_config_write(Session, <<"/tmp/sk1">>, true),
+    {ok, Cfgs1} = beam_agent_skills_core:skills_config_read(Session),
+    ?assertEqual(1, length(Cfgs1)),
+    ok = beam_agent_skills_core:clear_session(Session),
+    {ok, Cfgs2} = beam_agent_skills_core:skills_config_read(Session),
+    ?assertEqual([], Cfgs2),
+    beam_agent_skills_core:clear().
+
+clear_session_does_not_affect_other_sessions_test() ->
+    beam_agent_skills_core:ensure_tables(),
+    beam_agent_skills_core:clear(),
+    SessionA = <<"skills_clear_sessA">>,
+    SessionB = <<"skills_clear_sessB">>,
+    {ok, _} = beam_agent_skills_core:register_skill(SessionA, <<"skA">>, #{}),
+    {ok, _} = beam_agent_skills_core:register_skill(SessionB, <<"skB">>, #{}),
+    ok = beam_agent_skills_core:clear_session(SessionA),
+    {ok, ListA} = beam_agent_skills_core:skills_list(SessionA),
+    ?assertEqual([], ListA),
+    {ok, ListB} = beam_agent_skills_core:skills_list(SessionB),
+    ?assertEqual(1, length(ListB)),
+    beam_agent_skills_core:clear().
+
+clear_session_nonexistent_is_ok_test() ->
+    beam_agent_skills_core:ensure_tables(),
+    ?assertEqual(ok, beam_agent_skills_core:clear_session(<<"no-such">>)),
+    beam_agent_skills_core:clear().

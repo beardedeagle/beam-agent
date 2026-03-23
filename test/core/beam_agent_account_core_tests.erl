@@ -190,3 +190,38 @@ login_then_logout_flow_test() ->
     {ok, _} = beam_agent_account_core:account_logout(S),
     {ok, Auth2} = beam_agent_account_core:auth_status(S),
     ?assertEqual(logged_out, maps:get(status, Auth2)).
+
+%%====================================================================
+%% L9: clear_session/1
+%%====================================================================
+
+clear_session_removes_entry_test() ->
+    beam_agent_account_core:ensure_tables(),
+    beam_agent_account_core:clear(),
+    S = <<"acct_clear_session">>,
+    {ok, _} = beam_agent_account_core:account_login(S, #{provider_id => <<"gh">>}),
+    {ok, Auth1} = beam_agent_account_core:auth_status(S),
+    ?assertEqual(logged_in, maps:get(status, Auth1)),
+    ?assertEqual(error, maps:find(source, Auth1)),
+    ok = beam_agent_account_core:clear_session(S),
+    %% After clear_session the entry is gone; auth_status returns inferred default
+    {ok, Auth2} = beam_agent_account_core:auth_status(S),
+    ?assertEqual(inferred, maps:get(source, Auth2)),
+    beam_agent_account_core:clear().
+
+clear_session_nonexistent_is_ok_test() ->
+    beam_agent_account_core:ensure_tables(),
+    ?assertEqual(ok, beam_agent_account_core:clear_session(<<"no-such-session">>)),
+    beam_agent_account_core:clear().
+
+clear_session_pid_removes_entry_test() ->
+    beam_agent_account_core:ensure_tables(),
+    beam_agent_account_core:clear(),
+    Pid = self(),
+    {ok, _} = beam_agent_account_core:account_login(Pid, #{}),
+    {ok, Auth1} = beam_agent_account_core:auth_status(Pid),
+    ?assertEqual(logged_in, maps:get(status, Auth1)),
+    ok = beam_agent_account_core:clear_session(Pid),
+    {ok, Auth2} = beam_agent_account_core:auth_status(Pid),
+    ?assertEqual(inferred, maps:get(source, Auth2)),
+    beam_agent_account_core:clear().
