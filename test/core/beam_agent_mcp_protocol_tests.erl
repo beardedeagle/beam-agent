@@ -31,6 +31,29 @@ protocol_version_test() ->
     ?assertEqual(<<"2025-06-18">>,
                  beam_agent_mcp_protocol:protocol_version()).
 
+supported_protocol_versions_returns_list_test() ->
+    Versions = beam_agent_mcp_protocol:supported_protocol_versions(),
+    ?assert(is_list(Versions)),
+    ?assert(length(Versions) > 0),
+    lists:foreach(fun(V) -> ?assert(is_binary(V)) end, Versions).
+
+supported_protocol_versions_includes_current_test() ->
+    Current = beam_agent_mcp_protocol:protocol_version(),
+    ?assert(lists:member(Current,
+                         beam_agent_mcp_protocol:supported_protocol_versions())).
+
+is_supported_protocol_version_current_test() ->
+    ?assert(beam_agent_mcp_protocol:is_supported_protocol_version(
+                <<"2025-06-18">>)).
+
+is_supported_protocol_version_unknown_test() ->
+    ?assertNot(beam_agent_mcp_protocol:is_supported_protocol_version(
+                   <<"2024-11-05">>)).
+
+is_supported_protocol_version_garbage_test() ->
+    ?assertNot(beam_agent_mcp_protocol:is_supported_protocol_version(
+                   <<"not-a-version">>)).
+
 %%====================================================================
 %% JSON-RPC 2.0 Envelope Constructors
 %%====================================================================

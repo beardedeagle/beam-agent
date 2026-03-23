@@ -48,6 +48,58 @@ new_state_without_handler_test() ->
                  beam_agent_mcp_client_dispatch:lifecycle_state(State)).
 
 %%====================================================================
+%% H5: max_pending limit
+%%====================================================================
+
+max_pending_default_is_zero_test() ->
+    State = make_state(),
+    ?assertEqual(0, beam_agent_mcp_client_dispatch:max_pending(State)).
+
+max_pending_configured_value_test() ->
+    State = beam_agent_mcp_client_dispatch:new(
+        make_client_info(), make_client_caps(),
+        #{max_pending => 5}),
+    ?assertEqual(5, beam_agent_mcp_client_dispatch:max_pending(State)).
+
+max_pending_unlimited_allows_many_requests_test() ->
+    State = make_ready_state(),  %% default max_pending=0 (unlimited)
+    {_, S1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    {_, S2} = beam_agent_mcp_client_dispatch:send_tools_list(S1),
+    {_, S3} = beam_agent_mcp_client_dispatch:send_tools_list(S2),
+    ?assertEqual(3, beam_agent_mcp_client_dispatch:pending_count(S3)).
+
+max_pending_enforced_on_send_test() ->
+    State = make_ready_state_with_max_pending(2),
+    {_, S1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    {_, S2} = beam_agent_mcp_client_dispatch:send_tools_list(S1),
+    ?assertEqual(2, beam_agent_mcp_client_dispatch:pending_count(S2)),
+    %% Third request exceeds limit
+    ?assertError({max_pending_exceeded, 2, 2},
+        beam_agent_mcp_client_dispatch:send_tools_list(S2)).
+
+max_pending_allows_after_response_clears_slot_test() ->
+    State = make_ready_state_with_max_pending(1),
+    {_Msg, S1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    ?assertEqual(1, beam_agent_mcp_client_dispatch:pending_count(S1)),
+    %% Respond to clear the pending slot
+    Id = find_pending_id(S1),
+    Resp = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => Id,
+             <<"result">> => #{<<"tools">> => []}},
+    {response, _, _, S2} =
+        beam_agent_mcp_client_dispatch:handle_message(Resp, S1),
+    ?assertEqual(0, beam_agent_mcp_client_dispatch:pending_count(S2)),
+    %% Now a new request succeeds
+    {_, S3} = beam_agent_mcp_client_dispatch:send_tools_list(S2),
+    ?assertEqual(1, beam_agent_mcp_client_dispatch:pending_count(S3)).
+
+max_pending_applies_to_ping_too_test() ->
+    %% Ping uses the same track_request path — max_pending applies
+    State = make_ready_state_with_max_pending(1),
+    {_, S1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    ?assertError({max_pending_exceeded, 1, 1},
+        beam_agent_mcp_client_dispatch:send_ping(S1)).
+
+%%====================================================================
 %% Lifecycle: Initialize
 %%====================================================================
 
@@ -88,6 +140,54 @@ initialize_response_transitions_to_ready_test() ->
                     beam_agent_mcp_client_dispatch:session_capabilities(State2)),
     %% Pending request is cleared
     ?assertEqual(0, beam_agent_mcp_client_dispatch:pending_count(State2)).
+
+%%====================================================================
+%% M8: Protocol version validation in initialize response
+%%====================================================================
+
+initialize_rejects_unsupported_server_version_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    %% Craft response with unsupported protocol version
+    Response = #{<<"jsonrpc">> => <<"2.0">>,
+                 <<"id">> => 1,
+                 <<"result">> => #{
+                     <<"protocolVersion">> => <<"2024-11-05">>,
+                     <<"capabilities">> => #{},
+                     <<"serverInfo">> => #{<<"name">> => <<"old-server">>,
+                                           <<"version">> => <<"0.1">>}}},
+    {error_response, 1, -32600, _ErrMsg, ErrState} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ErrState)),
+    ?assertEqual({unsupported_protocol_version, <<"2024-11-05">>},
+                 beam_agent_mcp_client_dispatch:error_info(ErrState)).
+
+initialize_accepts_missing_server_version_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    %% Response omits protocolVersion — accepted leniently
+    Response = #{<<"jsonrpc">> => <<"2.0">>,
+                 <<"id">> => 1,
+                 <<"result">> => #{
+                     <<"capabilities">> => #{},
+                     <<"serverInfo">> => #{<<"name">> => <<"minimal">>,
+                                           <<"version">> => <<"1.0">>}}},
+    {response, 1, _Result, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(ready,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, State2)).
+
+initialize_stores_server_version_when_supported_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    Response = make_initialize_response(1),
+    {response, 1, _Result, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, State2)).
 
 %%====================================================================
 %% Lifecycle Gating
@@ -655,6 +755,19 @@ make_state() ->
 
 make_ready_state() ->
     make_ready_state_with_caps(make_client_caps()).
+
+make_ready_state_with_max_pending(MaxPending) ->
+    State0 = beam_agent_mcp_client_dispatch:new(
+        make_client_info(),
+        make_client_caps(),
+        #{handler => beam_agent_mcp_client_dispatch_test_handler,
+          handler_state => #{},
+          max_pending => MaxPending}),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State0),
+    Response = make_initialize_response(1),
+    {response, 1, _Result, ReadyState} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State1),
+    ReadyState.
 
 make_ready_state_with_caps(ClientCaps) ->
     State0 = beam_agent_mcp_client_dispatch:new(

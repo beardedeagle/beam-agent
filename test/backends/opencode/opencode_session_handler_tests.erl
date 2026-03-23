@@ -68,6 +68,58 @@ binary_http_localhost_test() ->
             <<"http://localhost:4096">>)).
 
 %%====================================================================
+%% M5: check_transport_security/3 — reject plaintext HTTP with auth
+%%====================================================================
+
+security_no_auth_always_ok_test() ->
+    ?assertEqual(ok,
+        opencode_session_handler:check_transport_security(
+            none, "http://remote.host:4096", #{})).
+
+security_auth_over_https_ok_test() ->
+    ?assertEqual(ok,
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "https://opencode.example.com:4096", #{})).
+
+security_auth_over_localhost_ok_test() ->
+    ?assertEqual(ok,
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "http://localhost:4096", #{})).
+
+security_auth_over_127_ok_test() ->
+    ?assertEqual(ok,
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "http://127.0.0.1:4096", #{})).
+
+security_auth_over_remote_http_rejected_test() ->
+    ?assertEqual({error, plaintext_auth},
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "http://opencode.example.com:4096", #{})).
+
+security_auth_over_remote_http_with_override_ok_test() ->
+    ?assertEqual(ok,
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "http://opencode.example.com:4096",
+            #{allow_insecure_http => true})).
+
+security_auth_over_remote_ip_rejected_test() ->
+    ?assertEqual({error, plaintext_auth},
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            "http://10.0.0.5:4096", #{})).
+
+security_binary_url_works_test() ->
+    ?assertEqual({error, plaintext_auth},
+        opencode_session_handler:check_transport_security(
+            {basic, <<"dXNlcjpwYXNz">>},
+            <<"http://remote.host:4096">>, #{})).
+
+%%====================================================================
 %% L14: event queue depth limit — integration tests
 %%====================================================================
 

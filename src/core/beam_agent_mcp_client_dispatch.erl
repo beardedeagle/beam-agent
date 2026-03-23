@@ -132,7 +132,8 @@ end,
 
     %% Timeout management
     check_timeouts/2,
-    pending_count/1
+    pending_count/1,
+    max_pending/1
 ]).
 
 -export_type([
@@ -201,6 +202,11 @@ layer handles encoding the response into the correct JSON-RPC format.
     next_id := pos_integer(),
     pending := #{beam_agent_mcp_protocol:request_id() => pending_request()},
     default_timeout := pos_integer(),
+    %% H5: Maximum number of concurrent pending requests.
+    %% 0 = unlimited (default).  When the limit is reached, track_request/4
+    %% raises {max_pending_exceeded, CurrentCount, MaxPending}.  Callers can
+    %% pre-check with pending_count/1 vs max_pending/1.
+    max_pending := non_neg_integer(),
     handler => module(),
     handler_state => term(),
     error_info => term(),
@@ -246,6 +252,7 @@ Options:
   - `handler` — callback module implementing `beam_agent_mcp_client_dispatch`
   - `handler_state` — opaque state passed to handler callbacks
   - `default_timeout` — default timeout in ms for pending requests (default: 30000)
+  - `max_pending` — maximum concurrent pending requests; 0 = unlimited (default: 0)
 """.
 -spec new(beam_agent_mcp_protocol:implementation_info(),
           beam_agent_mcp_protocol:client_capabilities(),
@@ -260,6 +267,7 @@ new(ClientInfo, ClientCaps0, Opts)
         next_id => 1,
         pending => #{},
         default_timeout => maps:get(default_timeout, Opts, ?DEFAULT_TIMEOUT),
+        max_pending => maps:get(max_pending, Opts, 0),
         notification_window => {0, erlang:monotonic_time(millisecond)},
         max_notifications_per_interval =>
             maps:get(max_notifications_per_interval, Opts, 0),
@@ -749,6 +757,14 @@ check_timeouts(Now, #{pending := Pending} = State) ->
 pending_count(#{pending := Pending}) ->
     map_size(Pending).
 
+-doc """
+Return the configured maximum pending request limit.
+
+Returns `0` when unlimited (the default).
+""".
+-spec max_pending(client_state()) -> non_neg_integer().
+max_pending(#{max_pending := Max}) -> Max.
+
 %%--------------------------------------------------------------------
 %% Internal: Response Handling
 %%--------------------------------------------------------------------
@@ -791,26 +807,40 @@ handle_error_response(Id, Code, Msg, #{pending := Pending} = State) ->
                                  map(), client_state()) -> client_result().
 handle_initialize_response(Id, Result,
                            #{client_capabilities := ClientCaps} = State) ->
-    %% M8: Validate server's protocolVersion against our own.
-    %% Warn on mismatch; always proceed (the MCP spec says clients should
-    %% handle minor version differences gracefully).
+    %% M8: Validate server's protocolVersion.
+    %% Reject unsupported versions; accept missing version leniently.
     OurVersion = beam_agent_mcp_protocol:protocol_version(),
     ServerVersion = maps:get(<<"protocolVersion">>, Result, undefined),
     case ServerVersion of
-        OurVersion -> ok;
         undefined ->
             logger:warning("MCP initialize response: server did not include "
-                           "protocolVersion; assuming ~s", [OurVersion]);
-        Other ->
-            logger:warning("MCP initialize response: server protocolVersion ~s "
-                           "differs from client ~s; proceeding",
-                           [Other, OurVersion])
-    end,
-    NegotiatedVersion = case ServerVersion of
-        undefined -> OurVersion;
-        _         -> ServerVersion
-    end,
+                           "protocolVersion; assuming ~s", [OurVersion]),
+            do_initialize_response(Id, Result, OurVersion, ClientCaps, State);
+        _ ->
+            case beam_agent_mcp_protocol:is_supported_protocol_version(ServerVersion) of
+                true ->
+                    do_initialize_response(Id, Result, ServerVersion,
+                                           ClientCaps, State);
+                false ->
+                    ErrMsg = iolist_to_binary(io_lib:format(
+                        "Unsupported server protocol version: ~s",
+                        [ServerVersion])),
+                    ErrorState = State#{
+                        lifecycle => error,
+                        error_info => {unsupported_protocol_version,
+                                       ServerVersion}
+                    },
+                    {error_response, Id,
+                     beam_agent_mcp_protocol:error_invalid_request(),
+                     ErrMsg, ErrorState}
+            end
+    end.
 
+-spec do_initialize_response(beam_agent_mcp_protocol:request_id(), map(),
+                             beam_agent_mcp_protocol:protocol_version(),
+                             beam_agent_mcp_protocol:client_capabilities(),
+                             client_state()) -> client_result().
+do_initialize_response(Id, Result, NegotiatedVersion, ClientCaps, State) ->
     ServerCaps = decode_server_capabilities(
                      maps:get(<<"capabilities">>, Result, #{})),
     SessionCaps = beam_agent_mcp_protocol:negotiate_capabilities(
@@ -1073,16 +1103,25 @@ next_request_id(#{next_id := Id} = State) ->
 %%--------------------------------------------------------------------
 
 %% Pure: accepts the current monotonic time from the caller.
+%% H5: Enforces max_pending limit.  Raises {max_pending_exceeded, Count, Max}
+%% when the pending map is at capacity and max_pending > 0.
 -spec track_request(beam_agent_mcp_protocol:request_id(), binary(),
                     integer(), client_state()) -> client_state().
 track_request(Id, Method, Now, #{pending := Pending,
+                                 max_pending := Max,
                                  default_timeout := Timeout} = State) ->
-    Req = #{
-        method => Method,
-        deadline => Now + Timeout,
-        sent_at => Now
-    },
-    State#{pending => Pending#{Id => Req}}.
+    Count = map_size(Pending),
+    case Max > 0 andalso Count >= Max of
+        true ->
+            error({max_pending_exceeded, Count, Max});
+        false ->
+            Req = #{
+                method => Method,
+                deadline => Now + Timeout,
+                sent_at => Now
+            },
+            State#{pending => Pending#{Id => Req}}
+    end.
 
 %% Boundary: reads the monotonic clock and delegates to the pure tracker.
 %% This is the sole point of impurity, kept at the outermost layer of the

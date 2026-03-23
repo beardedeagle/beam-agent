@@ -123,7 +123,7 @@ context_status(SessionOrThread) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, #{}),
     StartTime = telemetry_start(context_status, TeleMeta),
     Result = case resolve_scope(SessionOrThread, #{}) of
-        {ok, Scope} ->
+        {ok, #{session_id := SessionId} = Scope} ->
             case budget_estimate_for_scope(Scope, #{}) of
                 {ok, Budget} ->
                     Status0 = #{
@@ -131,14 +131,14 @@ context_status(SessionOrThread) ->
                         budget => Budget
                     },
                     Status1 = case beam_agent_session_store_core:get_summary(
-                        maps:get(session_id, Scope)) of
+                        SessionId) of
                         {ok, Summary} -> Status0#{session_summary => Summary};
                         {error, not_found} -> Status0
                     end,
                     Status2 = case maps:get(thread_id, Scope, undefined) of
                         ThreadId when is_binary(ThreadId) ->
                             case beam_agent_threads_core:get_thread(
-                                maps:get(session_id, Scope), ThreadId) of
+                                SessionId, ThreadId) of
                                 {ok, Thread} -> Status1#{thread => Thread};
                                 {error, not_found} -> Status1
                             end;
@@ -204,8 +204,8 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
     Result = case resolve_scope(SessionOrThread, Opts) of
         {ok, Scope} ->
             case budget_estimate_for_scope(Scope, Opts) of
-                {ok, Budget} ->
-                    case maps:get(triggers, Budget) of
+                {ok, #{triggers := Triggers} = Budget} ->
+                    case Triggers of
                         [] ->
                             {ok, #{
                                 compacted => false,

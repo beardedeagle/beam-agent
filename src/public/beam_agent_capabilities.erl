@@ -417,7 +417,7 @@ true = lists:member(checkpointing, Ids).
 """.
 -spec capability_ids() -> [capability()].
 capability_ids() ->
-    [maps:get(id, Capability) || Capability <- all()].
+    [Id || #{id := Id} <- all()].
 
 -doc """
 Return the projected capability list for a specific backend.
@@ -604,27 +604,23 @@ support(SupportLevel, Implementation, Fidelity, Extra) ->
 
 -spec project_capability(capability_info(), beam_agent_backend:backend()) ->
     {ok, map()} | {error, term()}.
-project_capability(Capability, Backend) ->
-    case maps:find(support, Capability) of
-        {ok, SupportMap} ->
-            case maps:find(Backend, SupportMap) of
-                {ok, SupportInfo} ->
-                    {ok, maps:merge(
-                        #{
-                            id => maps:get(id, Capability),
-                            title => maps:get(title, Capability),
-                            backend => Backend,
-                            support_level => maps:get(support_level, SupportInfo),
-                            implementation => maps:get(implementation, SupportInfo),
-                            fidelity => maps:get(fidelity, SupportInfo)
-                        },
-                        extra_projection_fields(SupportInfo)
-                    )};
-                error ->
-                    {error, {unknown_backend, Backend}}
-            end;
+project_capability(#{id := Id, title := Title, support := SupportMap}, Backend) ->
+    case maps:find(Backend, SupportMap) of
+        {ok, #{support_level := SL, implementation := Impl,
+               fidelity := Fid} = SupportInfo} ->
+            {ok, maps:merge(
+                #{
+                    id => Id,
+                    title => Title,
+                    backend => Backend,
+                    support_level => SL,
+                    implementation => Impl,
+                    fidelity => Fid
+                },
+                extra_projection_fields(SupportInfo)
+            )};
         error ->
-            {error, {unknown_capability, maps:get(id, Capability, unknown)}}
+            {error, {unknown_backend, Backend}}
     end.
 
 -spec extra_projection_fields(support_info()) -> map().
@@ -633,7 +629,7 @@ extra_projection_fields(SupportInfo) ->
 
 -spec lookup_capability(capability()) -> {ok, capability_info()} | {error, term()}.
 lookup_capability(Capability) ->
-    case [Info || Info <- all(), maps:get(id, Info) =:= Capability] of
+    case [Info || #{id := Id} = Info <- all(), Id =:= Capability] of
         [Info] -> {ok, Info};
         [] -> {error, {unknown_capability, Capability}}
     end.

@@ -276,3 +276,13 @@ parse_single_segment_list_test() ->
     ?assertEqual(list, maps:get(input_form, Result)),
     ?assertEqual(simple, maps:get(type, Result)),
     ?assertEqual([], maps:get(args, Result)).
+
+%% Direct call to parse_list_form/1 with a non-list argument must crash
+%% with function_clause (the `when is_list(Segments)` guard rejects it).
+parse_list_form_rejects_non_list_test() ->
+    ?assertError(function_clause,
+        beam_agent_command_parser:parse_list_form(not_a_list)),
+    ?assertError(function_clause,
+        beam_agent_command_parser:parse_list_form(42)),
+    ?assertError(function_clause,
+        beam_agent_command_parser:parse_list_form(<<"binary">>)).

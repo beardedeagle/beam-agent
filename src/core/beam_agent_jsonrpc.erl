@@ -84,19 +84,31 @@ encode_error(Id, Code, Message, Data) ->
 %% Decoding API
 %%====================================================================
 
--doc "Decode a JSON map into a typed JSON-RPC message. Handles requests, notifications, responses, and errors.".
+-doc """
+Decode a JSON map into a typed JSON-RPC message.
+
+Handles requests, notifications, responses, and errors. Per JSON-RPC 2.0,
+request IDs must be a string, number, or null — messages with other ID types
+are rejected as `{unknown, Map}`.
+""".
 -spec decode(map()) -> jsonrpc_msg().
-decode(#{<<"method">> := Method, <<"id">> := Id} = Raw) ->
-    %% Request (has both method and id)
+decode(#{<<"method">> := Method, <<"id">> := Id} = Raw)
+  when is_binary(Id); is_integer(Id); is_float(Id); Id =:= null ->
+    %% Request (has both method and id, valid id type)
     {request, Id, Method, maps:get(<<"params">>, Raw, undefined)};
+decode(#{<<"method">> := _Method, <<"id">> := _InvalidId} = Raw) ->
+    %% Request with invalid ID type — reject per JSON-RPC 2.0
+    {unknown, Raw};
 decode(#{<<"method">> := Method} = Raw) ->
     %% Notification (method, no id)
     {notification, Method, maps:get(<<"params">>, Raw, undefined)};
 decode(#{<<"id">> := Id, <<"error">> := #{<<"code">> := Code,
-                                           <<"message">> := Msg} = Err}) ->
+                                           <<"message">> := Msg} = Err})
+  when is_binary(Id); is_integer(Id); is_float(Id); Id =:= null ->
     %% Error response (check before success — error field is definitive)
     {error_response, Id, Code, Msg, maps:get(<<"data">>, Err, undefined)};
-decode(#{<<"id">> := Id, <<"result">> := Result}) ->
+decode(#{<<"id">> := Id, <<"result">> := Result})
+  when is_binary(Id); is_integer(Id); is_float(Id); Id =:= null ->
     %% Successful response
     {response, Id, Result};
 decode(Other) when is_map(Other) ->

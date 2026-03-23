@@ -135,6 +135,52 @@ decode_unknown_test() ->
     ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
 
 %%====================================================================
+%% M9: Request ID type validation per JSON-RPC 2.0
+%%====================================================================
+
+decode_request_binary_id_valid_test() ->
+    Map = #{<<"id">> => <<"abc">>, <<"method">> => <<"test">>,
+            <<"params">> => #{<<"k">> => <<"v">>}},
+    ?assertMatch({request, <<"abc">>, <<"test">>, _},
+        beam_agent_jsonrpc:decode(Map)).
+
+decode_request_null_id_valid_test() ->
+    Map = #{<<"id">> => null, <<"method">> => <<"test">>},
+    ?assertEqual({request, null, <<"test">>, undefined},
+        beam_agent_jsonrpc:decode(Map)).
+
+decode_request_float_id_valid_test() ->
+    Map = #{<<"id">> => 1.5, <<"method">> => <<"test">>},
+    ?assertMatch({request, _, <<"test">>, undefined},
+        beam_agent_jsonrpc:decode(Map)).
+
+decode_request_list_id_rejected_test() ->
+    Map = #{<<"id">> => [1, 2], <<"method">> => <<"test">>},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+decode_request_map_id_rejected_test() ->
+    Map = #{<<"id">> => #{<<"x">> => 1}, <<"method">> => <<"test">>},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+decode_request_boolean_id_rejected_test() ->
+    Map = #{<<"id">> => true, <<"method">> => <<"test">>},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+decode_request_atom_id_rejected_test() ->
+    %% Non-null atoms are not valid JSON-RPC 2.0 IDs
+    Map = #{<<"id">> => some_atom, <<"method">> => <<"test">>},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+decode_response_invalid_id_falls_through_test() ->
+    Map = #{<<"id">> => [1], <<"result">> => <<"ok">>},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+decode_error_response_invalid_id_falls_through_test() ->
+    Map = #{<<"id">> => #{<<"x">> => 1},
+            <<"error">> => #{<<"code">> => -1, <<"message">> => <<"e">>}},
+    ?assertMatch({unknown, _}, beam_agent_jsonrpc:decode(Map)).
+
+%%====================================================================
 %% Round-trip test
 %%====================================================================
 
