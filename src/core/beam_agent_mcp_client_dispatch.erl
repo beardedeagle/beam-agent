@@ -197,12 +197,21 @@ layer handles encoding the response into the correct JSON-RPC format.
     client_capabilities := beam_agent_mcp_protocol:client_capabilities(),
     server_capabilities => beam_agent_mcp_protocol:server_capabilities(),
     session_capabilities => beam_agent_mcp_protocol:session_capabilities(),
+    negotiated_protocol_version => beam_agent_mcp_protocol:protocol_version(),
     next_id := pos_integer(),
     pending := #{beam_agent_mcp_protocol:request_id() => pending_request()},
     default_timeout := pos_integer(),
     handler => module(),
     handler_state => term(),
-    error_info => term()
+    error_info => term(),
+    %% Notification flood protection (L4).
+    %% notification_window tracks {Count, WindowStartMs} for the current
+    %% time window.  max_notifications_per_interval = 0 disables flood
+    %% protection entirely (default).  notification_interval_ms sets the
+    %% window length in milliseconds (default: 60_000).
+    notification_window => {non_neg_integer(), integer()},
+    max_notifications_per_interval => non_neg_integer(),
+    notification_interval_ms => pos_integer()
 }.
 
 -type client_result() ::
@@ -250,7 +259,12 @@ new(ClientInfo, ClientCaps0, Opts)
         client_capabilities => ClientCaps,
         next_id => 1,
         pending => #{},
-        default_timeout => maps:get(default_timeout, Opts, ?DEFAULT_TIMEOUT)
+        default_timeout => maps:get(default_timeout, Opts, ?DEFAULT_TIMEOUT),
+        notification_window => {0, erlang:monotonic_time(millisecond)},
+        max_notifications_per_interval =>
+            maps:get(max_notifications_per_interval, Opts, 0),
+        notification_interval_ms =>
+            maps:get(notification_interval_ms, Opts, 60000)
     },
     OptKeys = [handler, handler_state],
     lists:foldl(fun(Key, Acc) ->
@@ -777,6 +791,26 @@ handle_error_response(Id, Code, Msg, #{pending := Pending} = State) ->
                                  map(), client_state()) -> client_result().
 handle_initialize_response(Id, Result,
                            #{client_capabilities := ClientCaps} = State) ->
+    %% M8: Validate server's protocolVersion against our own.
+    %% Warn on mismatch; always proceed (the MCP spec says clients should
+    %% handle minor version differences gracefully).
+    OurVersion = beam_agent_mcp_protocol:protocol_version(),
+    ServerVersion = maps:get(<<"protocolVersion">>, Result, undefined),
+    case ServerVersion of
+        OurVersion -> ok;
+        undefined ->
+            logger:warning("MCP initialize response: server did not include "
+                           "protocolVersion; assuming ~s", [OurVersion]);
+        Other ->
+            logger:warning("MCP initialize response: server protocolVersion ~s "
+                           "differs from client ~s; proceeding",
+                           [Other, OurVersion])
+    end,
+    NegotiatedVersion = case ServerVersion of
+        undefined -> OurVersion;
+        _         -> ServerVersion
+    end,
+
     ServerCaps = decode_server_capabilities(
                      maps:get(<<"capabilities">>, Result, #{})),
     SessionCaps = beam_agent_mcp_protocol:negotiate_capabilities(
@@ -784,7 +818,8 @@ handle_initialize_response(Id, Result,
     NewState = State#{
         lifecycle => ready,
         server_capabilities => ServerCaps,
-        session_capabilities => SessionCaps
+        session_capabilities => SessionCaps,
+        negotiated_protocol_version => NegotiatedVersion
     },
     {response, Id, Result, NewState}.
 
@@ -938,31 +973,73 @@ dispatch_roots_list(Id, _Params,
 -spec dispatch_notification(binary(), map(), client_state()) ->
     client_result().
 
+%% Notification flood protection (L4).
+%%
+%% When max_notifications_per_interval > 0, a time-window rate limiter is
+%% applied.  The window length is notification_interval_ms (default 60 000 ms).
+%% When the window expires the counter resets automatically on the next
+%% incoming notification — no external timer or reset call is needed.
+%% Setting max_notifications_per_interval to 0 (the default) disables flood
+%% protection entirely.
+dispatch_notification(Method, Params, State) ->
+    Max = maps:get(max_notifications_per_interval, State, 0),
+    case Max > 0 of
+        false ->
+            {Window, _} = maps:get(notification_window, State, {0, 0}),
+            State1 = State#{notification_window => {Window + 1, 0}},
+            dispatch_notification_inner(Method, Params, State1);
+        true ->
+            IntervalMs = maps:get(notification_interval_ms, State, 60000),
+            Now = erlang:monotonic_time(millisecond),
+            {Count, WindowStart} = maps:get(notification_window, State,
+                                            {0, Now}),
+            {WindowCount, NewStart} =
+                case Now - WindowStart >= IntervalMs of
+                    true  -> {0, Now};
+                    false -> {Count, WindowStart}
+                end,
+            case WindowCount >= Max of
+                true ->
+                    logger:warning("MCP client notification flood: dropping ~s "
+                                   "(count=~B, limit=~B, window_ms=~B)",
+                                   [Method, WindowCount, Max, IntervalMs]),
+                    {noreply, State#{notification_window =>
+                                         {WindowCount, NewStart}}};
+                false ->
+                    State1 = State#{notification_window =>
+                                        {WindowCount + 1, NewStart}},
+                    dispatch_notification_inner(Method, Params, State1)
+            end
+    end.
+
+-spec dispatch_notification_inner(binary(), map(), client_state()) ->
+    client_result().
+
 %% Notifications that indicate server-side changes.
 %% The caller may want to re-fetch the relevant list.
-dispatch_notification(<<"notifications/tools/list_changed">>,
-                      Params, State) ->
+dispatch_notification_inner(<<"notifications/tools/list_changed">>,
+                             Params, State) ->
     {notification, <<"notifications/tools/list_changed">>, Params, State};
-dispatch_notification(<<"notifications/resources/list_changed">>,
-                      Params, State) ->
+dispatch_notification_inner(<<"notifications/resources/list_changed">>,
+                             Params, State) ->
     {notification, <<"notifications/resources/list_changed">>, Params, State};
-dispatch_notification(<<"notifications/resources/updated">>,
-                      Params, State) ->
+dispatch_notification_inner(<<"notifications/resources/updated">>,
+                             Params, State) ->
     {notification, <<"notifications/resources/updated">>, Params, State};
-dispatch_notification(<<"notifications/prompts/list_changed">>,
-                      Params, State) ->
+dispatch_notification_inner(<<"notifications/prompts/list_changed">>,
+                             Params, State) ->
     {notification, <<"notifications/prompts/list_changed">>, Params, State};
 
 %% Logging message from server.
-dispatch_notification(<<"notifications/message">>, Params, State) ->
+dispatch_notification_inner(<<"notifications/message">>, Params, State) ->
     {notification, <<"notifications/message">>, Params, State};
 
 %% Progress notification from server.
-dispatch_notification(<<"notifications/progress">>, Params, State) ->
+dispatch_notification_inner(<<"notifications/progress">>, Params, State) ->
     {notification, <<"notifications/progress">>, Params, State};
 
 %% Cancelled notification from server.
-dispatch_notification(<<"notifications/cancelled">>, Params, State) ->
+dispatch_notification_inner(<<"notifications/cancelled">>, Params, State) ->
     RequestId = maps:get(<<"requestId">>, Params, undefined),
     %% If we have a pending request with this ID, remove it
     State1 = case RequestId of
@@ -972,17 +1049,24 @@ dispatch_notification(<<"notifications/cancelled">>, Params, State) ->
     {notification, <<"notifications/cancelled">>, Params, State1};
 
 %% Unknown notifications — surface to caller, don't drop silently.
-dispatch_notification(Method, Params, State) ->
+dispatch_notification_inner(Method, Params, State) ->
     {notification, Method, Params, State}.
 
 %%--------------------------------------------------------------------
 %% Internal: Request ID Generation
 %%--------------------------------------------------------------------
 
+%% Maximum safe integer for request IDs: 2^31 - 1 = 2147483647.
+%% This fits all JSON parsers (including those treating JSON numbers as
+%% 32-bit signed integers).  When the counter reaches this value it wraps
+%% back to 1 to prevent overflow.
+-define(MAX_REQUEST_ID, 2147483647).
+
 -spec next_request_id(client_state()) ->
     {pos_integer(), client_state()}.
 next_request_id(#{next_id := Id} = State) ->
-    {Id, State#{next_id => Id + 1}}.
+    NextId = if Id >= ?MAX_REQUEST_ID -> 1; true -> Id + 1 end,
+    {Id, State#{next_id => NextId}}.
 
 %%--------------------------------------------------------------------
 %% Internal: Pending Request Tracking

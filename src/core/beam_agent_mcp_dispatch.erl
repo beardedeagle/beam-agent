@@ -171,7 +171,17 @@ will never be called.
     handler_timeout => pos_integer(),
     provider => module(),
     provider_state => term(),
-    error_info => term()
+    error_info => term(),
+    %% Negotiated MCP protocol version (set after initialize handshake).
+    negotiated_protocol_version => beam_agent_mcp_protocol:protocol_version(),
+    %% Notification flood protection.
+    %% notification_window tracks {Count, WindowStartMs} for the current
+    %% time window.  max_notifications_per_interval = 0 disables flood
+    %% protection entirely (default).  notification_interval_ms sets the
+    %% window length in milliseconds (default: 60_000).
+    notification_window => {non_neg_integer(), integer()},
+    max_notifications_per_interval => non_neg_integer(),
+    notification_interval_ms => pos_integer()
 }.
 
 -type dispatch_result() :: {map() | noreply, dispatch_state()}.
@@ -203,7 +213,12 @@ new(ServerInfo, ServerCaps, Opts)
     Base = #{
         lifecycle => uninitialized,
         server_info => ServerInfo,
-        server_capabilities => ServerCaps
+        server_capabilities => ServerCaps,
+        notification_window => {0, erlang:monotonic_time(millisecond)},
+        max_notifications_per_interval =>
+            maps:get(max_notifications_per_interval, Opts, 0),
+        notification_interval_ms =>
+            maps:get(notification_interval_ms, Opts, 60000)
     },
     MergeKeys = [tool_registry, handler_timeout, provider, provider_state],
     lists:foldl(fun(Key, Acc) ->
@@ -435,29 +450,75 @@ dispatch_notification(_Method, _Params,
     %% Silently ignore all other notifications in terminal/error states
     {noreply, State};
 
+%% -- Flood protection check before processing any other notification.
+%%
+%% When max_notifications_per_interval > 0, a time-window rate limiter is
+%% applied.  The window length is notification_interval_ms (default 60 000 ms).
+%% When the window expires the counter resets automatically on the next
+%% incoming notification — no external timer or reset call is needed.
+%% Setting max_notifications_per_interval to 0 (the default) disables flood
+%% protection entirely.
+%% Protocol handshake notifications bypass flood protection — they are
+%% part of the MCP lifecycle, not user traffic.
+dispatch_notification(<<"notifications/initialized">> = Method, Params, State) ->
+    dispatch_notification_inner(Method, Params, State);
+dispatch_notification(Method, Params, State) ->
+    Max = maps:get(max_notifications_per_interval, State, 0),
+    case Max > 0 of
+        false ->
+            {Window, _} = maps:get(notification_window, State, {0, 0}),
+            State1 = State#{notification_window => {Window + 1, 0}},
+            dispatch_notification_inner(Method, Params, State1);
+        true ->
+            IntervalMs = maps:get(notification_interval_ms, State, 60000),
+            Now = erlang:monotonic_time(millisecond),
+            {Count, WindowStart} = maps:get(notification_window, State,
+                                            {0, Now}),
+            {WindowCount, NewStart} =
+                case Now - WindowStart >= IntervalMs of
+                    true  -> {0, Now};
+                    false -> {Count, WindowStart}
+                end,
+            case WindowCount >= Max of
+                true ->
+                    logger:warning("MCP notification flood: dropping ~s "
+                                   "(count=~B, limit=~B, window_ms=~B)",
+                                   [Method, WindowCount, Max, IntervalMs]),
+                    {noreply, State#{notification_window =>
+                                         {WindowCount, NewStart}}};
+                false ->
+                    State1 = State#{notification_window =>
+                                        {WindowCount + 1, NewStart}},
+                    dispatch_notification_inner(Method, Params, State1)
+            end
+    end.
+
+-spec dispatch_notification_inner(binary(), map(), dispatch_state()) ->
+    dispatch_result().
+
 %% -- initialized: transition from initializing to ready --
-dispatch_notification(<<"notifications/initialized">>, _Params,
-                      #{lifecycle := initializing} = State) ->
+dispatch_notification_inner(<<"notifications/initialized">>, _Params,
+                             #{lifecycle := initializing} = State) ->
     {noreply, State#{lifecycle => ready}};
-dispatch_notification(<<"notifications/initialized">>, _Params, State) ->
+dispatch_notification_inner(<<"notifications/initialized">>, _Params, State) ->
     %% Ignore if not in initializing state (spec says no error for notifs)
     {noreply, State};
 
 %% -- cancelled: acknowledge but no special handling in this layer --
-dispatch_notification(<<"notifications/cancelled">>, _Params, State) ->
+dispatch_notification_inner(<<"notifications/cancelled">>, _Params, State) ->
     {noreply, State};
 
 %% -- progress: pass through (no server-side handling needed) --
-dispatch_notification(<<"notifications/progress">>, _Params, State) ->
+dispatch_notification_inner(<<"notifications/progress">>, _Params, State) ->
     {noreply, State};
 
 %% -- roots/list_changed: acknowledge --
-dispatch_notification(<<"notifications/roots/list_changed">>, _Params,
-                      State) ->
+dispatch_notification_inner(<<"notifications/roots/list_changed">>, _Params,
+                             State) ->
     {noreply, State};
 
 %% -- Unknown notification: ignore per spec --
-dispatch_notification(_Method, _Params, State) ->
+dispatch_notification_inner(_Method, _Params, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -469,6 +530,22 @@ dispatch_notification(_Method, _Params, State) ->
 handle_initialize(Id, Params,
                   #{server_info := ServerInfo,
                     server_capabilities := ServerCaps} = State) ->
+    %% M8: Validate and negotiate protocolVersion.
+    %% Warn on mismatch; we continue but store the negotiated version.
+    OurVersion = beam_agent_mcp_protocol:protocol_version(),
+    PeerVersion = maps:get(<<"protocolVersion">>, Params, undefined),
+    case PeerVersion of
+        OurVersion -> ok;
+        undefined ->
+            logger:warning("MCP initialize: client did not send "
+                           "protocolVersion; assuming ~s", [OurVersion]);
+        Other ->
+            logger:warning("MCP initialize: client protocolVersion ~s "
+                           "differs from server ~s; proceeding with ~s",
+                           [Other, OurVersion, OurVersion])
+    end,
+    NegotiatedVersion = OurVersion,
+
     %% Extract client info for capability negotiation
     ClientCaps = decode_client_capabilities(
                      maps:get(<<"capabilities">>, Params, #{})),
@@ -480,7 +557,8 @@ handle_initialize(Id, Params,
 
     NewState = State#{
         lifecycle => initializing,
-        session_capabilities => SessionCaps
+        session_capabilities => SessionCaps,
+        negotiated_protocol_version => NegotiatedVersion
     },
     {Resp, NewState}.
 
@@ -525,7 +603,7 @@ handle_tools_call(Id, Params, State) ->
                                <<"No tool registry configured">>),
                     {Resp, State};
                 Registry ->
-                    case beam_agent_tool_registry:call_tool_by_name(
+                    try beam_agent_tool_registry:call_tool_by_name(
                              ToolName, Arguments, Registry,
                              #{handler_timeout => Timeout}) of
                         {ok, ContentResults} ->
@@ -541,6 +619,15 @@ handle_tools_call(Id, Params, State) ->
                             Resp = beam_agent_mcp_protocol:tools_call_response(
                                        Id, ErrContent, true),
                             {Resp, State}
+                    catch
+                        Class:CrashReason:Stacktrace ->
+                            logger:error("MCP tool ~s crashed: ~s:~p~n~p",
+                                [ToolName, Class, CrashReason, Stacktrace]),
+                            ErrResp = beam_agent_mcp_protocol:error_response(
+                                          Id,
+                                          beam_agent_mcp_protocol:error_internal(),
+                                          <<"Tool callback crashed">>),
+                            {ErrResp, State}
                     end
             end
     end.
@@ -557,7 +644,7 @@ handle_tools_call(Id, Params, State) ->
                         map(), dispatch_state()) ->
     dispatch_result().
 dispatch_provider(Id, Method, Capability, HandlerFun, Params, State) ->
-    ServerCaps = maps:get(server_capabilities, State),
+    ServerCaps = maps:get(server_capabilities, State, #{}),
     case maps:is_key(Capability, ServerCaps) of
         false ->
             {method_not_found(Id, Method), State};
@@ -591,6 +678,17 @@ safe_provider_call(Provider, Function, Args, _State) ->
     end.
 
 %%--------------------------------------------------------------------
+%% Internal: Cursor Validation (M10)
+%%--------------------------------------------------------------------
+
+%% Cursor MUST be undefined or a binary (string). Any other type is a
+%% protocol error — return an invalid-params JSON-RPC error to the caller.
+-spec validate_cursor(term()) -> ok | {error, invalid_cursor}.
+validate_cursor(undefined)              -> ok;
+validate_cursor(C) when is_binary(C)    -> ok;
+validate_cursor(_)                      -> {error, invalid_cursor}.
+
+%%--------------------------------------------------------------------
 %% Internal: Resource Handlers (delegate to provider)
 %%--------------------------------------------------------------------
 
@@ -600,18 +698,28 @@ handle_resources_list(Id, Params,
                       #{provider := Provider,
                         provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case safe_provider_call(Provider, handle_resources_list,
-                            [Cursor, PState], State) of
-        {ok, {Resources, undefined}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:resources_list_response(
-                       Id, Resources),
-            {Resp, State#{provider_state => NewPState}};
-        {ok, {Resources, NextCursor}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:resources_list_response(
-                       Id, Resources, NextCursor),
-            {Resp, State#{provider_state => NewPState}};
-        {error, Code, Msg} ->
-            {beam_agent_mcp_protocol:error_response(Id, Code, Msg), State}
+    case validate_cursor(Cursor) of
+        {error, invalid_cursor} ->
+            ErrResp = beam_agent_mcp_protocol:error_response(
+                          Id,
+                          beam_agent_mcp_protocol:error_invalid_params(),
+                          <<"cursor must be a string or absent">>),
+            {ErrResp, State};
+        ok ->
+            case safe_provider_call(Provider, handle_resources_list,
+                                    [Cursor, PState], State) of
+                {ok, {Resources, undefined}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:resources_list_response(
+                               Id, Resources),
+                    {Resp, State#{provider_state => NewPState}};
+                {ok, {Resources, NextCursor}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:resources_list_response(
+                               Id, Resources, NextCursor),
+                    {Resp, State#{provider_state => NewPState}};
+                {error, Code, Msg} ->
+                    {beam_agent_mcp_protocol:error_response(Id, Code, Msg),
+                     State}
+            end
     end.
 
 -spec handle_resources_read(beam_agent_mcp_protocol:request_id(), map(),
@@ -647,18 +755,28 @@ handle_resources_templates_list(Id, Params,
                                 #{provider := Provider,
                                   provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case safe_provider_call(Provider, handle_resources_templates_list,
-                            [Cursor, PState], State) of
-        {ok, {Templates, undefined}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:resources_templates_list_response(
-                       Id, Templates),
-            {Resp, State#{provider_state => NewPState}};
-        {ok, {Templates, NextCursor}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:resources_templates_list_response(
-                       Id, Templates, NextCursor),
-            {Resp, State#{provider_state => NewPState}};
-        {error, Code, Msg} ->
-            {beam_agent_mcp_protocol:error_response(Id, Code, Msg), State}
+    case validate_cursor(Cursor) of
+        {error, invalid_cursor} ->
+            ErrResp = beam_agent_mcp_protocol:error_response(
+                          Id,
+                          beam_agent_mcp_protocol:error_invalid_params(),
+                          <<"cursor must be a string or absent">>),
+            {ErrResp, State};
+        ok ->
+            case safe_provider_call(Provider, handle_resources_templates_list,
+                                    [Cursor, PState], State) of
+                {ok, {Templates, undefined}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:resources_templates_list_response(
+                               Id, Templates),
+                    {Resp, State#{provider_state => NewPState}};
+                {ok, {Templates, NextCursor}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:resources_templates_list_response(
+                               Id, Templates, NextCursor),
+                    {Resp, State#{provider_state => NewPState}};
+                {error, Code, Msg} ->
+                    {beam_agent_mcp_protocol:error_response(Id, Code, Msg),
+                     State}
+            end
     end.
 
 %% Subscribe/unsubscribe — acknowledge with empty result.
@@ -667,7 +785,7 @@ handle_resources_templates_list(Id, Params,
                                  map(), dispatch_state()) ->
     dispatch_result().
 handle_resources_subscribe(Id, _Params, State) ->
-    ServerCaps = maps:get(server_capabilities, State),
+    ServerCaps = maps:get(server_capabilities, State, #{}),
     ResCaps = maps:get(resources, ServerCaps, #{}),
     case maps:get(subscribe, ResCaps, false) of
         true ->
@@ -680,7 +798,7 @@ handle_resources_subscribe(Id, _Params, State) ->
                                    map(), dispatch_state()) ->
     dispatch_result().
 handle_resources_unsubscribe(Id, _Params, State) ->
-    ServerCaps = maps:get(server_capabilities, State),
+    ServerCaps = maps:get(server_capabilities, State, #{}),
     ResCaps = maps:get(resources, ServerCaps, #{}),
     case maps:get(subscribe, ResCaps, false) of
         true ->
@@ -699,18 +817,28 @@ handle_prompts_list(Id, Params,
                     #{provider := Provider,
                       provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case safe_provider_call(Provider, handle_prompts_list,
-                            [Cursor, PState], State) of
-        {ok, {Prompts, undefined}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:prompts_list_response(
-                       Id, Prompts),
-            {Resp, State#{provider_state => NewPState}};
-        {ok, {Prompts, NextCursor}, NewPState} ->
-            Resp = beam_agent_mcp_protocol:prompts_list_response(
-                       Id, Prompts, NextCursor),
-            {Resp, State#{provider_state => NewPState}};
-        {error, Code, Msg} ->
-            {beam_agent_mcp_protocol:error_response(Id, Code, Msg), State}
+    case validate_cursor(Cursor) of
+        {error, invalid_cursor} ->
+            ErrResp = beam_agent_mcp_protocol:error_response(
+                          Id,
+                          beam_agent_mcp_protocol:error_invalid_params(),
+                          <<"cursor must be a string or absent">>),
+            {ErrResp, State};
+        ok ->
+            case safe_provider_call(Provider, handle_prompts_list,
+                                    [Cursor, PState], State) of
+                {ok, {Prompts, undefined}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:prompts_list_response(
+                               Id, Prompts),
+                    {Resp, State#{provider_state => NewPState}};
+                {ok, {Prompts, NextCursor}, NewPState} ->
+                    Resp = beam_agent_mcp_protocol:prompts_list_response(
+                               Id, Prompts, NextCursor),
+                    {Resp, State#{provider_state => NewPState}};
+                {error, Code, Msg} ->
+                    {beam_agent_mcp_protocol:error_response(Id, Code, Msg),
+                     State}
+            end
     end.
 
 -spec handle_prompts_get(beam_agent_mcp_protocol:request_id(), map(),

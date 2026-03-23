@@ -5,6 +5,7 @@
     %% Table lifecycle
     ensure_tables/0,
     clear/0,
+    clear_session/1,
     %% Account operations
     account_login/2,
     account_login_cancel/2,
@@ -53,6 +54,14 @@ ensure_tables() ->
 clear() ->
     ensure_tables(),
     beam_agent_ets:delete_all_objects(?TABLE),
+    ok.
+
+-doc "Delete auth state for a single session. Safe to call when no entry exists.".
+-spec clear_session(pid() | binary()) -> ok.
+clear_session(Session) ->
+    ensure_tables(),
+    Key = beam_agent_ets:session_key(Session),
+    beam_agent_ets:delete(?TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------

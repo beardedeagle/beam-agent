@@ -208,6 +208,56 @@ no_data_no_event_test() ->
     ?assertEqual([], Events).
 
 %%====================================================================
+%% max_data_lines: per-event data line accumulation bound (M2)
+%%====================================================================
+
+%% Limit = 3: exactly at the limit works fine
+data_lines_at_limit_test() ->
+    Input = <<"data: a\ndata: b\ndata: c\n\n">>,
+    State = opencode_sse:new_state(#{max_data_lines => 3}),
+    {Events, _} = opencode_sse:parse_chunk(Input, State),
+    ?assertEqual(1, length(Events)),
+    [E] = Events,
+    ?assertEqual(<<"a\nb\nc">>, maps:get(data, E)).
+
+%% Limit = 3: the 4th data line triggers discard — no event emitted
+data_lines_exceed_limit_discards_event_test() ->
+    Input = <<"data: a\ndata: b\ndata: c\ndata: d\n\n">>,
+    State = opencode_sse:new_state(#{max_data_lines => 3}),
+    {Events, _} = opencode_sse:parse_chunk(Input, State),
+    ?assertEqual([], Events).
+
+%% After a discard, the next event in the same chunk is processed normally
+data_lines_exceed_limit_next_event_ok_test() ->
+    Input = <<"data: a\ndata: b\ndata: c\ndata: d\n\ndata: good\n\n">>,
+    State = opencode_sse:new_state(#{max_data_lines => 3}),
+    {Events, _} = opencode_sse:parse_chunk(Input, State),
+    ?assertEqual(1, length(Events)),
+    [E] = Events,
+    ?assertEqual(<<"good">>, maps:get(data, E)).
+
+%% Limit = 1: a single data line is accepted
+data_lines_limit_one_accepts_single_test() ->
+    Input = <<"data: only\n\n">>,
+    State = opencode_sse:new_state(#{max_data_lines => 1}),
+    {Events, _} = opencode_sse:parse_chunk(Input, State),
+    [E] = Events,
+    ?assertEqual(<<"only">>, maps:get(data, E)).
+
+%% Limit = 1: a second data line triggers discard
+data_lines_limit_one_rejects_second_test() ->
+    Input = <<"data: first\ndata: second\n\n">>,
+    State = opencode_sse:new_state(#{max_data_lines => 1}),
+    {Events, _} = opencode_sse:parse_chunk(Input, State),
+    ?assertEqual([], Events).
+
+%% Default state (no option) accepts normal events
+data_lines_default_state_accepts_normal_test() ->
+    Input = <<"data: hello\n\n">>,
+    {Events, _} = opencode_sse:parse_chunk(Input, opencode_sse:new_state()),
+    ?assertEqual([#{data => <<"hello">>}], Events).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

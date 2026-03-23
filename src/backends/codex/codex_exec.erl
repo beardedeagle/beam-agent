@@ -8,7 +8,7 @@
          session_info/1,
          set_model/2,
          set_permission_mode/2]).
--export([callback_mode/0,init/1,terminate/3]).
+-export([callback_mode/0,init/1,terminate/3,format_status/1]).
 -export([idle/3,active_query/3,error/3]).
 -type state_name() :: idle | active_query | error.
 -type state_callback_result() ::
@@ -101,6 +101,16 @@ terminate(Reason, _State, #data{port = Port} = Data) ->
                   Data),
     codex_port_utils:close_port(Port),
     ok.
+-doc "Redact sensitive fields from crash logs and sys:get_status output.".
+-spec format_status(gen_statem:format_status()) -> gen_statem:format_status().
+format_status(Status) ->
+    Data = maps:get(data, Status, undefined),
+    Status#{data => redact_data(Data)}.
+-spec redact_data(#data{} | term()) -> #data{} | term().
+redact_data(#data{} = Data) ->
+    Data#data{opts = beam_agent_redaction:map(Data#data.opts)};
+redact_data(Other) ->
+    Other.
 -spec idle(gen_statem:event_type(), term(), #data{}) ->
               state_callback_result().
 idle(enter, OldState, _Data) ->

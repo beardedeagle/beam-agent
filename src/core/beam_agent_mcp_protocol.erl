@@ -253,12 +253,19 @@ resolves advertised capabilities into a session capability set.
 %% Types — JSON-RPC Message Classification
 %%--------------------------------------------------------------------
 
+-type validation_error() ::
+    {bad_id_type, term()}
+  | {bad_params, term()}
+  | {not_a_map, term()}
+  | {unrecognized_message, map()}
+  | {unsupported_jsonrpc_version, term()}.
+
 -type jsonrpc_message() ::
     {request, request_id(), binary(), map()}
   | {notification, binary(), map()}
   | {response, request_id(), term()}
   | {error_response, request_id(), integer(), binary(), term()}
-  | {invalid, term()}.
+  | {invalid, validation_error()}.
 
 %%--------------------------------------------------------------------
 %% Types — Implementation Info
@@ -1219,36 +1226,86 @@ Validate an incoming JSON-RPC 2.0 message and classify it.
 Returns a tagged tuple identifying the message type, or
 `{invalid, Reason}` for malformed messages.
 
-Does NOT require `"jsonrpc": "2.0"` to be present — some transports
-strip it. The presence of `method` + `id` (request), `method` only
-(notification), or `id` + `result`/`error` (response) determines type.
+JSON-RPC 2.0 version field handling:
+  - Missing `"jsonrpc"` field: accepted with a warning log (lenient mode,
+    since some transports strip the field).
+  - `"jsonrpc": "2.0"`: accepted.
+  - Any other version value: rejected with `{invalid, {unsupported_jsonrpc_version, V}}`.
+
+Request ID validation: per JSON-RPC 2.0, id MUST be string, number, or null.
+Other types (list, map, tuple, atom) are rejected with
+`{invalid, {bad_id_type, Id}}`.
+
+The presence of `method` + `id` (request), `method` only (notification),
+or `id` + `result`/`error` (response) determines the message type.
 """.
 -spec validate_message(term()) -> jsonrpc_message().
-validate_message(#{<<"method">> := Method, <<"id">> := Id} = Msg)
-  when is_binary(Method) ->
-    Params = maps:get(<<"params">>, Msg, #{}),
-    case is_map(Params) of
-        true -> {request, Id, Method, Params};
-        false -> {invalid, {bad_params, Params}}
+validate_message(Msg) when is_map(Msg) ->
+    case check_jsonrpc_version(Msg) of
+        ok          -> validate_message_type(Msg);
+        {error, R}  -> {invalid, R}
     end;
-validate_message(#{<<"method">> := Method} = Msg)
-  when is_binary(Method) ->
-    Params = maps:get(<<"params">>, Msg, #{}),
-    case is_map(Params) of
-        true -> {notification, Method, Params};
-        false -> {invalid, {bad_params, Params}}
-    end;
-validate_message(#{<<"id">> := Id, <<"error">> :=
-                   #{<<"code">> := Code, <<"message">> := ErrMsg} = Err})
-  when is_integer(Code), is_binary(ErrMsg) ->
-    Data = maps:get(<<"data">>, Err, undefined),
-    {error_response, Id, Code, ErrMsg, Data};
-validate_message(#{<<"id">> := Id, <<"result">> := Result}) ->
-    {response, Id, Result};
-validate_message(Other) when is_map(Other) ->
-    {invalid, {unrecognized_message, Other}};
 validate_message(Other) ->
     {invalid, {not_a_map, Other}}.
+
+%% Check the jsonrpc version field; warn on missing, reject on wrong value.
+-spec check_jsonrpc_version(map()) -> ok | {error, {unsupported_jsonrpc_version, term()}}.
+check_jsonrpc_version(Msg) ->
+    case maps:find(<<"jsonrpc">>, Msg) of
+        error ->
+            logger:warning("MCP: received message without jsonrpc field, "
+                           "accepting leniently"),
+            ok;
+        {ok, <<"2.0">>} ->
+            ok;
+        {ok, Other} ->
+            {error, {unsupported_jsonrpc_version, Other}}
+    end.
+
+%% Check that a request id is a valid JSON-RPC 2.0 type.
+-spec valid_id(term()) -> boolean().
+valid_id(Id) when is_binary(Id)  -> true;
+valid_id(Id) when is_integer(Id) -> true;
+valid_id(Id) when is_float(Id)   -> true;
+valid_id(null)                   -> true;
+valid_id(_)                      -> false.
+
+%% Classify a map that has already passed version validation.
+-spec validate_message_type(map()) -> jsonrpc_message().
+validate_message_type(#{<<"method">> := Method, <<"id">> := Id} = Msg)
+  when is_binary(Method) ->
+    case valid_id(Id) of
+        false -> {invalid, {bad_id_type, Id}};
+        true  ->
+            Params = maps:get(<<"params">>, Msg, #{}),
+            case is_map(Params) of
+                true  -> {request, Id, Method, Params};
+                false -> {invalid, {bad_params, Params}}
+            end
+    end;
+validate_message_type(#{<<"method">> := Method} = Msg)
+  when is_binary(Method) ->
+    Params = maps:get(<<"params">>, Msg, #{}),
+    case is_map(Params) of
+        true  -> {notification, Method, Params};
+        false -> {invalid, {bad_params, Params}}
+    end;
+validate_message_type(#{<<"id">> := Id, <<"error">> :=
+                        #{<<"code">> := Code, <<"message">> := ErrMsg} = Err})
+  when is_integer(Code), is_binary(ErrMsg) ->
+    case valid_id(Id) of
+        false -> {invalid, {bad_id_type, Id}};
+        true  ->
+            Data = maps:get(<<"data">>, Err, undefined),
+            {error_response, Id, Code, ErrMsg, Data}
+    end;
+validate_message_type(#{<<"id">> := Id, <<"result">> := Result}) ->
+    case valid_id(Id) of
+        false -> {invalid, {bad_id_type, Id}};
+        true  -> {response, Id, Result}
+    end;
+validate_message_type(Other) ->
+    {invalid, {unrecognized_message, Other}}.
 
 -doc """
 Validate a tool definition map.

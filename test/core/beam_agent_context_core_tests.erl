@@ -74,7 +74,41 @@ context_status_reports_summary_and_memory_counts_test() ->
     ?assert(maps:is_key(thread, Status)),
     reset().
 
+%%====================================================================
+%% M17: safe budget map access in compaction_triggers
+%%====================================================================
+
+%% budget_estimate returns a result even when the session has 0 messages —
+%% the maps:get/3 default-0 paths in compaction_triggers must not crash.
+budget_estimate_returns_ok_with_zero_messages_test() ->
+    reset(),
+    SessionId = <<"ctx-budget-zero-session">>,
+    _ThreadId = seed_thread(SessionId, <<"ctx-budget-zero-thread">>, 0),
+    {ok, Budget} = beam_agent_context_core:budget_estimate(SessionId),
+    ?assertEqual(0, maps:get(session_message_count, Budget)),
+    ?assertEqual(0, maps:get(estimated_token_count, Budget)),
+    ?assert(is_list(maps:get(triggers, Budget))),
+    reset().
+
+%% maybe_compact with very low thresholds fires triggers — exercises
+%% all four maps:get/3 paths in compaction_triggers/2 with real Budget values.
+budget_triggers_fire_when_threshold_is_zero_test() ->
+    reset(),
+    SessionId = <<"ctx-trigger-fire-session">>,
+    _ThreadId = seed_thread(SessionId, <<"ctx-trigger-fire-thread">>, 1),
+    {ok, Result} = beam_agent_context_core:maybe_compact(SessionId, #{
+        message_count_threshold => 0,
+        visible_message_threshold => 0,
+        estimated_token_threshold => 0
+    }),
+    Triggers = maps:get(triggers, Result),
+    ?assert(lists:member(message_count_threshold, Triggers)),
+    reset().
+
 seed_thread(SessionId, ThreadId, Count) ->
+    %% Ensure a session exists in the store so budget_estimate can find it
+    %% even when Count is 0 (no messages to auto-vivify the session).
+    ok = beam_agent_session_store_core:register_session(SessionId, #{}),
     {ok, _Thread} = beam_agent_threads_core:start_thread(SessionId, #{
         thread_id => ThreadId,
         name => ThreadId

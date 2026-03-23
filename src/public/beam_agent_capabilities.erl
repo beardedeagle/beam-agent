@@ -97,7 +97,8 @@ for details.
     for_backend/1,
     for_session/1,
     status/2,
-    supports/2
+    supports/2,
+    assert_capability/2
 ]).
 
 -export_type([
@@ -109,7 +110,8 @@ for details.
     fidelity/0,
     capability_error/0,
     backend_lookup_error/0,
-    status_error/0
+    status_error/0,
+    assert_capability_error/0
 ]).
 
 -type capability() ::
@@ -156,6 +158,9 @@ for details.
     {invalid_session_info, term()} |
     {session_backend_lookup_failed, term()}.
 -type status_error() :: capability_error() | {unknown_backend, term()}.
+-type assert_capability_error() ::
+    {unsupported_capability, capability(), beam_agent_backend:backend()} |
+    status_error().
 -dialyzer({no_underspecs, [support/3, support/4]}).
 
 -type capability_info() :: #{
@@ -437,7 +442,12 @@ Returns `{error, {unknown_backend, Backend}}` for unrecognised backend values.
 for_backend(BackendLike) ->
     case beam_agent_backend:normalize(BackendLike) of
         {ok, Backend} ->
-            {ok, [project_capability(Capability, Backend) || Capability <- all()]};
+            Results = [project_capability(Capability, Backend) || Capability <- all()],
+            case lists:keyfind(error, 1, Results) of
+                {error, _} = Error -> Error;
+                false ->
+                    {ok, [Cap || {ok, Cap} <- Results]}
+            end;
         {error, _} = Error ->
             Error
     end.
@@ -489,7 +499,17 @@ atom, or `{error, {unknown_backend, Backend}}` for an unrecognised backend.
 status(Capability, BackendLike) ->
     case {lookup_capability(Capability), beam_agent_backend:normalize(BackendLike)} of
         {{ok, Info}, {ok, Backend}} ->
-            {ok, maps:get(Backend, maps:get(support, Info))};
+            case maps:find(support, Info) of
+                {ok, SupportMap} ->
+                    case maps:find(Backend, SupportMap) of
+                        {ok, SupportInfo} ->
+                            {ok, SupportInfo};
+                        error ->
+                            {error, {unknown_backend, Backend}}
+                    end;
+                error ->
+                    {error, {unknown_capability, Capability}}
+            end;
         {{error, _} = Error, _} ->
             Error;
         {_, {error, _} = Error} ->
@@ -523,6 +543,43 @@ supports(Capability, BackendLike) ->
             Error
     end.
 
+-doc """
+Assert that a capability is supported for a given backend.
+
+A pre-flight check wrapper around `supports/2`. Returns `ok` when the
+capability is supported, or `{error, {unsupported_capability, Cap, Backend}}`
+when the support level is `missing`. Returns the underlying
+`{error, status_error()}` tuple for unknown capability or backend atoms.
+
+Use this before calling a feature to produce a clear error before the
+call site rather than a confusing failure inside it.
+
+```erlang
+ok = beam_agent_capabilities:assert_capability(checkpointing, codex).
+{error, {unknown_capability, bogus}} =
+    beam_agent_capabilities:assert_capability(bogus, claude).
+%% When support_level is missing for a known pair:
+%% {error, {unsupported_capability, Cap, Backend}} =
+%%     beam_agent_capabilities:assert_capability(some_cap, some_backend).
+```
+""".
+-spec assert_capability(capability(), beam_agent_backend:backend() | binary() | atom()) ->
+    ok | {error, assert_capability_error()}.
+assert_capability(Capability, BackendLike) ->
+    case beam_agent_backend:normalize(BackendLike) of
+        {ok, Backend} ->
+            case status(Capability, Backend) of
+                {ok, #{support_level := missing}} ->
+                    {error, {unsupported_capability, Capability, Backend}};
+                {ok, _} ->
+                    ok;
+                {error, _} = Error ->
+                    Error
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
 %%--------------------------------------------------------------------
 %% Internal helpers
 %%--------------------------------------------------------------------
@@ -545,20 +602,30 @@ support(SupportLevel, Implementation, Fidelity) ->
 support(SupportLevel, Implementation, Fidelity, Extra) ->
     maps:merge(support(SupportLevel, Implementation, Fidelity), Extra).
 
--spec project_capability(capability_info(), beam_agent_backend:backend()) -> map().
+-spec project_capability(capability_info(), beam_agent_backend:backend()) ->
+    {ok, map()} | {error, term()}.
 project_capability(Capability, Backend) ->
-    SupportInfo = maps:get(Backend, maps:get(support, Capability)),
-    maps:merge(
-        #{
-            id => maps:get(id, Capability),
-            title => maps:get(title, Capability),
-            backend => Backend,
-            support_level => maps:get(support_level, SupportInfo),
-            implementation => maps:get(implementation, SupportInfo),
-            fidelity => maps:get(fidelity, SupportInfo)
-        },
-        extra_projection_fields(SupportInfo)
-    ).
+    case maps:find(support, Capability) of
+        {ok, SupportMap} ->
+            case maps:find(Backend, SupportMap) of
+                {ok, SupportInfo} ->
+                    {ok, maps:merge(
+                        #{
+                            id => maps:get(id, Capability),
+                            title => maps:get(title, Capability),
+                            backend => Backend,
+                            support_level => maps:get(support_level, SupportInfo),
+                            implementation => maps:get(implementation, SupportInfo),
+                            fidelity => maps:get(fidelity, SupportInfo)
+                        },
+                        extra_projection_fields(SupportInfo)
+                    )};
+                error ->
+                    {error, {unknown_backend, Backend}}
+            end;
+        error ->
+            {error, {unknown_capability, maps:get(id, Capability, unknown)}}
+    end.
 
 -spec extra_projection_fields(support_info()) -> map().
 extra_projection_fields(SupportInfo) ->

@@ -26,6 +26,9 @@
     handle_info/3
 ]).
 
+%% Exported for unit testing
+-export([is_remote_plaintext_http/1]).
+
 %%--------------------------------------------------------------------
 %% Types
 %%--------------------------------------------------------------------
@@ -87,6 +90,7 @@
     event_ref          :: reference() | undefined,
     event_consumer     :: gen_statem:from() | undefined,
     event_queue        :: queue:queue(),
+    max_event_queue_depth :: pos_integer(),
 
     %% Session metadata
     session_id         :: binary() | undefined,
@@ -138,6 +142,7 @@ init_handler(Opts) ->
     BaseUrl = maps:get(base_url, Opts, "http://localhost:4096"),
     Directory = maps:get(directory, Opts, <<".">>),
     BufferMax = maps:get(buffer_max, Opts, 2 * 1024 * 1024),
+    MaxEventQueueDepth = maps:get(max_event_queue_depth, Opts, 1000),
     Model = maps:get(model, Opts, undefined),
     PermissionHandler = maps:get(permission_handler, Opts, undefined),
     McpRegistry = beam_agent_tool_registry:build_registry(
@@ -149,6 +154,7 @@ init_handler(Opts) ->
         {basic, U, P}                        -> opencode_http:encode_basic_auth(U, P);
         {basic, Encoded} when is_binary(Encoded) -> {basic, Encoded}
     end,
+    _ = maybe_warn_plaintext_http(Auth, BaseUrl),
     {Host, Port, BasePath} = opencode_http:parse_base_url(BaseUrl),
     ClientMod = maps:get(client_module, Opts, beam_agent_http_client),
     HState = #hstate{
@@ -156,6 +162,7 @@ init_handler(Opts) ->
         sse_state          = opencode_sse:new_state(),
         rest_pending       = #{},
         event_queue        = queue:new(),
+        max_event_queue_depth = MaxEventQueueDepth,
         directory          = Directory,
         opts               = Opts,
         host               = Host,
@@ -688,11 +695,72 @@ clear_event_subscription(HState) ->
 enqueue_event(_Msg, #hstate{event_ref = undefined} = HState) ->
     HState;
 enqueue_event(Msg, #hstate{event_consumer = undefined,
-                           event_queue = Q} = HState) ->
-    HState#hstate{event_queue = queue:in(Msg, Q)};
+                           event_queue = Q,
+                           max_event_queue_depth = MaxDepth} = HState) ->
+    Q1 = case queue:len(Q) >= MaxDepth of
+        true ->
+            {{value, Dropped}, QTrimmed} = queue:out(Q),
+            logger:warning(
+                "opencode_session: event_queue full (depth ~p) — "
+                "dropping oldest event: ~0p",
+                [MaxDepth, Dropped]),
+            QTrimmed;
+        false ->
+            Q
+    end,
+    HState#hstate{event_queue = queue:in(Msg, Q1)};
 enqueue_event(Msg, #hstate{event_consumer = From} = HState) ->
     gen_statem:reply(From, {ok, Msg}),
     HState#hstate{event_consumer = undefined}.
+
+%%====================================================================
+%% Internal: security / configuration helpers
+%%====================================================================
+
+%% @doc Warn when auth credentials are configured but the BaseUrl uses
+%% plain HTTP to a non-localhost host.  Emits a logger:warning so that
+%% operators can detect unintended insecure configurations in production.
+%% The connection is NOT rejected — the caller may intentionally route
+%% through a VPN tunnel or a local TLS-terminating proxy.
+-spec maybe_warn_plaintext_http(Auth, BaseUrl) -> ok when
+      Auth    :: {basic, binary()} | none,
+      BaseUrl :: string() | binary().
+maybe_warn_plaintext_http(none, _BaseUrl) ->
+    ok;
+maybe_warn_plaintext_http(_Auth, BaseUrl) ->
+    case is_remote_plaintext_http(BaseUrl) of
+        true ->
+            logger:warning(
+                "opencode_session: auth credentials are configured but the "
+                "base_url '~s' uses plaintext HTTP to a non-localhost host — "
+                "credentials will be transmitted in cleartext. "
+                "Use HTTPS or restrict the server to localhost.",
+                [BaseUrl]);
+        false ->
+            ok
+    end.
+
+%% @doc Pure predicate: returns true when the URL has scheme 'http' and
+%% the host is NOT a loopback address (localhost, 127.0.0.1, ::1).
+%% Exported for direct unit testing.
+-spec is_remote_plaintext_http(string() | binary()) -> boolean().
+is_remote_plaintext_http(BaseUrl) ->
+    UrlStr = case is_binary(BaseUrl) of
+        true  -> binary_to_list(BaseUrl);
+        false -> BaseUrl
+    end,
+    case uri_string:parse(UrlStr) of
+        #{scheme := "http", host := Host} ->
+            not is_loopback_host(Host);
+        _ ->
+            false
+    end.
+
+-spec is_loopback_host(string()) -> boolean().
+is_loopback_host("localhost") -> true;
+is_loopback_host("127.0.0.1") -> true;
+is_loopback_host("::1")       -> true;
+is_loopback_host(_)           -> false.
 
 %%====================================================================
 %% Internal: permission handling

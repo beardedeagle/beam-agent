@@ -89,6 +89,13 @@ Accepts three input forms:
 Returns a `command_struct()` map tagged by structure type.
 """.
 -spec parse(binary() | string() | [binary() | string()]) -> command_struct().
+%% List-form fast path: a non-empty list whose head is not an integer (i.e. not
+%% a character-code string) is treated as a segment list and cannot be
+%% shell-injected.  The `not is_integer(hd(Segments))` guard distinguishes a
+%% flat char-list string like "git status" (where hd/1 returns a code-point
+%% integer) from a binary-segment list like [<<"git">>, <<"status">>] (where
+%% hd/1 returns a binary).  An empty list falls through to the string clause,
+%% which produces #{type => opaque} for the empty-command edge case.
 parse(Segments) when is_list(Segments), Segments =/= [], not is_integer(hd(Segments)) ->
     (parse_list_form(Segments))#{input_form => list};
 parse(Str) when is_list(Str) ->
@@ -133,7 +140,12 @@ flatten_commands(#{type := opaque} = Cmd) ->
 %% Internal: List-form parsing (fast path)
 %%--------------------------------------------------------------------
 
--spec parse_list_form([binary() | string(), ...]) -> command_struct().
+-spec parse_list_form([binary() | string()]) -> command_struct().
+%% Guard against empty list: callers who bypass parse/1 and call this directly
+%% receive a safe {error, empty_command} signal rather than a badmatch crash
+%% on the [Program | Args] = Bins pattern match below.
+parse_list_form([]) ->
+    #{type => opaque, raw => <<>>, error => empty_command};
 parse_list_form(Segments) ->
     Bins = [to_binary(S) || S <- Segments],
     [Program | Args] = Bins,

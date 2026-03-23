@@ -867,7 +867,7 @@ set_mcp_servers(Session, Servers) ->
             Err
     end.
 -spec reconnect_mcp_server(pid(), binary()) ->
-                              {ok, term()} | {error, term()}.
+                              {ok, #{binary() => binary()}} | {error, not_found}.
 reconnect_mcp_server(Session, ServerName) ->
     case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->
@@ -885,7 +885,7 @@ reconnect_mcp_server(Session, ServerName) ->
             Err
     end.
 -spec toggle_mcp_server(pid(), binary(), boolean()) ->
-                           {ok, term()} | {error, term()}.
+                           {ok, #{binary() => binary()}} | {error, not_found}.
 toggle_mcp_server(Session, ServerName, Enabled) ->
     case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->

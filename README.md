@@ -50,7 +50,7 @@ the session process.
  +-----+-----+ +-----+-----+         +-----+-----+ +-----+-----+ +-----+-----+
  | Claude    | | Codex     |         | Gemini    | | OpenCode  | | Copilot   |
  | handler   | | handler   |         | handler   | | handler   | | handler   |
- | port/jsonl| | port/rpc  |         | port/rpc  | | http/sse  | | port/clrpc|
+ | port/jsonl| | port/rpc  |         | port/rpc  | | http/sse  | | port/jsonrpc|
  +-----------+ +-----------+         +-----------+ +-----------+ +-----------+
 ```
 
@@ -187,7 +187,7 @@ Beyond the lifecycle/query surface, the canonical SDK exposes the following
 capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_threads`, `beam_agent_runtime`, `beam_agent_config`,
 `beam_agent_provider`, `beam_agent_catalog`, `beam_agent_capabilities`,
-`beam_agent_command`, `beam_agent_control`, `beam_agent_mcp`,
+`beam_agent_command`, `beam_agent_command_validator`, `beam_agent_control`, `beam_agent_mcp`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
 `beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
@@ -229,36 +229,43 @@ beam_agent_session_store:list_sessions(Opts)                    -> {ok, [Session
 beam_agent_session_store:get_session(SessionId)                 -> {ok, SessionMeta} | {error, not_found}
 beam_agent_session_store:get_session_messages(SessionId, Opts)  -> {ok, [Message]} | {error, not_found}
 beam_agent_session_store:delete_session(SessionId)              -> ok
-beam_agent_session_store:fork_session(SessionPid, Opts)         -> {ok, SessionMeta} | {error, not_found | session_limit_reached | message_limit_reached}
-beam_agent_session_store:revert_session(SessionPid, Selector)   -> {ok, map()} | {error, Reason}
-beam_agent_session_store:unrevert_session(SessionPid)           -> {ok, map()} | {error, not_found}
-beam_agent_session_store:share_session(SessionPid, Opts)        -> {ok, map()} | {error, not_found}
-beam_agent_session_store:unshare_session(SessionPid)            -> ok | {error, not_found}
-beam_agent_session_store:summarize_session(SessionPid, Opts)    -> {ok, map()} | {error, not_found}
+beam_agent_session_store:fork_session(SessionId, Opts)         -> {ok, SessionMeta} | {error, not_found}
+beam_agent_session_store:revert_session(SessionId, Selector)   -> {ok, SessionMeta} | {error, not_found | invalid_selector}
+beam_agent_session_store:unrevert_session(SessionId)           -> {ok, SessionMeta} | {error, not_found}
+beam_agent_session_store:share_session(SessionId, Opts)        -> {ok, session_share()} | {error, not_found}
+beam_agent_session_store:unshare_session(SessionId)            -> ok | {error, not_found}
+beam_agent_session_store:summarize_session(SessionId, Opts)    -> {ok, session_summary()} | {error, not_found}
 
 %% Universal/native thread state — beam_agent_threads
-beam_agent_threads:thread_start(SessionPid, Opts)         -> {ok, ThreadMeta} | {error, Reason}
-beam_agent_threads:thread_resume(SessionPid, ThreadId)    -> {ok, ThreadMeta} | {error, not_found}
-beam_agent_threads:thread_list(SessionPid)                -> {ok, [ThreadMeta]} | {error, Reason}
-beam_agent_threads:thread_fork(SessionPid, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found | message_limit_reached}
-beam_agent_threads:thread_read(SessionPid, ThreadId, Opts)-> {ok, map()} | {error, not_found}
-beam_agent_threads:thread_archive(SessionPid, ThreadId)   -> {ok, map()} | {error, not_found}
-beam_agent_threads:thread_unarchive(SessionPid, ThreadId) -> {ok, map()} | {error, not_found}
-beam_agent_threads:thread_rollback(SessionPid, ThreadId, Selector) ->
+beam_agent_threads:thread_start(Session, Opts)         -> {ok, ThreadMeta} | {error, Reason}
+beam_agent_threads:thread_resume(Session, ThreadId)    -> {ok, ThreadMeta} | {error, not_found}
+beam_agent_threads:thread_list(Session)                -> {ok, [ThreadMeta]} | {error, Reason}
+beam_agent_threads:thread_fork(Session, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found | message_limit_reached}
+beam_agent_threads:thread_read(Session, ThreadId, Opts)-> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_archive(Session, ThreadId)   -> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_unarchive(Session, ThreadId) -> {ok, map()} | {error, not_found}
+beam_agent_threads:thread_rollback(Session, ThreadId, Selector) ->
     {ok, map()} | {error, Reason}
 
 %% Canonical runs/steps -- beam_agent_runs
 beam_agent_runs:start_run(Scope, Opts)                   -> {ok, Run} | {error, Reason}
-beam_agent_runs:start_step(RunId, Opts)                  -> {ok, Step} | {error, Reason}
-beam_agent_runs:complete_step(RunId, StepId, Result)     -> {ok, Step} | {error, Reason}
-beam_agent_runs:complete_run(RunId, Result)              -> {ok, Run} | {error, Reason}
+beam_agent_runs:get_run(RunId)                           -> {ok, Run} | {error, not_found}
 beam_agent_runs:list_runs(Filter)                        -> {ok, [Run]} | {error, Reason}
+beam_agent_runs:complete_run(RunId, Result)              -> {ok, Run} | {error, Reason}
+beam_agent_runs:fail_run(RunId, ErrorTerm)               -> {ok, Run} | {error, Reason}
+beam_agent_runs:cancel_run(RunId, Reason)                -> {ok, Run} | {error, Reason}
+beam_agent_runs:start_step(RunId, Opts)                  -> {ok, Step} | {error, Reason}
+beam_agent_runs:get_step(RunId, StepId)                  -> {ok, Step} | {error, not_found}
 beam_agent_runs:list_steps(RunId)                        -> {ok, [Step]} | {error, not_found}
+beam_agent_runs:complete_step(RunId, StepId, Result)     -> {ok, Step} | {error, Reason}
+beam_agent_runs:fail_step(RunId, StepId, ErrorTerm)      -> {ok, Step} | {error, Reason}
+beam_agent_runs:cancel_step(RunId, StepId, Reason)       -> {ok, Step} | {error, Reason}
 
 %% Canonical artifacts -- beam_agent_artifacts
 beam_agent_artifacts:put(Artifact)                       -> {ok, ArtifactRecord} | {error, Reason}
 beam_agent_artifacts:get(ArtifactId)                     -> {ok, ArtifactRecord} | {error, not_found}
 beam_agent_artifacts:list(Filter)                        -> {ok, [ArtifactRecord]} | {error, Reason}
+beam_agent_artifacts:search(Query)                       -> {ok, [ArtifactRecord]}
 beam_agent_artifacts:search(Query, Filter)               -> {ok, [ArtifactRecord]} | {error, Reason}
 beam_agent_artifacts:attach(ArtifactId, RefType, RefId)  -> ok | {error, Reason}
 beam_agent_artifacts:delete(ArtifactId)                  -> ok | {error, not_found}
@@ -366,7 +373,28 @@ handle_message(_Other) ->
 
 ### Backend Event Streams
 
-The public API exposes a canonical event-stream interface for every backend:
+The public API exposes a canonical event-stream interface for every backend.
+
+Erlang:
+
+```erlang
+ok = beam_agent:event_subscribe(Session),
+receive
+    {beam_agent_event, Session, Event} ->
+        io:format("Event: ~p~n", [Event])
+after 30_000 ->
+    timeout
+end,
+ok = beam_agent:event_unsubscribe(Session, self()).
+```
+
+`receive_event/2,3` provides a convenience wrapper with an optional timeout:
+
+```erlang
+{ok, Event} = beam_agent:receive_event(Session, 30_000).
+```
+
+Elixir:
 
 ```elixir
 session
@@ -577,9 +605,9 @@ surface, even when the underlying SDK does not implement it directly.
 {ok, Messages} = beam_agent_session_store:get_session_messages(<<"sid">>),
 
 %% Create and inspect universal threads
-{ok, Thread} = beam_agent_threads:start_thread(<<"sid">>, #{}),
-{ok, ThreadInfo} = beam_agent_threads:read_thread(
-    <<"sid">>, maps:get(thread_id, Thread), #{include_messages => true}
+{ok, Thread} = beam_agent_threads:thread_start(Session, #{}),
+{ok, ThreadInfo} = beam_agent_threads:thread_read(
+    Session, maps:get(thread_id, Thread), #{include_messages => true}
 ).
 ```
 
@@ -631,7 +659,7 @@ mix dialyzer               # Static analysis (via Dialyxir)
 - Elixir 1.17+ (for wrappers)
 - OTP built-ins: `crypto`, `ssl`, `inets`, `public_key` (for HTTP/WebSocket transports)
 - Optional: `telemetry` ~> 1.3 (for instrumentation — see [Telemetry](#telemetry))
-- Test deps: `proper` ~> 1.4
+- Test deps: `proper` 1.5.0
 
 **Zero external runtime dependencies.** The SDK relies only on OTP standard
 libraries. All third-party integrations (telemetry, metrics, tracing) are

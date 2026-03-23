@@ -32,6 +32,16 @@ tls_client_opts(Host, Custom, AllowInsecure) ->
     Merged = lists:foldl(fun merge_tls_opt/2, DefaultTls, Custom),
     case AllowInsecure orelse not has_unsafe_tls_opt(Merged) of
         true ->
+            case AllowInsecure of
+                true ->
+                    logger:warning(
+                        "beam_agent_transport: TLS certificate verification "
+                        "disabled for host '~s' — connections are vulnerable "
+                        "to MITM attacks",
+                        [Host]);
+                false ->
+                    ok
+            end,
             {ok, [Opt || Opt <- Merged, not is_internal_tls_flag(Opt)]};
         false ->
             {error, unsafe_tls_opts}

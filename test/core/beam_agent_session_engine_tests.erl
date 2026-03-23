@@ -207,3 +207,60 @@ drop_oldest_zero_is_noop_test() ->
     Q = queue:from_list([1, 2, 3]),
     Q1 = beam_agent_session_engine:drop_oldest(Q, 0),
     ?assertEqual([1, 2, 3], queue:to_list(Q1)).
+
+%%====================================================================
+%% M14: ensure_session_id/1 validation
+%%====================================================================
+
+ensure_session_id_undefined_generates_id_test() ->
+    {ok, Id} = beam_agent_session_engine:ensure_session_id(undefined),
+    ?assert(is_binary(Id)),
+    ?assert(byte_size(Id) > 0).
+
+ensure_session_id_empty_binary_generates_id_test() ->
+    {ok, Id} = beam_agent_session_engine:ensure_session_id(<<>>),
+    ?assert(is_binary(Id)),
+    ?assert(byte_size(Id) > 0).
+
+ensure_session_id_valid_ascii_passes_test() ->
+    Id = <<"session_abc123">>,
+    ?assertEqual({ok, Id}, beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_valid_hyphen_underscore_test() ->
+    Id = <<"sess-foo_bar.baz">>,
+    ?assertEqual({ok, Id}, beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_too_long_returns_error_test() ->
+    Id = binary:copy(<<"a">>, 257),
+    ?assertEqual({error, {session_id_too_long, 257}},
+                 beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_exactly_256_bytes_passes_test() ->
+    Id = binary:copy(<<"x">>, 256),
+    ?assertEqual({ok, Id}, beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_control_chars_rejected_test() ->
+    %% NUL byte is a C0 control character
+    Id = <<"sess\x00id">>,
+    ?assertMatch({error, {session_id_invalid_chars, _}},
+                 beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_newline_rejected_test() ->
+    Id = <<"sess\nid">>,
+    ?assertMatch({error, {session_id_invalid_chars, _}},
+                 beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_tab_rejected_test() ->
+    Id = <<"sess\tid">>,
+    ?assertMatch({error, {session_id_invalid_chars, _}},
+                 beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_valid_utf8_passes_test() ->
+    %% U+00E9 = é — valid UTF-8 non-control code point above 0x9F
+    Id = <<"caf\xC3\xA9">>,
+    ?assertEqual({ok, Id}, beam_agent_session_engine:ensure_session_id(Id)).
+
+ensure_session_id_generated_ids_are_unique_test() ->
+    {ok, Id1} = beam_agent_session_engine:ensure_session_id(undefined),
+    {ok, Id2} = beam_agent_session_engine:ensure_session_id(undefined),
+    ?assertNotEqual(Id1, Id2).

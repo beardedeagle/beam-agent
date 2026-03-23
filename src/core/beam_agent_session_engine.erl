@@ -48,7 +48,8 @@
     test_get_handler_state/1,
     test_get_opts/1,
     test_get_msg_queue/1,
-    test_get_queue_max/1
+    test_get_queue_max/1,
+    ensure_session_id/1
 ]).
 -endif.
 
@@ -170,39 +171,46 @@ callback_mode() ->
     gen_statem:init_result(state_name()) | {stop, term()}.
 init({HandlerMod, Opts}) ->
     process_flag(trap_exit, true),
-    %% Generate session_id before calling init_handler so the handler
-    %% can rely on it being present in Opts.
-    SessionId = ensure_session_id(maps:get(session_id, Opts, undefined)),
-    Opts1 = Opts#{session_id => SessionId},
-    case HandlerMod:init_handler(Opts1) of
-        {ok, #{transport_spec := {TMod, TOpts},
-               initial_state  := InitState,
-               handler_state  := HState}} ->
-            case TMod:start(TOpts) of
-                {ok, TRef} ->
-                    HState1 = notify_transport_started(HandlerMod, TRef,
-                                                       HState),
-                    Data = #engine{
-                        handler_mod   = HandlerMod,
-                        handler_state = HState1,
-                        transport_mod = TMod,
-                        transport_ref = TRef,
-                        buffer_max    = maps:get(buffer_max, Opts1,
-                                                 ?BUFFER_MAX_DEFAULT),
-                        queue_max     = maps:get(queue_max, Opts1, 10_000),
-                        session_id    = SessionId,
-                        model         = maps:get(model, Opts1, undefined),
-                        permission_mode = maps:get(permission_mode, Opts1,
-                                                   undefined),
-                        opts          = Opts1
-                    },
-                    TimeoutAction = timeout_action(InitState, Opts1),
-                    {ok, InitState, Data, TimeoutAction};
-                {error, Reason} ->
-                    {stop, {transport_start_failed, Reason}}
-            end;
-        {stop, Reason} ->
-            {stop, Reason}
+    %% Generate or validate session_id before calling init_handler so the
+    %% handler can rely on it being present in Opts.
+    case ensure_session_id(maps:get(session_id, Opts, undefined)) of
+        {error, IdReason} ->
+            {stop, IdReason};
+        {ok, SessionId} ->
+            Opts1 = Opts#{session_id => SessionId},
+            case HandlerMod:init_handler(Opts1) of
+                {ok, #{transport_spec := {TMod, TOpts},
+                       initial_state  := InitState,
+                       handler_state  := HState}} ->
+                    case TMod:start(TOpts) of
+                        {ok, TRef} ->
+                            HState1 = notify_transport_started(HandlerMod,
+                                                               TRef, HState),
+                            Data = #engine{
+                                handler_mod   = HandlerMod,
+                                handler_state = HState1,
+                                transport_mod = TMod,
+                                transport_ref = TRef,
+                                buffer_max    = maps:get(buffer_max, Opts1,
+                                                         ?BUFFER_MAX_DEFAULT),
+                                queue_max     = validate_queue_max(
+                                                    maps:get(queue_max, Opts1,
+                                                             10_000)),
+                                session_id    = SessionId,
+                                model         = maps:get(model, Opts1,
+                                                         undefined),
+                                permission_mode = maps:get(permission_mode,
+                                                           Opts1, undefined),
+                                opts          = Opts1
+                            },
+                            TimeoutAction = timeout_action(InitState, Opts1),
+                            {ok, InitState, Data, TimeoutAction};
+                        {error, Reason} ->
+                            {stop, {transport_start_failed, Reason}}
+                    end;
+                {stop, Reason} ->
+                    {stop, Reason}
+            end
     end.
 
 -spec terminate(term(), state_name(), #engine{}) -> ok.
@@ -210,7 +218,8 @@ terminate(Reason, _State, #engine{consumer      = Consumer,
                                    handler_mod   = H,
                                    handler_state = HState,
                                    transport_mod = TMod,
-                                   transport_ref = TRef}) ->
+                                   transport_ref = TRef,
+                                   session_id    = SessionId}) ->
     %% Reply to any pending consumer so callers don't hang
     case Consumer of
         undefined -> ok;
@@ -218,6 +227,17 @@ terminate(Reason, _State, #engine{consumer      = Consumer,
     end,
     _ = H:terminate_handler(Reason, HState),
     _ = TMod:close(TRef),
+    %% Clean up orphaned ETS entries in core modules keyed by this session.
+    %% These are synchronous deletes — no process spawning.
+    SessionPid = self(),
+    _ = beam_agent_runtime_core:clear_session(SessionPid),
+    _ = beam_agent_account_core:clear_session(SessionPid),
+    _ = beam_agent_search_core:clear_session(SessionPid),
+    _ = beam_agent_skills_core:clear_session(SessionPid),
+    _ = beam_agent_runtime_core:clear_session(SessionId),
+    _ = beam_agent_account_core:clear_session(SessionId),
+    _ = beam_agent_search_core:clear_session(SessionId),
+    _ = beam_agent_skills_core:clear_session(SessionId),
     ok.
 
 -doc "Redact sensitive fields from crash logs and sys:get_status output.".
@@ -307,7 +327,10 @@ ready(info, Msg, Data) ->
             handle_transport_exit(Status, Data);
         {disconnected, Reason} ->
             enter_error({disconnected, Reason}, Data);
-        _Other ->
+        Other ->
+            logger:debug("beam_agent_session_engine: unexpected event in ready"
+                         " [session=~s type=info content=~p]",
+                         [Data#engine.session_id, Other]),
             keep_state_and_data
     end;
 ready({call, From}, Request, Data) ->
@@ -364,7 +387,10 @@ active_query(info, Msg, Data) ->
             reply_consumer_error({disconnected, Reason}, Data),
             enter_error({disconnected, Reason},
                         Data#engine{consumer = undefined});
-        _Other ->
+        Other ->
+            logger:debug("beam_agent_session_engine: unexpected event in"
+                         " active_query [session=~s type=info content=~p]",
+                         [Data#engine.session_id, Other]),
             keep_state_and_data
     end;
 active_query({call, From}, Request, Data) ->
@@ -714,7 +740,7 @@ handle_incoming_data(RawData, StateName,
             enter_error(buffer_overflow,
                         Data#engine{consumer = undefined});
         false ->
-            case H:handle_data(Combined, HState) of
+            try H:handle_data(Combined, HState) of
                 {ok, Messages, NewBuf, Actions, HState1} ->
                     Data1 = execute_send_actions(
                                 Actions,
@@ -726,7 +752,24 @@ handle_incoming_data(RawData, StateName,
                         ready ->
                             Data2 = queue_messages(Messages, Data1),
                             {keep_state, Data2}
-                    end
+                    end;
+                Unexpected ->
+                    logger:error(
+                        "beam_agent_session_engine: handler ~p returned"
+                        " unexpected result from handle_data/2"
+                        " [session=~s result=~p] — transitioning to error",
+                        [H, Data#engine.session_id, Unexpected]),
+                    enter_error({handler_crashed, {bad_return, Unexpected}},
+                                Data#engine{consumer = undefined})
+            catch
+                Class:Reason:Stack ->
+                    logger:error(
+                        "beam_agent_session_engine: handler ~p crashed in"
+                        " handle_data/2 [session=~s class=~p reason=~p"
+                        " stack=~p] — transitioning to error",
+                        [H, Data#engine.session_id, Class, Reason, Stack]),
+                    enter_error({handler_crashed, {Class, Reason}},
+                                Data#engine{consumer = undefined})
             end
     end.
 
@@ -941,11 +984,41 @@ notify_transport_started(H, TRef, HState) ->
 %% Internal: utility helpers
 %%====================================================================
 
--spec ensure_session_id(binary() | undefined) -> binary().
+-define(SESSION_ID_MAX_BYTES, 256).
+
+-spec ensure_session_id(binary() | undefined) ->
+    {ok, binary()} | {error, {session_id_too_long, non_neg_integer()}}.
 ensure_session_id(undefined) ->
-    make_session_id();
+    {ok, make_session_id()};
+ensure_session_id(<<>>) ->
+    {ok, make_session_id()};
 ensure_session_id(Id) when is_binary(Id) ->
-    Id.
+    Size = byte_size(Id),
+    case Size > ?SESSION_ID_MAX_BYTES of
+        true ->
+            {error, {session_id_too_long, Size}};
+        false ->
+            case is_valid_session_id(Id) of
+                true  -> {ok, Id};
+                false -> {error, {session_id_invalid_chars, Id}}
+            end
+    end.
+
+%% Validate that Id contains only printable ASCII (0x20–0x7E) or valid UTF-8
+%% with no C0/C1 control characters (0x00–0x1F, 0x7F, 0x80–0x9F).
+-spec is_valid_session_id(binary()) -> boolean().
+is_valid_session_id(Id) ->
+    case unicode:characters_to_list(Id, utf8) of
+        {error, _, _}   -> false;
+        {incomplete, _, _} -> false;
+        Chars when is_list(Chars) ->
+            lists:all(fun is_valid_id_char/1, Chars)
+    end.
+
+-spec is_valid_id_char(integer()) -> boolean().
+is_valid_id_char(C) when C >= 16#20, C =< 16#7E -> true;  % printable ASCII
+is_valid_id_char(C) when C > 16#9F               -> true;  % non-control Unicode
+is_valid_id_char(_)                              -> false.
 
 -spec make_session_id() -> <<_:64, _:_*8>>.
 make_session_id() ->
@@ -985,6 +1058,15 @@ redact_engine_data(#engine{} = Data) ->
     };
 redact_engine_data(Other) ->
     Other.
+
+%%====================================================================
+%% Internal: queue_max validation
+%%====================================================================
+
+-spec validate_queue_max(term()) -> pos_integer() | infinity.
+validate_queue_max(infinity) -> infinity;
+validate_queue_max(N) when is_integer(N), N > 0 -> N;
+validate_queue_max(_) -> 10_000.
 
 %%====================================================================
 %% Internal: queue_max enforcement

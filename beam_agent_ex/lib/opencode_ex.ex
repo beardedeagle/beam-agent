@@ -39,10 +39,6 @@ defmodule OpencodeEx do
       )
   """
 
-  # Dialyzer infers impractically narrow binary sizes for small status maps.
-  @dialyzer {:nowarn_function, reconnect_mcp_server: 2}
-  @dialyzer {:nowarn_function, toggle_mcp_server: 3}
-
   # ── Shared Types ────────────────────────────────────────────────────
 
   @typep stop_reason ::
@@ -417,7 +413,7 @@ defmodule OpencodeEx do
   end
 
   @doc "Initialize native OpenCode app state."
-  @spec app_init(pid()) :: {:ok, term()} | {:error, term()}
+  @spec app_init(pid()) :: {:ok, term()}
   def app_init(session) do
     :beam_agent_app_core.app_init(session)
   end
@@ -429,7 +425,7 @@ defmodule OpencodeEx do
   end
 
   @doc "List native OpenCode app modes."
-  @spec app_modes(pid()) :: {:ok, term()} | {:error, term()}
+  @spec app_modes(pid()) :: {:ok, [binary()]}
   def app_modes(session) do
     :beam_agent_app_core.app_modes(session)
   end
@@ -920,13 +916,13 @@ defmodule OpencodeEx do
 
   @doc "Reconnect a failed MCP server."
   @spec reconnect_mcp_server(pid(), binary()) ::
-          {:error, :not_found} | {:ok, %{binary() => binary()}}
+          {:ok, %{<<_::48>> => <<_::88>>}} | {:error, :not_found}
   def reconnect_mcp_server(session, server_name),
     do: :opencode_client.reconnect_mcp_server(session, server_name)
 
   @doc "Enable or disable an MCP server."
   @spec toggle_mcp_server(pid(), binary(), boolean()) ::
-          {:error, :not_found} | {:ok, %{binary() => binary()}}
+          {:ok, %{<<_::48>> => <<_::56>>}} | {:error, :not_found}
   def toggle_mcp_server(session, server_name, enabled),
     do: :opencode_client.toggle_mcp_server(session, server_name, enabled)
 

@@ -8,7 +8,7 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2]).
+         terminate/2, format_status/1]).
 
 %%====================================================================
 %% Types
@@ -239,6 +239,19 @@ terminate(_Reason, #state{pending = Pending}) ->
         catch httpc:cancel_request(ReqId)
     end, Pending),
     ok.
+
+-doc "Redact sensitive fields from crash logs and sys:get_status output.".
+-spec format_status(gen_server:format_status()) -> gen_server:format_status().
+format_status(Status) ->
+    State = maps:get(state, Status, undefined),
+    Status#{state => redact_state(State)}.
+
+-spec redact_state(#state{} | term()) -> #state{} | term().
+redact_state(#state{} = State) ->
+    %% ssl_opts may contain private key material; redact it.
+    State#state{ssl_opts = [redacted]};
+redact_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal helpers

@@ -475,19 +475,22 @@ scope_memory_count(#{session_id := SessionId}) ->
     end.
 
 -spec compaction_triggers(budget_snapshot(), map()) -> [compaction_trigger()].
+%% All Budget fields use maps:get/3 with default 0, meaning "no threshold
+%% exceeded" — the safe fallback when a Budget map is partially populated or
+%% comes from an unexpected code path during context compaction decisions.
 compaction_triggers(Budget, Opts) ->
     maybe_add_trigger(task_boundary, maps:get(task_boundary, Opts, false),
         maybe_add_trigger(idle_ms_threshold,
-            over_threshold(maps:get(idle_ms, Budget),
+            over_threshold(maps:get(idle_ms, Budget, 0),
                 maps:get(idle_ms_threshold, Opts, undefined)),
             maybe_add_trigger(estimated_token_threshold,
-                over_threshold(maps:get(estimated_token_count, Budget),
+                over_threshold(maps:get(estimated_token_count, Budget, 0),
                     maps:get(estimated_token_threshold, Opts, 16000)),
                 maybe_add_trigger(visible_message_threshold,
-                    over_threshold(maps:get(visible_message_count, Budget),
+                    over_threshold(maps:get(visible_message_count, Budget, 0),
                         maps:get(visible_message_threshold, Opts, 80)),
                     maybe_add_trigger(message_count_threshold,
-                        over_threshold(maps:get(session_message_count, Budget),
+                        over_threshold(maps:get(session_message_count, Budget, 0),
                             maps:get(message_count_threshold, Opts, 200)),
                         []))))).
 

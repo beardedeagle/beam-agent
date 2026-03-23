@@ -632,6 +632,244 @@ initialize_rejected_in_shutting_down_state_test() ->
     ?assert(maps:is_key(<<"error">>, Resp)).
 
 %%====================================================================
+%% M8: Protocol version validation in initialize handshake
+%%====================================================================
+
+initialize_stores_negotiated_version_test() ->
+    %% After a successful initialize with matching version, state should
+    %% hold the negotiated protocol version.
+    State = make_state(),
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 100,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"protocolVersion">> => <<"2025-06-18">>,
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"c">>,
+                                          <<"version">> => <<"1">>}}},
+    {_Resp, NewState} = beam_agent_mcp_dispatch:handle_message(
+                            InitMsg, State),
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, NewState)).
+
+initialize_accepts_mismatched_version_with_warning_test() ->
+    %% A client sending a different version should still succeed (server
+    %% logs a warning but proceeds), using its own version.
+    State = make_state(),
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 101,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"protocolVersion">> => <<"2024-11-05">>,
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"old-client">>,
+                                          <<"version">> => <<"0.9">>}}},
+    {Resp, NewState} = beam_agent_mcp_dispatch:handle_message(
+                           InitMsg, State),
+    %% Response is still valid (server doesn't reject on mismatch)
+    ?assert(maps:is_key(<<"result">>, Resp)),
+    %% Negotiated version is always the server's own version
+    ?assertEqual(<<"2025-06-18">>,
+                 maps:get(negotiated_protocol_version, NewState)).
+
+initialize_accepts_missing_version_test() ->
+    %% A client that omits protocolVersion should still succeed.
+    State = make_state(),
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 102,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"legacy">>,
+                                          <<"version">> => <<"1.0">>}}},
+    {Resp, _NewState} = beam_agent_mcp_dispatch:handle_message(
+                            InitMsg, State),
+    ?assert(maps:is_key(<<"result">>, Resp)).
+
+%%====================================================================
+%% M10: Cursor type validation
+%%====================================================================
+
+resources_list_rejects_bad_cursor_test() ->
+    State = do_initialize(make_state_with_provider()),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 200,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{<<"cursor">> => 42}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32602, maps:get(<<"code">>, Err)).
+
+resources_list_accepts_binary_cursor_test() ->
+    State = do_initialize(make_state_with_provider()),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 201,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{<<"cursor">> => <<"page-2">>}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    ?assert(maps:is_key(<<"result">>, Resp)).
+
+resources_list_accepts_missing_cursor_test() ->
+    State = do_initialize(make_state_with_provider()),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 202,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    ?assert(maps:is_key(<<"result">>, Resp)).
+
+resources_templates_list_rejects_bad_cursor_test() ->
+    State = do_initialize(make_state_with_provider()),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 210,
+            <<"method">> => <<"resources/templates/list">>,
+            <<"params">> => #{<<"cursor">> => [bad]}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32602, maps:get(<<"code">>, Err)).
+
+prompts_list_rejects_bad_cursor_test() ->
+    State = do_initialize(make_state_with_provider()),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 220,
+            <<"method">> => <<"prompts/list">>,
+            <<"params">> => #{<<"cursor">> => #{}}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32602, maps:get(<<"code">>, Err)).
+
+%%====================================================================
+%% M16: Safe defaults for State access
+%%====================================================================
+
+dispatch_provider_safe_when_no_server_caps_test() ->
+    %% Build a state without server_capabilities (simulating a stripped state).
+    %% dispatch_provider should return method_not_found instead of crashing.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    %% Start with normal state, then manually remove server_capabilities
+    BaseState = beam_agent_mcp_dispatch:new(Info, #{}, #{}),
+    State = do_initialize(BaseState),
+    StrippedState = maps:remove(server_capabilities, State),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 300,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{}},
+    %% Should return method_not_found (-32601), not crash
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, StrippedState),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32601, maps:get(<<"code">>, Err)).
+
+%%====================================================================
+%% L4: Notification flood protection
+%%====================================================================
+
+notification_flood_drops_when_limit_exceeded_test() ->
+    %% Set limit to 2 notifications per interval.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    Caps = #{tools => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps,
+                 #{max_notifications_per_interval => 2}),
+    State1 = do_initialize_state(State0),
+
+    Notif = #{<<"jsonrpc">> => <<"2.0">>,
+              <<"method">> => <<"notifications/progress">>,
+              <<"params">> => #{}},
+
+    %% First notification: accepted — window count becomes 1
+    {noreply, State2} = beam_agent_mcp_dispatch:handle_message(Notif, State1),
+    {Count2, _} = maps:get(notification_window, State2),
+    ?assertEqual(1, Count2),
+
+    %% Second notification: accepted — window count becomes 2
+    {noreply, State3} = beam_agent_mcp_dispatch:handle_message(Notif, State2),
+    {Count3, _} = maps:get(notification_window, State3),
+    ?assertEqual(2, Count3),
+
+    %% Third notification: dropped (over limit) — count stays at 2
+    {noreply, State4} = beam_agent_mcp_dispatch:handle_message(Notif, State3),
+    {Count4, _} = maps:get(notification_window, State4),
+    ?assertEqual(2, Count4).
+
+notification_flood_unlimited_when_zero_test() ->
+    %% Default (limit=0) means unlimited.
+    State = do_initialize(make_state()),
+    Notif = #{<<"jsonrpc">> => <<"2.0">>,
+              <<"method">> => <<"notifications/progress">>,
+              <<"params">> => #{}},
+    %% Send 5 notifications — all accepted
+    State1 = lists:foldl(fun(_, S) ->
+        {noreply, S1} = beam_agent_mcp_dispatch:handle_message(Notif, S),
+        S1
+    end, State, lists:seq(1, 5)),
+    {Count, _} = maps:get(notification_window, State1),
+    ?assertEqual(5, Count).
+
+notification_flood_resets_after_window_expires_test() ->
+    %% Use a 1 ms window so we can test expiry without sleeping.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    Caps = #{tools => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps,
+                 #{max_notifications_per_interval => 2,
+                   notification_interval_ms => 1}),
+    State1 = do_initialize_state(State0),
+
+    Notif = #{<<"jsonrpc">> => <<"2.0">>,
+              <<"method">> => <<"notifications/progress">>,
+              <<"params">> => #{}},
+
+    %% Fill the window: send 2 notifications.
+    {noreply, State2} = beam_agent_mcp_dispatch:handle_message(Notif, State1),
+    {noreply, State3} = beam_agent_mcp_dispatch:handle_message(Notif, State2),
+    {Count3, _} = maps:get(notification_window, State3),
+    ?assertEqual(2, Count3),
+
+    %% Wait for the 1 ms window to expire, then send another notification.
+    %% The counter must reset to 1 (window opened fresh).
+    timer:sleep(5),
+    {noreply, State4} = beam_agent_mcp_dispatch:handle_message(Notif, State3),
+    {Count4, _} = maps:get(notification_window, State4),
+    ?assertEqual(1, Count4).
+
+notification_flood_initialized_bypasses_protection_test() ->
+    %% notifications/initialized must always pass even at limit.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    Caps = #{tools => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps,
+                 #{max_notifications_per_interval => 1}),
+    %% Drive through initialize so lifecycle = initializing (awaiting initialized).
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"protocolVersion">> => <<"2025-06-18">>,
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"tc">>,
+                                          <<"version">> => <<"1">>}}},
+    {_Resp, StateInit} = beam_agent_mcp_dispatch:handle_message(InitMsg, State0),
+    %% Inject a fake window that is already full.
+    StateInit2 = StateInit#{notification_window => {1, erlang:monotonic_time(millisecond)}},
+    %% notifications/initialized must still transition to ready.
+    InitedMsg = #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"method">> => <<"notifications/initialized">>},
+    {noreply, StateFinal} = beam_agent_mcp_dispatch:handle_message(
+                                InitedMsg, StateInit2),
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(StateFinal)).
+
+%%====================================================================
+%% Helpers (private to test module)
+%%====================================================================
+
+%% Like do_initialize/1 but works on any initial state (not just make_state()).
+do_initialize_state(State) ->
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"protocolVersion">> => <<"2025-06-18">>,
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"tc">>,
+                                          <<"version">> => <<"1">>}}},
+    {_Resp, State1} = beam_agent_mcp_dispatch:handle_message(InitMsg, State),
+    InitedMsg = #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"method">> => <<"notifications/initialized">>},
+    {noreply, State2} = beam_agent_mcp_dispatch:handle_message(
+                            InitedMsg, State1),
+    State2.
+
+%%====================================================================
 %% Notification Gating — Error / Shutting Down States
 %%====================================================================
 

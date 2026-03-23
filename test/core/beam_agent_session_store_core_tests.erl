@@ -505,3 +505,29 @@ default_session_limit_test() ->
 
 default_message_limit_test() ->
     ?assertEqual(100_000, beam_agent_session_store_core:max_messages_per_session()).
+
+%%====================================================================
+%% L8: Counters table has read_concurrency
+%%====================================================================
+
+counters_table_has_read_concurrency_test() ->
+    ok = beam_agent_session_store_core:ensure_tables(),
+    Props = ets:info(beam_agent_session_counters),
+    ?assertNotEqual(undefined, Props),
+    ReadConc = proplists:get_value(read_concurrency, Props),
+    ?assertEqual(true, ReadConc),
+    beam_agent_session_store_core:clear().
+
+sessions_table_has_read_concurrency_test() ->
+    ok = beam_agent_session_store_core:ensure_tables(),
+    Props = ets:info(beam_agent_sessions),
+    ReadConc = proplists:get_value(read_concurrency, Props),
+    ?assertEqual(true, ReadConc),
+    beam_agent_session_store_core:clear().
+
+messages_table_has_read_concurrency_test() ->
+    ok = beam_agent_session_store_core:ensure_tables(),
+    Props = ets:info(beam_agent_session_messages),
+    ReadConc = proplists:get_value(read_concurrency, Props),
+    ?assertEqual(true, ReadConc),
+    beam_agent_session_store_core:clear().

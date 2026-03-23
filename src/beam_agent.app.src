@@ -105,6 +105,7 @@
         beam_agent_session_handler,
         beam_agent_transport,
         beam_agent_transport_port,
+        beam_agent_transport_utils,
         beam_agent_transport_ws,
         beam_agent_ws_frame,
         beam_agent_ws_client,

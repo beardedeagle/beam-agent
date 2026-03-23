@@ -543,11 +543,16 @@ spawn_child(ParentRun, Relation, Task, Opts) ->
     normalized_spawn_opts(), resolved_spawn_context()) ->
     {ok, child()} | {error, spawn_error()}.
 persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
-    ParentRunId = maps:get(run_id, ParentRun),
+    %% Use maps:find to surface a descriptive error when run_id is missing,
+    %% preventing orphaned child runs with inconsistent lineage.
+    ParentRunId = case maps:find(run_id, ParentRun) of
+        {ok, Id} -> Id;
+        error -> error({missing_run_id, ParentRun})
+    end,
     RunScope = build_run_scope(Ctx),
     Substrate = determine_substrate(Ctx),
     Metadata = orchestrator_metadata(
-        ParentRunId, Relation, Substrate, maps:get(metadata, Opts), Ctx
+        ParentRunId, Relation, Substrate, maps:get(metadata, Opts, #{}), Ctx
     ),
     case evaluate_orchestrator_policy(Relation, Metadata, ParentRun, Task, RunScope, Ctx) of
         allow ->
@@ -559,13 +564,20 @@ persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
             RunOpts = maybe_put(input, maps:get(input, Opts, undefined), RunOpts1),
             case beam_agent_runs:start_run(RunScope, RunOpts) of
                 {ok, Run} ->
+                    %% Use maps:find to surface a descriptive error if start_run
+                    %% returns a run without a run_id — would indicate a broken
+                    %% runs implementation and should never be silently swallowed.
+                    ChildRunId = case maps:find(run_id, Run) of
+                        {ok, Cid} -> Cid;
+                        error -> error({missing_run_id, Run})
+                    end,
                     Now = erlang:system_time(millisecond),
                     Link = #{
-                        child_run_id => maps:get(run_id, Run),
+                        child_run_id => ChildRunId,
                         parent_run_id => ParentRunId,
                         relation => Relation,
                         substrate => Substrate,
-                        metadata => maps:get(metadata, Opts),
+                        metadata => maps:get(metadata, Opts, #{}),
                         sequence => erlang:unique_integer([monotonic, positive]),
                         created_at => Now,
                         updated_at => Now
@@ -583,7 +595,7 @@ persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
                     ok = beam_agent_orchestrator_store:put_link(Link6),
                     ok = append_orchestrator_event(orchestrator_event(Relation), #{
                         parent_run_id => ParentRunId,
-                        child_run_id => maps:get(run_id, Run),
+                        child_run_id => ChildRunId,
                         relation => Relation,
                         substrate => Substrate,
                         child_session_id => maps:get(session_id, Run, undefined),
@@ -600,7 +612,7 @@ persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
                 parent_run_id => ParentRunId,
                 relation => Relation,
                 substrate => Substrate,
-                metadata => maps:get(metadata, Opts)
+                metadata => maps:get(metadata, Opts, #{})
             },
             ok = audit_orchestrator_event(Relation, Link, deny, Reason),
             {error, {policy_denied, Reason}}
