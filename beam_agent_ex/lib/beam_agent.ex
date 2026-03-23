@@ -1398,7 +1398,8 @@ defmodule BeamAgent do
   - `{:error, :not_found}` if the source thread does not exist.
   - `{:error, :message_limit_reached}` if the fork would exceed message limits.
   """
-  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, :not_found | :message_limit_reached}
+  @spec thread_fork(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_found | :message_limit_reached}
   def thread_fork(session, thread_id), do: BeamAgent.Threads.thread_fork(session, thread_id)
 
   @doc """
@@ -1419,7 +1420,8 @@ defmodule BeamAgent do
   - `{:error, :not_found}` if the source thread does not exist.
   - `{:error, :message_limit_reached}` if the fork would exceed message limits.
   """
-  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found | :message_limit_reached}
+  @spec thread_fork(pid(), binary(), map()) ::
+          {:ok, map()} | {:error, :not_found | :message_limit_reached}
   def thread_fork(session, thread_id, opts),
     do: BeamAgent.Threads.thread_fork(session, thread_id, opts)
 
