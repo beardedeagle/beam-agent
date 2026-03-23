@@ -3,7 +3,7 @@
 %%%
 %%% All tests exercise pure functions: no processes, no sockets, no
 %%% test doubles. Server frames are constructed as raw binaries (unmasked)
-%%% and fed to decode/2,3.  Client frames produced by encode/2 are
+%%% and fed to decode/2,3,4.  Client frames produced by encode/2 are
 %%% validated structurally (mask-bit set, correct opcode).
 %%%
 %%% Tests cover:
@@ -20,6 +20,9 @@
 %%%   - Unexpected continuation frame
 %%%   - 16-bit and 64-bit extended length
 %%%   - encode/2 produces correctly masked client frames
+%%%   - Fragment accumulation size limit (message_too_large)
+%%%   - decode/3 convenience wrapper defaults MaxMessageSize
+%%%   - Control frames interleaved with fragments respect size limit
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_ws_frame_tests).
@@ -304,6 +307,79 @@ encode_64bit_length_test() ->
     Payload = binary:copy(<<$Y>>, 70000),
     Encoded = iolist_to_binary(beam_agent_ws_frame:encode(text, Payload)),
     <<1:1, 0:3, 1:4, 1:1, 127:7, 70000:64, _/binary>> = Encoded.
+
+%%====================================================================
+%% Decode: fragment accumulation size limit
+%%====================================================================
+
+%% decode/3 convenience wrapper: MaxMessageSize defaults to MaxFrameSize * 16.
+%% A 3-fragment message well within that default limit assembles normally.
+decode3_convenience_wrapper_assembles_within_limit_test() ->
+    F1 = <<0:1, 0:3, 1:4, 0:1, 3:7, "foo">>,
+    F2 = <<1:1, 0:3, 0:4, 0:1, 3:7, "bar">>,
+    Buf = <<F1/binary, F2/binary>>,
+    ?assertMatch({ok, [{text, <<"foobar">>}], <<>>, undefined},
+        beam_agent_ws_frame:decode(Buf, ?MAX, undefined)).
+
+%% First fragment exceeds MaxMessageSize → error immediately.
+fragment_start_exceeds_max_message_size_test() ->
+    Payload = binary:copy(<<$A>>, 10),
+    F1 = <<0:1, 0:3, 1:4, 0:1, 10:7, Payload/binary>>,
+    %% MaxMessageSize = 5, less than the 10-byte first fragment.
+    ?assertEqual({error, message_too_large},
+        beam_agent_ws_frame:decode(F1, ?MAX, 5, undefined)).
+
+%% Middle continuation frame pushes accumulated size over limit.
+fragment_middle_exceeds_max_message_size_test() ->
+    P1 = binary:copy(<<$A>>, 5),
+    P2 = binary:copy(<<$B>>, 5),
+    F1 = <<0:1, 0:3, 1:4, 0:1, 5:7, P1/binary>>,
+    F2 = <<0:1, 0:3, 0:4, 0:1, 5:7, P2/binary>>,
+    %% MaxMessageSize = 9: first fragment (5) fits, second pushes to 10.
+    ?assertEqual({error, message_too_large},
+        beam_agent_ws_frame:decode(<<F1/binary, F2/binary>>, ?MAX, 9, undefined)).
+
+%% Final continuation frame pushes accumulated size over limit.
+fragment_final_exceeds_max_message_size_test() ->
+    P1 = binary:copy(<<$A>>, 5),
+    P2 = binary:copy(<<$B>>, 5),
+    F1 = <<0:1, 0:3, 1:4, 0:1, 5:7, P1/binary>>,
+    F2 = <<1:1, 0:3, 0:4, 0:1, 5:7, P2/binary>>,
+    %% MaxMessageSize = 9: first fragment (5) fits, final pushes to 10.
+    ?assertEqual({error, message_too_large},
+        beam_agent_ws_frame:decode(<<F1/binary, F2/binary>>, ?MAX, 9, undefined)).
+
+%% Exactly at the limit — should succeed (boundary check).
+fragment_exactly_at_max_message_size_test() ->
+    P1 = binary:copy(<<$A>>, 5),
+    P2 = binary:copy(<<$B>>, 5),
+    F1 = <<0:1, 0:3, 1:4, 0:1, 5:7, P1/binary>>,
+    F2 = <<1:1, 0:3, 0:4, 0:1, 5:7, P2/binary>>,
+    %% MaxMessageSize = 10 exactly — 5 + 5 = 10, should pass.
+    Expected = <<P1/binary, P2/binary>>,
+    ?assertMatch({ok, [{text, Expected}], <<>>, undefined},
+        beam_agent_ws_frame:decode(<<F1/binary, F2/binary>>, ?MAX, 10, undefined)).
+
+%% Control frames interleaved with fragments do not count toward message size.
+control_frame_during_fragmentation_size_limit_test() ->
+    P1   = binary:copy(<<$A>>, 5),
+    Ping = <<1:1, 0:3, 9:4, 0:1, 4:7, "ping">>,
+    P2   = binary:copy(<<$B>>, 5),
+    F1 = <<0:1, 0:3, 1:4, 0:1, 5:7, P1/binary>>,
+    F2 = <<1:1, 0:3, 0:4, 0:1, 5:7, P2/binary>>,
+    Buf = <<F1/binary, Ping/binary, F2/binary>>,
+    %% MaxMessageSize = 10; control frame payload (4) must not inflate the count.
+    ?assertMatch({ok, [{ping, <<"ping">>}, {text, _}], <<>>, undefined},
+        beam_agent_ws_frame:decode(Buf, ?MAX, 10, undefined)).
+
+%% Single unfragmented frames are unaffected by MaxMessageSize
+%% (they are bounded by MaxFrameSize, not MaxMessageSize).
+unfragmented_frame_ignores_max_message_size_test() ->
+    Payload = binary:copy(<<$Z>>, 20),
+    Frame = server_frame(1, 1, Payload),
+    %% MaxMessageSize = 1 — unfragmented frames should still decode fine.
+    ?assertMatch({ok, [{text, Payload}], <<>>, undefined},
+        beam_agent_ws_frame:decode(Frame, ?MAX, 1, undefined)).
 
 %%====================================================================
 %% Helper: build an unmasked server frame

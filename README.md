@@ -229,7 +229,7 @@ beam_agent_session_store:list_sessions(Opts)                    -> {ok, [Session
 beam_agent_session_store:get_session(SessionId)                 -> {ok, SessionMeta} | {error, not_found}
 beam_agent_session_store:get_session_messages(SessionId, Opts)  -> {ok, [Message]} | {error, not_found}
 beam_agent_session_store:delete_session(SessionId)              -> ok
-beam_agent_session_store:fork_session(SessionPid, Opts)         -> {ok, SessionMeta} | {error, not_found}
+beam_agent_session_store:fork_session(SessionPid, Opts)         -> {ok, SessionMeta} | {error, not_found | session_limit_reached | message_limit_reached}
 beam_agent_session_store:revert_session(SessionPid, Selector)   -> {ok, map()} | {error, Reason}
 beam_agent_session_store:unrevert_session(SessionPid)           -> {ok, map()} | {error, not_found}
 beam_agent_session_store:share_session(SessionPid, Opts)        -> {ok, map()} | {error, not_found}
@@ -240,7 +240,7 @@ beam_agent_session_store:summarize_session(SessionPid, Opts)    -> {ok, map()} |
 beam_agent_threads:thread_start(SessionPid, Opts)         -> {ok, ThreadMeta} | {error, Reason}
 beam_agent_threads:thread_resume(SessionPid, ThreadId)    -> {ok, ThreadMeta} | {error, not_found}
 beam_agent_threads:thread_list(SessionPid)                -> {ok, [ThreadMeta]} | {error, Reason}
-beam_agent_threads:thread_fork(SessionPid, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found}
+beam_agent_threads:thread_fork(SessionPid, ThreadId, Opts)-> {ok, ThreadMeta} | {error, not_found | message_limit_reached}
 beam_agent_threads:thread_read(SessionPid, ThreadId, Opts)-> {ok, map()} | {error, not_found}
 beam_agent_threads:thread_archive(SessionPid, ThreadId)   -> {ok, map()} | {error, not_found}
 beam_agent_threads:thread_unarchive(SessionPid, ThreadId) -> {ok, map()} | {error, not_found}

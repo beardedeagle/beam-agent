@@ -1359,10 +1359,10 @@ cleanup_mcp_config(Path) when is_list(Path)   -> _ = file:delete(Path), ok.
 -spec track_message(beam_agent_core:message(), #hstate{}) -> ok.
 track_message(Msg, #hstate{session_id = SessionId}) ->
     StoreId = session_store_id(SessionId),
-    ok = beam_agent_session_store_core:register_session(StoreId,
+    _ = beam_agent_session_store_core:register_session(StoreId,
                                                          #{adapter => claude}),
     StoredMsg = maybe_tag_session_id(Msg, StoreId),
-    case beam_agent_threads_core:active_thread(StoreId) of
+    _ = case beam_agent_threads_core:active_thread(StoreId) of
         {ok, ThreadId} ->
             beam_agent_threads_core:record_thread_message(StoreId,
                                                            ThreadId,

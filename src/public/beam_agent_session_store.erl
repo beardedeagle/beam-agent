@@ -255,7 +255,7 @@ ok = beam_agent_session_store:register_session(<<"sess_001">>, #{
 })
 ```
 """.
--spec register_session(binary(), map()) -> ok.
+-spec register_session(binary(), map()) -> ok | {error, session_limit_reached}.
 register_session(SessionId, Meta) ->
     beam_agent_session_store_core:register_session(SessionId, Meta).
 
@@ -558,7 +558,8 @@ Also publishes the message via beam_agent_events for live subscribers.
 SessionId is the binary session identifier.
 Message is a beam_agent_core:message() map.
 """.
--spec record_message(binary(), beam_agent_core:message()) -> ok.
+-spec record_message(binary(), beam_agent_core:message()) ->
+    ok | {error, message_limit_reached}.
 record_message(SessionId, Message) ->
     beam_agent_session_store_core:record_message(SessionId, Message).
 
@@ -571,7 +572,8 @@ in the list, preserving the given order.
 SessionId is the binary session identifier.
 Messages is a list of beam_agent_core:message() maps.
 """.
--spec record_messages(binary(), [beam_agent_core:message()]) -> ok.
+-spec record_messages(binary(), [beam_agent_core:message()]) ->
+    ok | {error, message_limit_reached}.
 record_messages(SessionId, Messages) ->
     beam_agent_session_store_core:record_messages(SessionId, Messages).
 

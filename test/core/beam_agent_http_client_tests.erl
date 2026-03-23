@@ -261,6 +261,83 @@ https_client_allows_explicit_insecure_tls_opt_in_test() ->
     beam_agent_http_client:close(Pid).
 
 %%====================================================================
+%% M1: HTTP timeout defaults
+%%====================================================================
+
+default_timeout_is_30000_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999, #{}),
+    State = sys:get_state(Pid),
+    %% element() indices (element 1 is the record tag 'state'):
+    %% 2=owner,3=owner_mon,4=base_url,5=ssl_opts,
+    %% 6=timeout,7=connect_timeout,8=max_body_size,9=pending,10=body_sizes
+    ?assertEqual(30000, element(6, State)),
+    beam_agent_http_client:close(Pid).
+
+default_connect_timeout_is_10000_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999, #{}),
+    State = sys:get_state(Pid),
+    ?assertEqual(10000, element(7, State)),
+    beam_agent_http_client:close(Pid).
+
+custom_timeout_is_respected_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999,
+        #{timeout => 5000, connect_timeout => 2000}),
+    State = sys:get_state(Pid),
+    ?assertEqual(5000,  element(6, State)),
+    ?assertEqual(2000,  element(7, State)),
+    beam_agent_http_client:close(Pid).
+
+%%====================================================================
+%% M4: Response body size limit defaults
+%%====================================================================
+
+default_max_body_size_is_100mb_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999, #{}),
+    State = sys:get_state(Pid),
+    ?assertEqual(104_857_600, element(8, State)),
+    beam_agent_http_client:close(Pid).
+
+custom_max_body_size_is_respected_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999,
+        #{max_body_size => 1024}),
+    State = sys:get_state(Pid),
+    ?assertEqual(1024, element(8, State)),
+    beam_agent_http_client:close(Pid).
+
+body_sizes_starts_empty_test() ->
+    {ok, Pid} = beam_agent_http_client:open("127.0.0.1", 9999, #{}),
+    State = sys:get_state(Pid),
+    ?assertEqual(#{}, element(10, State)),
+    beam_agent_http_client:close(Pid).
+
+%%====================================================================
+%% M4: Body too large triggers transport_down
+%%====================================================================
+
+body_too_large_triggers_transport_down_test() ->
+    {ok, Port, LSock} = listen(),
+    %% Respond with a body larger than our 10-byte limit.
+    %% We send a 50-byte body; the client's limit is 10 bytes.
+    LargeBody = binary:copy(<<"x">>, 50),
+    spawn_responder(LSock, 200, <<"application/octet-stream">>, LargeBody),
+    try
+        {ok, Pid} = beam_agent_http_client:open("127.0.0.1", Port,
+            #{max_body_size => 10}),
+        receive {transport_up, Pid, http} -> ok after 2000 -> error(timeout) end,
+
+        _Ref = beam_agent_http_client:get(Pid, <<"/large">>, []),
+
+        receive
+            {transport_down, Pid, {body_too_large, _Size}} -> ok
+        after 5000 ->
+            error(no_body_too_large)
+        end,
+        beam_agent_http_client:close(Pid)
+    after
+        gen_tcp:close(LSock)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

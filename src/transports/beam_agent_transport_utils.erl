@@ -42,7 +42,8 @@ default_tls_opts(Host) ->
     [{verify, verify_peer},
      {cacerts, public_key:cacerts_get()},
      {depth, 4},
-     {server_name_indication, Host}].
+     {server_name_indication, Host},
+     {versions, ['tlsv1.2', 'tlsv1.3']}].
 
 -spec merge_tls_opt(term(), list()) -> list().
 merge_tls_opt(Opt, Acc) when is_tuple(Opt), tuple_size(Opt) >= 2 ->
@@ -59,6 +60,12 @@ has_unsafe_tls_opt(Opts) ->
         ({verify, verify_none}) -> true;
         ({cacerts, []}) -> true;
         ({server_name_indication, disable}) -> true;
+        ({versions, Versions}) ->
+            lists:any(fun
+                ('tlsv1.2') -> false;
+                ('tlsv1.3') -> false;
+                (_) -> true
+            end, Versions);
         (_) -> false
     end, Opts).
 

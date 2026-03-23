@@ -389,7 +389,9 @@ direct_write(delete_all_objects, Table, _Arg) ->
 direct_write(update_counter, Table, {Key, UpdateOp}) ->
     ets:update_counter(Table, Key, UpdateOp);
 direct_write(update_counter, Table, {Key, UpdateOp, Default}) ->
-    ets:update_counter(Table, Key, UpdateOp, Default).
+    ets:update_counter(Table, Key, UpdateOp, Default);
+direct_write(select_replace, Table, MatchSpec) ->
+    ets:select_replace(Table, MatchSpec).
 
 %%--------------------------------------------------------------------
 %% Internal: Cleanup

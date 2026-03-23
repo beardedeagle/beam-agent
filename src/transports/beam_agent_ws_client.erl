@@ -31,7 +31,8 @@
     buffer     = <<>> :: binary(),
     frag_state :: beam_agent_ws_frame:frag_state(),
     phase      :: connecting | upgrading | open | ws_open | closing,
-    max_frame  :: pos_integer()
+    max_frame   :: pos_integer(),
+    max_message :: pos_integer()
 }).
 
 %% RFC 6455 Section 4.2.2 magic GUID
@@ -39,6 +40,9 @@
 
 %% Default max frame payload: 64 MB
 -define(DEFAULT_MAX_FRAME, 67108864).
+
+%% Default max assembled message: 256 MB (4x max_frame)
+-define(DEFAULT_MAX_MESSAGE, 268435456).
 
 %% Connect timeout: 30 seconds
 -define(CONNECT_TIMEOUT, 30000).
@@ -90,19 +94,21 @@ init({Owner, Host, Port, Opts}) ->
     UseTls = maps:get(transport, Opts, tcp) =:= tls orelse
              maps:get(scheme, Opts, <<"wss">>) =:= <<"wss">>,
     Transport = case UseTls of true -> ssl; false -> gen_tcp end,
-    MaxFrame = maps:get(max_frame_size, Opts, ?DEFAULT_MAX_FRAME),
+    MaxFrame   = maps:get(max_frame_size,   Opts, ?DEFAULT_MAX_FRAME),
+    MaxMessage = maps:get(max_message_size, Opts, ?DEFAULT_MAX_MESSAGE),
     TlsOpts = maps:get(tls_opts, Opts, []),
     case validate_tls_opts(UseTls, Host, TlsOpts, maps:get(allow_insecure_tls, Opts, false)) of
         {ok, ValidatedTls} ->
             State = #state{
-                owner      = Owner,
-                owner_mon  = MonRef,
-                transport  = Transport,
-                host       = Host,
-                port       = Port,
-                frag_state = undefined,
-                phase      = connecting,
-                max_frame  = MaxFrame
+                owner       = Owner,
+                owner_mon   = MonRef,
+                transport   = Transport,
+                host        = Host,
+                port        = Port,
+                frag_state  = undefined,
+                phase       = connecting,
+                max_frame   = MaxFrame,
+                max_message = MaxMessage
             },
             %% Connect asynchronously via self-message
             self() ! {do_connect, UseTls, ValidatedTls},
@@ -258,11 +264,12 @@ terminate(_Reason, #state{socket = Socket, transport = Transport}) ->
     {noreply, #state{}} | {stop, term(), #state{}}.
 handle_socket_data(Data, #state{buffer = Buffer,
                                 max_frame = MaxFrame,
+                                max_message = MaxMessage,
                                 frag_state = FragState,
                                 transport = Transport,
                                 socket = Socket} = State) ->
     Combined = <<Buffer/binary, Data/binary>>,
-    case beam_agent_ws_frame:decode(Combined, MaxFrame, FragState) of
+    case beam_agent_ws_frame:decode(Combined, MaxFrame, MaxMessage, FragState) of
         {ok, Frames, Remaining, NewFrag} ->
             State1 = dispatch_frames(Frames,
                          State#state{buffer     = Remaining,

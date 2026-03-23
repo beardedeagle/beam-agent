@@ -6,6 +6,7 @@
     encode_close/2,
     decode/2,
     decode/3,
+    decode/4,
     mask/2
 ]).
 
@@ -24,7 +25,8 @@
 
 -type frag_state() ::
     undefined |
-    {non_neg_integer(), [binary()]}.
+    {non_neg_integer(), non_neg_integer(), [binary()]}.
+    %% {OrigOpcode, AccumulatedBytes, Fragments}
 
 %%====================================================================
 %% Opcodes
@@ -74,6 +76,7 @@ encode_close(Code, Reason) ->
     fragmented_control_frame |
     frame_too_large |
     interleaved_data_frame |
+    message_too_large |
     server_frame_masked |
     unexpected_continuation |
     {reserved_opcode, 1..255} |
@@ -90,12 +93,26 @@ Decode frames from a buffer, carrying fragmentation state across calls.
 
 Returns `{ok, Frames, Remaining, NewFragState}` on success, where
 `Remaining` is unconsumed bytes and `NewFragState` tracks any
-in-progress fragmented message.
+in-progress fragmented message. MaxMessageSize defaults to
+MaxFrameSize * 16.
 """.
 -spec decode(binary(), pos_integer(), frag_state()) ->
     {ok, [frame()], binary(), frag_state()} | {error, decode_error()}.
 decode(Buffer, MaxFrameSize, FragState) ->
-    decode_loop(Buffer, MaxFrameSize, FragState, []).
+    decode(Buffer, MaxFrameSize, MaxFrameSize * 16, FragState).
+
+-doc """
+Decode frames from a buffer, carrying fragmentation state across calls.
+
+Returns `{ok, Frames, Remaining, NewFragState}` on success, where
+`Remaining` is unconsumed bytes and `NewFragState` tracks any
+in-progress fragmented message. MaxMessageSize bounds the total
+assembled size of a fragmented message.
+""".
+-spec decode(binary(), pos_integer(), pos_integer(), frag_state()) ->
+    {ok, [frame()], binary(), frag_state()} | {error, decode_error()}.
+decode(Buffer, MaxFrameSize, MaxMessageSize, FragState) ->
+    decode_loop(Buffer, MaxFrameSize, MaxMessageSize, FragState, []).
 
 %%====================================================================
 %% Masking (Section 5.3)
@@ -164,16 +181,16 @@ mask_tail(<<>>, _K1, _K2, _K3, _K4, _I, Acc) ->
 %% Internal: decoding helpers
 %%====================================================================
 
--spec decode_loop(binary(), pos_integer(), frag_state(), [frame()]) ->
+-spec decode_loop(binary(), pos_integer(), pos_integer(), frag_state(), [frame()]) ->
     {ok, [frame()], binary(), frag_state()} | {error, term()}.
-decode_loop(Buffer, MaxSize, FragState, Acc) ->
+decode_loop(Buffer, MaxSize, MaxMsgSize, FragState, Acc) ->
     case decode_one(Buffer, MaxSize) of
         {ok, {Fin, Opcode, Payload}, Rest} ->
-            case assemble(Fin, Opcode, Payload, FragState) of
+            case assemble(Fin, Opcode, Payload, FragState, MaxMsgSize) of
                 {frame, Frame, NewFrag} ->
-                    decode_loop(Rest, MaxSize, NewFrag, [Frame | Acc]);
+                    decode_loop(Rest, MaxSize, MaxMsgSize, NewFrag, [Frame | Acc]);
                 {continue, NewFrag} ->
-                    decode_loop(Rest, MaxSize, NewFrag, Acc);
+                    decode_loop(Rest, MaxSize, MaxMsgSize, NewFrag, Acc);
                 {error, _} = Err ->
                     Err
             end;
@@ -237,31 +254,45 @@ extract(Fin, Op, Len, Rest, MaxSize, _Rsv) ->
 %% Internal: fragmentation assembly
 %%====================================================================
 
--spec assemble(0 | 1, non_neg_integer(), binary(), frag_state()) ->
+-spec assemble(0 | 1, non_neg_integer(), binary(), frag_state(), pos_integer()) ->
     {frame, frame(), frag_state()} |
     {continue, frag_state()} |
     {error, term()}.
 %% Control frames — never fragmented, don't affect frag state.
-assemble(1, Op, Payload, FragState) when Op >= 8 ->
+assemble(1, Op, Payload, FragState, _MaxMsgSize) when Op >= 8 ->
     {frame, make_frame(Op, Payload), FragState};
 %% Complete unfragmented data frame.
-assemble(1, Op, Payload, undefined) when Op > 0, Op < 8 ->
+assemble(1, Op, Payload, undefined, _MaxMsgSize) when Op > 0, Op < 8 ->
     {frame, make_frame(Op, Payload), undefined};
 %% Start of fragmented message.
-assemble(0, Op, Payload, undefined) when Op > 0, Op < 8 ->
-    {continue, {Op, [Payload]}};
+assemble(0, Op, Payload, undefined, MaxMsgSize) when Op > 0, Op < 8 ->
+    Size = byte_size(Payload),
+    case Size > MaxMsgSize of
+        true  -> {error, message_too_large};
+        false -> {continue, {Op, Size, [Payload]}}
+    end;
 %% Continuation frame (middle).
-assemble(0, ?OP_CONT, Payload, {OrigOp, Acc}) ->
-    {continue, {OrigOp, [Payload | Acc]}};
+assemble(0, ?OP_CONT, Payload, {OrigOp, AccSize, Acc}, MaxMsgSize) ->
+    NewSize = AccSize + byte_size(Payload),
+    case NewSize > MaxMsgSize of
+        true  -> {error, message_too_large};
+        false -> {continue, {OrigOp, NewSize, [Payload | Acc]}}
+    end;
 %% Final continuation frame.
-assemble(1, ?OP_CONT, Payload, {OrigOp, Acc}) ->
-    Complete = iolist_to_binary(lists:reverse([Payload | Acc])),
-    {frame, make_frame(OrigOp, Complete), undefined};
+assemble(1, ?OP_CONT, Payload, {OrigOp, AccSize, Acc}, MaxMsgSize) ->
+    NewSize = AccSize + byte_size(Payload),
+    case NewSize > MaxMsgSize of
+        true ->
+            {error, message_too_large};
+        false ->
+            Complete = iolist_to_binary(lists:reverse([Payload | Acc])),
+            {frame, make_frame(OrigOp, Complete), undefined}
+    end;
 %% New data frame while a fragmented message is in progress.
-assemble(_, Op, _Payload, {_, _}) when Op > 0, Op < 8 ->
+assemble(_, Op, _Payload, {_, _, _}, _MaxMsgSize) when Op > 0, Op < 8 ->
     {error, interleaved_data_frame};
 %% Continuation frame with no fragmented message in progress.
-assemble(_, ?OP_CONT, _Payload, undefined) ->
+assemble(_, ?OP_CONT, _Payload, undefined, _MaxMsgSize) ->
     {error, unexpected_continuation}.
 
 -spec make_frame(1 | 2 | 8 | 9 | 10, binary()) ->

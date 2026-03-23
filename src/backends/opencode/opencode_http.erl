@@ -2,6 +2,7 @@
 -moduledoc false.
 -export([parse_base_url/1,
          build_path/2,
+         build_path_with_segment/3,
          auth_headers/1,
          common_headers/2,
          encode_basic_auth/2]).
@@ -34,6 +35,18 @@ parse_base_url(Url) when is_binary(Url) ->
 -spec build_path(binary(), iodata()) -> binary().
 build_path(BasePath, Endpoint) ->
     iolist_to_binary([BasePath, Endpoint]).
+
+-doc "Build a URL path with a percent-encoded dynamic segment appended.
+Use this instead of build_path/2 whenever a dynamic value (e.g. a session
+ID or model name received from user input or a remote server) is appended
+as a path segment. The segment is encoded via uri_string:quote/1, which
+encodes all characters not permitted in a path segment per RFC 3986.".
+-spec build_path_with_segment(binary(), iodata(), binary()) -> binary().
+build_path_with_segment(BasePath, Endpoint, Segment)
+  when is_binary(BasePath), is_binary(Segment) ->
+    Encoded = uri_string:quote(Segment),
+    iolist_to_binary([BasePath, Endpoint, "/", Encoded]).
+
 -spec auth_headers(none | {basic, binary()}) -> [{binary(), binary()}].
 auth_headers(none) ->
     [];

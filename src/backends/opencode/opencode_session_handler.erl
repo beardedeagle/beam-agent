@@ -587,11 +587,12 @@ normalize_sse_event(SseEvent) ->
     Payload = case RawData of
         <<>> -> #{};
         Json ->
-            try json:decode(Json)
-            catch _:_ ->
-                logger:warning("OpenCode: failed to decode SSE event JSON: ~p",
-                               [Json]),
-                #{}
+            case beam_agent_json:safe_decode_object(Json) of
+                {ok, Map} -> Map;
+                {error, _} ->
+                    logger:warning("OpenCode: failed to decode SSE event JSON: ~p",
+                                   [Json]),
+                    #{}
             end
     end,
     opencode_protocol:normalize_event(SseEvent#{data => Payload}).
@@ -1327,10 +1328,10 @@ fire_hook(Event, Context,
 -spec track_message(beam_agent_core:message(), #hstate{}) -> ok.
 track_message(Msg, #hstate{} = HState) ->
     StoreId = session_store_id(HState),
-    ok = beam_agent_session_store_core:register_session(
+    _ = beam_agent_session_store_core:register_session(
              StoreId, #{adapter => opencode}),
     StoredMsg = maybe_tag_session_id(Msg, StoreId),
-    case beam_agent_threads_core:active_thread(StoreId) of
+    _ = case beam_agent_threads_core:active_thread(StoreId) of
         {ok, ThreadId} ->
             beam_agent_threads_core:record_thread_message(
                 StoreId, ThreadId, StoredMsg);

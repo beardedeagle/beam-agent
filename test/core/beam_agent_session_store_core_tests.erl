@@ -434,3 +434,74 @@ message_count_isolated_per_session_test() ->
     ?assertEqual(2, beam_agent_session_store_core:message_count(SId1)),
     ?assertEqual(1, beam_agent_session_store_core:message_count(SId2)),
     beam_agent_session_store_core:clear().
+
+%%====================================================================
+%% Session and message limit tests
+%%====================================================================
+
+session_limit_allows_under_limit_test() ->
+    beam_agent_session_store_core:ensure_tables(),
+    ok = application:set_env(beam_agent, max_sessions, 3),
+    ok = beam_agent_session_store_core:register_session(<<"lim-s1">>, #{adapter => claude}),
+    ok = beam_agent_session_store_core:register_session(<<"lim-s2">>, #{adapter => claude}),
+    ok = beam_agent_session_store_core:register_session(<<"lim-s3">>, #{adapter => claude}),
+    application:unset_env(beam_agent, max_sessions),
+    beam_agent_session_store_core:clear().
+
+session_limit_reached_test() ->
+    beam_agent_session_store_core:ensure_tables(),
+    ok = application:set_env(beam_agent, max_sessions, 2),
+    ok = beam_agent_session_store_core:register_session(<<"lim-r1">>, #{adapter => claude}),
+    ok = beam_agent_session_store_core:register_session(<<"lim-r2">>, #{adapter => claude}),
+    ?assertEqual({error, session_limit_reached},
+        beam_agent_session_store_core:register_session(<<"lim-r3">>, #{adapter => claude})),
+    application:unset_env(beam_agent, max_sessions),
+    beam_agent_session_store_core:clear().
+
+message_limit_allows_under_limit_test() ->
+    SId = <<"msg-lim-under-session">>,
+    ok = application:set_env(beam_agent, max_messages_per_session, 3),
+    beam_agent_session_store_core:register_session(SId, #{adapter => claude}),
+    ok = beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"a">>}),
+    ok = beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"b">>}),
+    ok = beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"c">>}),
+    application:unset_env(beam_agent, max_messages_per_session),
+    beam_agent_session_store_core:clear().
+
+message_limit_reached_test() ->
+    SId = <<"msg-lim-reached-session">>,
+    ok = application:set_env(beam_agent, max_messages_per_session, 2),
+    beam_agent_session_store_core:register_session(SId, #{adapter => claude}),
+    ok = beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"a">>}),
+    ok = beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"b">>}),
+    ?assertEqual({error, message_limit_reached},
+        beam_agent_session_store_core:record_message(SId, #{type => text, text => <<"c">>})),
+    application:unset_env(beam_agent, max_messages_per_session),
+    beam_agent_session_store_core:clear().
+
+session_limit_infinity_allows_growth_test() ->
+    beam_agent_session_store_core:ensure_tables(),
+    ok = application:set_env(beam_agent, max_sessions, infinity),
+    lists:foreach(fun(I) ->
+        SId = iolist_to_binary([<<"inf-s">>, integer_to_binary(I)]),
+        ok = beam_agent_session_store_core:register_session(SId, #{adapter => claude})
+    end, lists:seq(1, 20)),
+    application:unset_env(beam_agent, max_sessions),
+    beam_agent_session_store_core:clear().
+
+message_limit_infinity_allows_growth_test() ->
+    SId = <<"msg-lim-inf-session">>,
+    ok = application:set_env(beam_agent, max_messages_per_session, infinity),
+    beam_agent_session_store_core:register_session(SId, #{adapter => claude}),
+    lists:foreach(fun(I) ->
+        ok = beam_agent_session_store_core:record_message(SId,
+            #{type => text, text => integer_to_binary(I)})
+    end, lists:seq(1, 20)),
+    application:unset_env(beam_agent, max_messages_per_session),
+    beam_agent_session_store_core:clear().
+
+default_session_limit_test() ->
+    ?assertEqual(10_000, beam_agent_session_store_core:max_sessions()).
+
+default_message_limit_test() ->
+    ?assertEqual(100_000, beam_agent_session_store_core:max_messages_per_session()).

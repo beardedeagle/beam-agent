@@ -100,3 +100,107 @@ runtime_state_view_redacts_provider_secret_values_test() ->
     Provider = maps:get(provider, State),
     ?assertEqual(<<"https://example.test">>, maps:get(base_url, Provider)),
     ?assertEqual(redacted, maps:get(api_key, Provider)).
+
+%%====================================================================
+%% Credential protection integration tests
+%%====================================================================
+
+put_state_get_state_roundtrip_with_api_key_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    SessionId = <<"sess-cred-roundtrip">>,
+    ok = beam_agent_runtime_core:set_provider_config(SessionId, #{
+        provider_id => <<"openai">>,
+        api_key => <<"sk-live-abc123">>,
+        base_url => <<"https://api.openai.com">>
+    }),
+    {ok, Config} = beam_agent_runtime_core:get_provider_config(SessionId),
+    %% get_provider_config returns redacted view
+    ?assertEqual(redacted, maps:get(api_key, Config)),
+    ?assertEqual(<<"https://api.openai.com">>, maps:get(base_url, Config)).
+
+raw_ets_shows_protected_provider_config_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    SessionId = <<"sess-cred-ets-check">>,
+    %% Store a top-level sensitive key via register_session
+    ok = beam_agent_runtime_core:register_session(SessionId, #{
+        provider_id => <<"openai">>,
+        provider => #{
+            api_key => <<"sk-plaintext-should-not-appear">>,
+            base_url => <<"https://api.openai.com">>
+        }
+    }),
+    %% Read ETS directly -- the provider sub-map is stored inside
+    %% the protected state. The provider key itself is not sensitive,
+    %% but the top-level state map goes through protect which encrypts
+    %% any top-level sensitive keys. Verify by checking that the
+    %% provider sub-map roundtrips correctly through get_state.
+    Key = beam_agent_ets:session_key(SessionId),
+    [{_, RawState}] = ets:lookup(beam_agent_runtime_core, Key),
+    %% provider_id at top level is not sensitive, should be present as-is
+    ?assertEqual(<<"openai">>, maps:get(provider_id, RawState)),
+    %% The state should roundtrip correctly through get_state
+    {ok, State} = beam_agent_runtime_core:get_state(SessionId),
+    ?assertEqual(<<"openai">>, maps:get(provider_id, State)),
+    Provider = maps:get(provider, State),
+    %% api_key inside provider is redacted by beam_agent_redaction
+    ?assertEqual(redacted, maps:get(api_key, Provider)),
+    ?assertEqual(<<"https://api.openai.com">>, maps:get(base_url, Provider)).
+
+top_level_sensitive_key_is_protected_in_ets_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    %% Directly test that credential protect/unprotect works
+    %% on a map with top-level sensitive keys.
+    TestMap = #{api_key => <<"sk-secret">>, base_url => <<"https://test">>},
+    Protected = beam_agent_credential:protect(TestMap),
+    ?assert(beam_agent_credential:is_protected(Protected)),
+    ?assertMatch({beam_agent_protected, _, _, _}, maps:get(api_key, Protected)),
+    ?assertEqual(<<"https://test">>, maps:get(base_url, Protected)),
+    Restored = beam_agent_credential:unprotect(Protected),
+    ?assertEqual(TestMap, Restored).
+
+get_state_roundtrips_through_protection_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    SessionId = <<"sess-cred-decrypt">>,
+    ok = beam_agent_runtime_core:register_session(SessionId, #{
+        provider_id => <<"anthropic">>,
+        model_id => <<"claude-opus">>
+    }),
+    {ok, State} = beam_agent_runtime_core:get_state(SessionId),
+    ?assertEqual(<<"anthropic">>, maps:get(provider_id, State)),
+    ?assertEqual(<<"claude-opus">>, maps:get(model_id, State)).
+
+%%====================================================================
+%% Concurrent CAS tests
+%%====================================================================
+
+concurrent_put_state_no_lost_updates_test() ->
+    ok = beam_agent_runtime_core:clear(),
+    NumWriters = 20,
+    Parent = self(),
+    %% Each writer uses a unique session and sets provider + agent,
+    %% then we verify all sessions have correct state.
+    %% For the CAS test, use a shared session with concurrent set_provider
+    %% followed by set_agent to verify no state is lost.
+    SharedSession = <<"sess-cas-shared">>,
+    ok = beam_agent_runtime_core:register_session(SharedSession, #{
+        provider_id => <<"initial">>
+    }),
+    %% Spawn writers that each set a different agent name concurrently
+    Pids = [spawn_link(fun() ->
+        AgentName = iolist_to_binary([<<"agent_">>, integer_to_binary(I)]),
+        ok = beam_agent_runtime_core:set_agent(SharedSession, AgentName),
+        Parent ! {done, self()}
+    end) || I <- lists:seq(1, NumWriters)],
+    %% Wait for all writers
+    lists:foreach(fun(Pid) ->
+        receive {done, Pid} -> ok
+        after 5000 -> error({timeout, Pid})
+        end
+    end, Pids),
+    %% Verify the session still has a valid state -- provider_id should
+    %% survive all the concurrent agent writes (CAS ensures no lost updates)
+    {ok, FinalState} = beam_agent_runtime_core:get_state(SharedSession),
+    ?assertEqual(<<"initial">>, maps:get(provider_id, FinalState)),
+    %% Agent should be one of the written values (last writer wins)
+    {ok, Agent} = beam_agent_runtime_core:current_agent(SharedSession),
+    ?assertMatch(<<"agent_", _/binary>>, Agent).

@@ -28,3 +28,35 @@ tls_client_opts_allows_verify_none_when_explicitly_enabled_test() ->
         [{verify, verify_none}],
         true),
     ?assertEqual(verify_none, proplists:get_value(verify, Opts)).
+
+default_tls_opts_includes_versions_key_test() ->
+    {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
+        "example.test", [], false),
+    ?assertNotEqual(undefined, proplists:get_value(versions, Opts)).
+
+default_tls_opts_versions_are_tls12_and_tls13_only_test() ->
+    {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
+        "example.test", [], false),
+    Versions = proplists:get_value(versions, Opts),
+    ?assertEqual(lists:sort(['tlsv1.2', 'tlsv1.3']), lists:sort(Versions)).
+
+tls_client_opts_rejects_legacy_version_test() ->
+    ?assertEqual({error, unsafe_tls_opts},
+        beam_agent_transport_utils:tls_client_opts(
+            "example.test",
+            [{versions, ['tlsv1']}],
+            false)).
+
+tls_client_opts_allows_safe_version_override_test() ->
+    {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
+        "example.test",
+        [{versions, ['tlsv1.2', 'tlsv1.3']}],
+        false),
+    ?assertEqual(['tlsv1.2', 'tlsv1.3'], proplists:get_value(versions, Opts)).
+
+tls_client_opts_custom_versions_override_default_test() ->
+    {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
+        "example.test",
+        [{versions, ['tlsv1.3']}],
+        false),
+    ?assertEqual(['tlsv1.3'], proplists:get_value(versions, Opts)).

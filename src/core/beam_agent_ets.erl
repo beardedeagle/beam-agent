@@ -58,6 +58,7 @@ beam_agent_ets:ensure_table(?TABLE, [set, named_table,
     delete_all_objects/1,
     update_counter/3,
     update_counter/4,
+    select_replace/2,
 
     %% Read operations (always direct — no proxy needed)
     lookup/2,
@@ -171,6 +172,15 @@ update_counter(Table, Key, UpdateOp, Default) ->
         false -> ets:update_counter(Table, Key, UpdateOp, Default);
         true  -> beam_agent_table_owner:write_proxy_sync(
                      update_counter, Table, {Key, UpdateOp, Default})
+    end.
+
+-doc "Atomically replace matching records. Proxied in hardened mode.".
+-spec select_replace(atom(), ets:match_spec()) -> non_neg_integer().
+select_replace(Table, MatchSpec) ->
+    case needs_proxy(Table) of
+        false -> ets:select_replace(Table, MatchSpec);
+        true  -> beam_agent_table_owner:write_proxy_sync(
+                     select_replace, Table, MatchSpec)
     end.
 
 %%--------------------------------------------------------------------
