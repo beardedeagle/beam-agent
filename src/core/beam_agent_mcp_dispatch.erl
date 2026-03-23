@@ -550,12 +550,16 @@ handle_initialize(Id, Params,
                         Id,
                         beam_agent_mcp_protocol:error_invalid_request(),
                         ErrMsg),
-                    {Resp, State#{error_info => {unsupported_protocol_version,
+                    {Resp, State#{lifecycle => error,
+                                  error_info => {unsupported_protocol_version,
                                                  PeerVersion}}}
             end
     end.
 
-do_initialize(Id, Params,  NegotiatedVersion,
+-spec do_initialize(beam_agent_mcp_protocol:request_id(), map(),
+                    beam_agent_mcp_protocol:protocol_version(),
+                    dispatch_state()) -> dispatch_result().
+do_initialize(Id, Params, NegotiatedVersion,
               #{server_info := ServerInfo,
                 server_capabilities := ServerCaps} = State) ->
     ClientCaps = decode_client_capabilities(

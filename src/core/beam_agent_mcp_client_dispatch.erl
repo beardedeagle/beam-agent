@@ -836,6 +836,10 @@ handle_initialize_response(Id, Result,
             end
     end.
 
+-spec do_initialize_response(beam_agent_mcp_protocol:request_id(), map(),
+                             beam_agent_mcp_protocol:protocol_version(),
+                             beam_agent_mcp_protocol:client_capabilities(),
+                             client_state()) -> client_result().
 do_initialize_response(Id, Result, NegotiatedVersion, ClientCaps, State) ->
     ServerCaps = decode_server_capabilities(
                      maps:get(<<"capabilities">>, Result, #{})),

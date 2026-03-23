@@ -161,7 +161,7 @@ initialize_rejects_unsupported_server_version_test() ->
     ?assertEqual(error,
                  beam_agent_mcp_client_dispatch:lifecycle_state(ErrState)),
     ?assertEqual({unsupported_protocol_version, <<"2024-11-05">>},
-                 maps:get(error_info, ErrState)).
+                 beam_agent_mcp_client_dispatch:error_info(ErrState)).
 
 initialize_accepts_missing_server_version_test() ->
     State = make_state(),

@@ -666,8 +666,10 @@ initialize_rejects_unsupported_version_test() ->
     ?assert(maps:is_key(<<"error">>, Resp)),
     ?assertEqual(-32600, maps:get(<<"code">>,
                                    maps:get(<<"error">>, Resp))),
+    ?assertEqual(error,
+                 beam_agent_mcp_dispatch:lifecycle_state(NewState)),
     ?assertEqual({unsupported_protocol_version, <<"2024-11-05">>},
-                 maps:get(error_info, NewState)).
+                 beam_agent_mcp_dispatch:error_info(NewState)).
 
 initialize_accepts_missing_version_test() ->
     %% A client that omits protocolVersion should still succeed (lenient).
