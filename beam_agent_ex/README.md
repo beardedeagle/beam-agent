@@ -26,15 +26,32 @@ The Erlang `:beam_agent` module works from Elixir, but this wrapper provides:
 | Module | Purpose |
 |--------|---------|
 | `BeamAgent` | Canonical session lifecycle/query surface plus wire utilities |
-| `BeamAgent.Runtime` | Shared provider and default-agent runtime state |
-| `BeamAgent.Catalog` | Shared tools/skills/plugins/agents accessors |
+| `BeamAgent.Account` | Account lifecycle operations — login, logout, rate limits, and account info |
+| `BeamAgent.Apps` | App and project management — listing, initializing, logging, and app modes |
+| `BeamAgent.Artifacts` | Durable runtime outputs — plans, diffs, reviews, summaries, and transcript snapshots |
+| `BeamAgent.Audit` | Durable audit records for policy decisions and higher-level control actions |
 | `BeamAgent.Capabilities` | Support-level / implementation / fidelity introspection |
-| `BeamAgent.Raw` | Explicit backend-native escape hatch |
-| `BeamAgent.MCP` | MCP 2025-06-18 protocol, server/client dispatch, tool registry, and transports |
-| `BeamAgent.Hooks` | SDK lifecycle hooks (pre/post tool use, stop, etc.) |
+| `BeamAgent.Catalog` | Shared tools/skills/plugins/agents accessors |
+| `BeamAgent.Config` | Configuration read/write — individual values, batches, and external agent config import |
 | `BeamAgent.Content` | Content block / flat message conversion |
-| `BeamAgent.Telemetry` | Telemetry event helpers |
+| `BeamAgent.Context` | Context pressure reporting and caller-driven compaction |
+| `BeamAgent.File` | File discovery and inspection — text search, file search, symbol search, and VCS status |
+| `BeamAgent.Hooks` | SDK lifecycle hooks (pre/post tool use, stop, etc.) |
+| `BeamAgent.Journal` | Durable append-only event journal for replay of canonical domain events |
+| `BeamAgent.MCP` | MCP 2025-06-18 protocol, server/client dispatch, tool registry, and transports |
+| `BeamAgent.Memory` | Durable cross-session facts and notes with lexical recall |
+| `BeamAgent.Orchestrator` | Process-free parent-child execution with cross-session lineage |
+| `BeamAgent.Policy` | Reusable allow/deny policy profiles with deterministic, deny-wins evaluation |
+| `BeamAgent.Provider` | LLM provider and sub-agent management — selection, OAuth, and multi-provider routing |
+| `BeamAgent.Raw` | Explicit backend-native escape hatch |
+| `BeamAgent.Routing` | Backend routing by policy — sticky, round-robin, failover, and capability-first |
+| `BeamAgent.Routines` | Durable one-shot and interval job records with caller-driven scheduling |
+| `BeamAgent.Runs` | Durable run and step lifecycle scoped to sessions, threads, and parent runs |
+| `BeamAgent.Runtime` | Shared provider and default-agent runtime state |
+| `BeamAgent.Search` | Fuzzy file search — one-shot and stateful sessions with cached listings |
 | `BeamAgent.SessionStore` | Universal session history, fork, revert, share, summarize |
+| `BeamAgent.Skills` | Skill lifecycle — listing, exporting, and enabling/disabling local and remote skills |
+| `BeamAgent.Telemetry` | Telemetry event helpers |
 | `BeamAgent.Threads` | Universal thread start/resume/read/archive/rollback |
 | `BeamAgent.Todo` | Todo extraction and summary helpers |
 | `ClaudeEx` / `CodexEx` / `GeminiEx` / `OpencodeEx` / `CopilotEx` | Backend-specific wrappers |

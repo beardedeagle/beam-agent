@@ -25,14 +25,6 @@ defmodule CodexEx do
       {:ok, messages} = CodexEx.query(session, "Follow-up question")
   """
 
-  # Dialyzer infers impractically narrow binary sizes for small status maps
-  # and expands type aliases more aggressively than the spec references.
-  @dialyzer {:nowarn_function, reconnect_mcp_server: 2}
-  @dialyzer {:nowarn_function, toggle_mcp_server: 3}
-  @dialyzer {:nowarn_function, sdk_hook: 2}
-  @dialyzer {:nowarn_function, get_session_messages: 2}
-  @dialyzer {:nowarn_function, extract_todos: 1}
-
   # ── Shared Types ────────────────────────────────────────────────────
 
   @typedoc "Stop reason atoms returned by the backend."
@@ -166,6 +158,14 @@ defmodule CodexEx do
           optional(:since) => integer()
         }
 
+  @typedoc "Message filter options for `get_session_messages/2`."
+  @type message_filter_opts :: %{
+          optional(:include_hidden) => boolean(),
+          optional(:limit) => pos_integer(),
+          optional(:offset) => non_neg_integer(),
+          optional(:types) => [atom()]
+        }
+
   @typedoc "Share state information."
   @type share_info :: %{
           :created_at => integer(),
@@ -185,7 +185,7 @@ defmodule CodexEx do
 
   @typedoc "Hook context map passed to SDK lifecycle hook callbacks."
   @type hook_context :: %{
-          optional(:event) => atom(),
+          required(:event) => atom(),
           optional(:agent_id) => binary(),
           optional(:agent_transcript_path) => binary(),
           optional(:agent_type) => binary(),
@@ -708,7 +708,7 @@ defmodule CodexEx do
   # ── SDK Hook Constructors ──────────────────────────────────────────
 
   @doc "Create an SDK lifecycle hook."
-  @spec sdk_hook(atom(), hook_callback()) :: hook_def()
+  @spec sdk_hook(atom(), hook_callback()) :: %{:event => atom(), :callback => hook_callback()}
   def sdk_hook(event, callback) do
     :beam_agent_hooks_core.hook(event, callback)
   end
@@ -944,7 +944,8 @@ defmodule CodexEx do
   def get_session_messages(session_id), do: :codex_app_server.get_session_messages(session_id)
 
   @doc "Get messages with options."
-  @spec get_session_messages(binary(), map()) :: {:ok, [message()]} | {:error, :not_found}
+  @spec get_session_messages(binary(), message_filter_opts()) ::
+          {:ok, [message()]} | {:error, :not_found}
   def get_session_messages(session_id, opts),
     do: :codex_app_server.get_session_messages(session_id, opts)
 
@@ -1001,12 +1002,14 @@ defmodule CodexEx do
     do: :codex_app_server.set_mcp_servers(session, servers)
 
   @doc "Reconnect a failed MCP server."
-  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec reconnect_mcp_server(pid(), binary()) ::
+          {:ok, %{<<_::48>> => <<_::88>>}} | {:error, :not_found}
   def reconnect_mcp_server(session, server_name),
     do: :codex_app_server.reconnect_mcp_server(session, server_name)
 
   @doc "Enable or disable an MCP server."
-  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, map()} | {:error, :not_found}
+  @spec toggle_mcp_server(pid(), binary(), boolean()) ::
+          {:ok, %{<<_::48>> => <<_::56>>}} | {:error, :not_found}
   def toggle_mcp_server(session, server_name, enabled),
     do: :codex_app_server.toggle_mcp_server(session, server_name, enabled)
 
@@ -1057,7 +1060,7 @@ defmodule CodexEx do
   # ── Todo Extraction ─────────────────────────────────────────────────
 
   @doc "Extract all TodoWrite items from a list of messages."
-  @spec extract_todos([message()]) :: [todo_item()]
+  @spec extract_todos([BeamAgent.message()]) :: [todo_item()]
   defdelegate extract_todos(messages), to: BeamAgent.Todo
 
   @doc "Filter todo items by status."

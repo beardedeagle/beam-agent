@@ -3,8 +3,9 @@
 Symmetric encryption for sensitive credential fields stored in ETS.
 
 Uses AES-256-GCM with a per-node key derived from the BEAM node cookie
-or a configured secret. This prevents casual ets:tab2list reads from
-exposing plaintext API keys.
+via HKDF-SHA256 (RFC 5869). HKDF-Extract produces a pseudorandom key
+from the cookie and a fixed salt, then HKDF-Expand stretches it to the
+required 32 bytes with a purpose-specific info label.
 
 Note: This is defense-in-depth, not a security boundary. Any process
 with access to the node cookie can derive the key. The goal is to
@@ -16,6 +17,9 @@ prevent accidental exposure in logs, crash dumps, and admin UIs.
     unprotect/1,
     is_protected/1
 ]).
+
+-define(KDF_SALT, <<"beam_agent_credential_v1">>).
+-define(KDF_INFO, <<"aes-256-gcm-key">>).
 
 -define(SENSITIVE_KEYS, [api_key, <<"apiKey">>, <<"api_key">>,
                          token, <<"token">>,
@@ -89,8 +93,23 @@ is_sensitive(Key) ->
 
 -spec derive_key() -> binary().
 derive_key() ->
-    Cookie = erlang:get_cookie(),
-    crypto:hash(sha256, atom_to_binary(Cookie, utf8)).
+    case erlang:get_cookie() of
+        nocookie ->
+            logger:warning("beam_agent_credential: deriving key from 'nocookie' — "
+                           "credential encryption provides no protection without "
+                           "a real distribution cookie"),
+            do_derive(nocookie);
+        Cookie ->
+            do_derive(Cookie)
+    end.
+
+-spec do_derive(atom()) -> binary().
+do_derive(Cookie) ->
+    IKM = atom_to_binary(Cookie, utf8),
+    %% HKDF-Extract: PRK = HMAC-SHA256(salt, IKM)
+    PRK = crypto:mac(hmac, sha256, ?KDF_SALT, IKM),
+    %% HKDF-Expand: OKM = HMAC-SHA256(PRK, info || 0x01) truncated to 32 bytes
+    crypto:mac(hmac, sha256, PRK, <<?KDF_INFO/binary, 1>>).
 
 -spec encrypt_value(term()) -> {beam_agent_protected, binary(), binary(), binary()}.
 encrypt_value(Value) ->

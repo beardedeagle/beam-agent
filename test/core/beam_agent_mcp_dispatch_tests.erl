@@ -768,17 +768,20 @@ notification_flood_drops_when_limit_exceeded_test() ->
               <<"method">> => <<"notifications/progress">>,
               <<"params">> => #{}},
 
-    %% First notification: accepted
+    %% First notification: accepted — window count becomes 1
     {noreply, State2} = beam_agent_mcp_dispatch:handle_message(Notif, State1),
-    ?assertEqual(1, maps:get(notification_count, State2)),
+    {Count2, _} = maps:get(notification_window, State2),
+    ?assertEqual(1, Count2),
 
-    %% Second notification: accepted (at limit)
+    %% Second notification: accepted — window count becomes 2
     {noreply, State3} = beam_agent_mcp_dispatch:handle_message(Notif, State2),
-    ?assertEqual(2, maps:get(notification_count, State3)),
+    {Count3, _} = maps:get(notification_window, State3),
+    ?assertEqual(2, Count3),
 
     %% Third notification: dropped (over limit) — count stays at 2
     {noreply, State4} = beam_agent_mcp_dispatch:handle_message(Notif, State3),
-    ?assertEqual(2, maps:get(notification_count, State4)).
+    {Count4, _} = maps:get(notification_window, State4),
+    ?assertEqual(2, Count4).
 
 notification_flood_unlimited_when_zero_test() ->
     %% Default (limit=0) means unlimited.
@@ -791,7 +794,60 @@ notification_flood_unlimited_when_zero_test() ->
         {noreply, S1} = beam_agent_mcp_dispatch:handle_message(Notif, S),
         S1
     end, State, lists:seq(1, 5)),
-    ?assertEqual(5, maps:get(notification_count, State1)).
+    {Count, _} = maps:get(notification_window, State1),
+    ?assertEqual(5, Count).
+
+notification_flood_resets_after_window_expires_test() ->
+    %% Use a 1 ms window so we can test expiry without sleeping.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    Caps = #{tools => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps,
+                 #{max_notifications_per_interval => 2,
+                   notification_interval_ms => 1}),
+    State1 = do_initialize_state(State0),
+
+    Notif = #{<<"jsonrpc">> => <<"2.0">>,
+              <<"method">> => <<"notifications/progress">>,
+              <<"params">> => #{}},
+
+    %% Fill the window: send 2 notifications.
+    {noreply, State2} = beam_agent_mcp_dispatch:handle_message(Notif, State1),
+    {noreply, State3} = beam_agent_mcp_dispatch:handle_message(Notif, State2),
+    {Count3, _} = maps:get(notification_window, State3),
+    ?assertEqual(2, Count3),
+
+    %% Wait for the 1 ms window to expire, then send another notification.
+    %% The counter must reset to 1 (window opened fresh).
+    timer:sleep(5),
+    {noreply, State4} = beam_agent_mcp_dispatch:handle_message(Notif, State3),
+    {Count4, _} = maps:get(notification_window, State4),
+    ?assertEqual(1, Count4).
+
+notification_flood_initialized_bypasses_protection_test() ->
+    %% notifications/initialized must always pass even at limit.
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test">>, <<"1.0">>),
+    Caps = #{tools => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps,
+                 #{max_notifications_per_interval => 1}),
+    %% Drive through initialize so lifecycle = initializing (awaiting initialized).
+    InitMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+                <<"method">> => <<"initialize">>,
+                <<"params">> => #{
+                    <<"protocolVersion">> => <<"2025-06-18">>,
+                    <<"capabilities">> => #{},
+                    <<"clientInfo">> => #{<<"name">> => <<"tc">>,
+                                          <<"version">> => <<"1">>}}},
+    {_Resp, StateInit} = beam_agent_mcp_dispatch:handle_message(InitMsg, State0),
+    %% Inject a fake window that is already full.
+    StateInit2 = StateInit#{notification_window => {1, erlang:monotonic_time(millisecond)}},
+    %% notifications/initialized must still transition to ready.
+    InitedMsg = #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"method">> => <<"notifications/initialized">>},
+    {noreply, StateFinal} = beam_agent_mcp_dispatch:handle_message(
+                                InitedMsg, StateInit2),
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(StateFinal)).
 
 %%====================================================================
 %% Helpers (private to test module)

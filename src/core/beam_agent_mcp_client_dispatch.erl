@@ -205,10 +205,13 @@ layer handles encoding the response into the correct JSON-RPC format.
     handler_state => term(),
     error_info => term(),
     %% Notification flood protection (L4).
-    %% notification_count tracks notifications in the current interval.
-    %% max_notifications_per_interval = 0 means unlimited (default/disabled).
-    notification_count => non_neg_integer(),
-    max_notifications_per_interval => non_neg_integer()
+    %% notification_window tracks {Count, WindowStartMs} for the current
+    %% time window.  max_notifications_per_interval = 0 disables flood
+    %% protection entirely (default).  notification_interval_ms sets the
+    %% window length in milliseconds (default: 60_000).
+    notification_window => {non_neg_integer(), integer()},
+    max_notifications_per_interval => non_neg_integer(),
+    notification_interval_ms => pos_integer()
 }.
 
 -type client_result() ::
@@ -257,9 +260,11 @@ new(ClientInfo, ClientCaps0, Opts)
         next_id => 1,
         pending => #{},
         default_timeout => maps:get(default_timeout, Opts, ?DEFAULT_TIMEOUT),
-        notification_count => 0,
+        notification_window => {0, erlang:monotonic_time(millisecond)},
         max_notifications_per_interval =>
-            maps:get(max_notifications_per_interval, Opts, 0)
+            maps:get(max_notifications_per_interval, Opts, 0),
+        notification_interval_ms =>
+            maps:get(notification_interval_ms, Opts, 60000)
     },
     OptKeys = [handler, handler_state],
     lists:foldl(fun(Key, Acc) ->
@@ -970,23 +975,41 @@ dispatch_roots_list(Id, _Params,
 
 %% Notification flood protection (L4).
 %%
-%% When max_notifications_per_interval > 0, each notification increments
-%% notification_count.  If the count reaches the limit the notification is
-%% dropped with a warning log entry.  The caller is responsible for
-%% periodically resetting notification_count (e.g. via a timer) to
-%% implement the interval window.  Setting max_notifications_per_interval
-%% to 0 (the default) disables flood protection entirely.
+%% When max_notifications_per_interval > 0, a time-window rate limiter is
+%% applied.  The window length is notification_interval_ms (default 60 000 ms).
+%% When the window expires the counter resets automatically on the next
+%% incoming notification — no external timer or reset call is needed.
+%% Setting max_notifications_per_interval to 0 (the default) disables flood
+%% protection entirely.
 dispatch_notification(Method, Params, State) ->
     Max = maps:get(max_notifications_per_interval, State, 0),
-    Count = maps:get(notification_count, State, 0),
-    case Max > 0 andalso Count >= Max of
-        true ->
-            logger:warning("MCP client notification flood: dropping ~s "
-                           "(count=~B, limit=~B)", [Method, Count, Max]),
-            {noreply, State};
+    case Max > 0 of
         false ->
-            State1 = State#{notification_count => Count + 1},
-            dispatch_notification_inner(Method, Params, State1)
+            {Window, _} = maps:get(notification_window, State, {0, 0}),
+            State1 = State#{notification_window => {Window + 1, 0}},
+            dispatch_notification_inner(Method, Params, State1);
+        true ->
+            IntervalMs = maps:get(notification_interval_ms, State, 60000),
+            Now = erlang:monotonic_time(millisecond),
+            {Count, WindowStart} = maps:get(notification_window, State,
+                                            {0, Now}),
+            {WindowCount, NewStart} =
+                case Now - WindowStart >= IntervalMs of
+                    true  -> {0, Now};
+                    false -> {Count, WindowStart}
+                end,
+            case WindowCount >= Max of
+                true ->
+                    logger:warning("MCP client notification flood: dropping ~s "
+                                   "(count=~B, limit=~B, window_ms=~B)",
+                                   [Method, WindowCount, Max, IntervalMs]),
+                    {noreply, State#{notification_window =>
+                                         {WindowCount, NewStart}}};
+                false ->
+                    State1 = State#{notification_window =>
+                                        {WindowCount + 1, NewStart}},
+                    dispatch_notification_inner(Method, Params, State1)
+            end
     end.
 
 -spec dispatch_notification_inner(binary(), map(), client_state()) ->

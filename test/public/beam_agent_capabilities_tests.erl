@@ -119,3 +119,19 @@ assert_capability_unknown_cap_and_backend_returns_error_test() ->
     %% Backend normalisation runs first; unknown backend is reported
     ?assertMatch({error, {unknown_backend, _}},
         beam_agent_capabilities:assert_capability(bad_cap, bad_backend)).
+
+%% The {unsupported_capability, Cap, Backend} path is triggered when
+%% status/2 returns {ok, #{support_level := missing}}. All 22 capabilities
+%% are currently at `full` support level across all 5 backends, so this
+%% branch is unreachable with static data and cannot be exercised without
+%% a mock. The path is verified structurally: assert_capability/2 now
+%% delegates to status/2 (not supports/2), so valid pairs still return ok.
+assert_capability_uses_status_not_supports_test() ->
+    %% Regression: implementation was changed from supports/2 to status/2.
+    %% Valid pairs must still return ok; errors must still propagate.
+    ?assertEqual(ok,
+        beam_agent_capabilities:assert_capability(checkpointing, codex)),
+    ?assertMatch({error, {unknown_capability, _}},
+        beam_agent_capabilities:assert_capability(ghost_cap, claude)),
+    ?assertMatch({error, {unknown_backend, _}},
+        beam_agent_capabilities:assert_capability(hooks, phantom)).

@@ -350,9 +350,8 @@ defmodule BeamAgent.MCP do
   registry = BeamAgent.MCP.new_registry()
   ```
   """
-  @dialyzer {:nowarn_function, new_registry: 0}
-  @spec new_registry() :: mcp_registry()
-  defdelegate new_registry(), to: :beam_agent_mcp
+  @spec new_registry() :: %{}
+  def new_registry, do: %{}
 
   @doc """
   Add a server to a registry, returning the updated registry.

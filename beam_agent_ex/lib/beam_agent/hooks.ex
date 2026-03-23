@@ -229,9 +229,8 @@ defmodule BeamAgent.Hooks do
 
   Returns a new `hook_registry()` map with no registered hooks.
   """
-  @dialyzer {:nowarn_function, new_registry: 0}
-  @spec new_registry() :: hook_registry()
-  defdelegate new_registry(), to: :beam_agent_hooks
+  @spec new_registry() :: %{}
+  def new_registry, do: %{}
 
   @doc """
   Register a single hook in the registry.

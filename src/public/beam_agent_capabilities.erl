@@ -558,6 +558,9 @@ call site rather than a confusing failure inside it.
 ok = beam_agent_capabilities:assert_capability(checkpointing, codex).
 {error, {unknown_capability, bogus}} =
     beam_agent_capabilities:assert_capability(bogus, claude).
+%% When support_level is missing for a known pair:
+%% {error, {unsupported_capability, Cap, Backend}} =
+%%     beam_agent_capabilities:assert_capability(some_cap, some_backend).
 ```
 """.
 -spec assert_capability(capability(), beam_agent_backend:backend() | binary() | atom()) ->
@@ -565,8 +568,10 @@ ok = beam_agent_capabilities:assert_capability(checkpointing, codex).
 assert_capability(Capability, BackendLike) ->
     case beam_agent_backend:normalize(BackendLike) of
         {ok, Backend} ->
-            case supports(Capability, Backend) of
-                {ok, true} ->
+            case status(Capability, Backend) of
+                {ok, #{support_level := missing}} ->
+                    {error, {unsupported_capability, Capability, Backend}};
+                {ok, _} ->
                     ok;
                 {error, _} = Error ->
                     Error
