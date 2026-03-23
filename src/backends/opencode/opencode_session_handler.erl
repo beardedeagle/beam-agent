@@ -1394,14 +1394,21 @@ dispatch_rest_endpoint(_Unknown, _From, _HState) ->
 %% Internal: general helpers
 %%====================================================================
 
--spec decode_json_result(binary()) -> {ok, false | null | true | binary() | [any()] | number() | #{binary() => _}} | {error, decode_failed}.
+-spec decode_json_result(binary()) ->
+    {ok, false | null | true | binary() | [any()] | number() | #{binary() => _}} |
+    {error, decode_failed | {json_too_large, non_neg_integer()}}.
 decode_json_result(<<>>) ->
     {ok, #{}};
 decode_json_result(Body) ->
-    try
-        {ok, json:decode(Body)}
-    catch
-        _:_ -> {error, decode_failed}
+    case byte_size(Body) > beam_agent_json:max_decode_size() of
+        true ->
+            {error, {json_too_large, byte_size(Body)}};
+        false ->
+            try
+                {ok, json:decode(Body)}
+            catch
+                _:_ -> {error, decode_failed}
+            end
     end.
 
 -spec maybe_reply(gen_statem:from() | undefined, term()) -> ok.

@@ -112,6 +112,12 @@ decode_line_invalid_json_test() ->
 decode_line_number_test() ->
     {error, {not_object, _}} = beam_agent_jsonl:decode_line(<<"42">>).
 
+decode_line_rejects_oversized_input_test() ->
+    Max = beam_agent_json:max_decode_size(),
+    Big = binary:copy(<<"{">>, Max + 1),
+    ?assertEqual({error, {json_too_large, Max + 1}},
+        beam_agent_jsonl:decode_line(Big)).
+
 %%====================================================================
 %% EUnit: encode_line/1
 %%====================================================================

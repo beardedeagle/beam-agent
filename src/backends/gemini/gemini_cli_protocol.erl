@@ -68,11 +68,13 @@ normalize_event(#{<<"type">> := <<"tool_result">>,
 normalize_event(#{<<"type">> := <<"tool_result">>,
                   <<"status">> := <<"error">>} =
                     Raw) ->
+    ToolErrContent =
+        maps:get(<<"output">>,
+                 Raw,
+                 maps:get(<<"message">>, Raw, <<"tool_result error">>)),
     #{type => error,
-      content =>
-          maps:get(<<"output">>,
-                   Raw,
-                   maps:get(<<"message">>, Raw, <<"tool_result error">>)),
+      content => ToolErrContent,
+      category => beam_agent_error_core:infer_category(ToolErrContent),
       raw => Raw,
       timestamp => erlang:system_time(millisecond)};
 normalize_event(#{<<"type">> := <<"error">>,
@@ -84,8 +86,10 @@ normalize_event(#{<<"type">> := <<"error">>,
       raw => Raw,
       timestamp => erlang:system_time(millisecond)};
 normalize_event(#{<<"type">> := <<"error">>} = Raw) ->
+    ErrContent = maps:get(<<"message">>, Raw, <<>>),
     #{type => error,
-      content => maps:get(<<"message">>, Raw, <<>>),
+      content => ErrContent,
+      category => beam_agent_error_core:infer_category(ErrContent),
       raw => Raw,
       timestamp => erlang:system_time(millisecond)};
 normalize_event(#{<<"type">> := <<"result">>,
@@ -101,11 +105,13 @@ normalize_event(#{<<"type">> := <<"result">>,
 normalize_event(#{<<"type">> := <<"result">>,
                   <<"status">> := <<"error">>} =
                     Raw) ->
+    ResultErrContent =
+        maps:get(<<"message">>,
+                 Raw,
+                 maps:get(<<"content">>, Raw, <<"result error">>)),
     #{type => error,
-      content =>
-          maps:get(<<"message">>,
-                   Raw,
-                   maps:get(<<"content">>, Raw, <<"result error">>)),
+      content => ResultErrContent,
+      category => beam_agent_error_core:infer_category(ResultErrContent),
       raw => Raw,
       timestamp => erlang:system_time(millisecond)};
 normalize_event(Raw) when is_map(Raw) ->

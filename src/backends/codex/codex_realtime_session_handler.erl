@@ -99,23 +99,30 @@ init_handler(Opts) ->
 handle_data(<<>>, HState) ->
     {ok, [], <<>>, [], HState};
 handle_data(Buffer, HState) ->
-    try json:decode(Buffer) of
-        Json when is_map(Json) ->
-            case maps:get(<<"type">>, Json, <<>>) of
-                <<"response.done">> ->
-                    {Msg, HState1} = handle_response_done(Json, HState),
-                    HState2 = HState1#hstate{output_buffer = <<>>},
-                    {ok, [Msg], <<>>, [], HState2};
+    case byte_size(Buffer) > beam_agent_json:max_decode_size() of
+        true ->
+            logger:warning("codex_realtime: rejecting oversized JSON"
+                           " buffer (~B bytes)", [byte_size(Buffer)]),
+            {ok, [], <<>>, [], HState};
+        false ->
+            try json:decode(Buffer) of
+                Json when is_map(Json) ->
+                    case maps:get(<<"type">>, Json, <<>>) of
+                        <<"response.done">> ->
+                            {Msg, HState1} = handle_response_done(Json, HState),
+                            HState2 = HState1#hstate{output_buffer = <<>>},
+                            {ok, [Msg], <<>>, [], HState2};
+                        _ ->
+                            Messages = codex_realtime_protocol:normalize_server_event(Json),
+                            HState1 = accumulate_output(Messages, HState),
+                            {ok, Messages, <<>>, [], HState1}
+                    end;
                 _ ->
-                    Messages = codex_realtime_protocol:normalize_server_event(Json),
-                    HState1 = accumulate_output(Messages, HState),
-                    {ok, Messages, <<>>, [], HState1}
-            end;
-        _ ->
-            {ok, [], <<>>, [], HState}
-    catch
-        _:_ ->
-            {ok, [], <<>>, [], HState}
+                    {ok, [], <<>>, [], HState}
+            catch
+                _:_ ->
+                    {ok, [], <<>>, [], HState}
+            end
     end.
 
 -spec encode_query(binary(), beam_agent_core:query_opts(), #hstate{}) ->

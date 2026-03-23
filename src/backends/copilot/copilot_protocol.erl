@@ -161,6 +161,7 @@ normalize_event(#{<<"type">> := ToolComplete,
         true ->
             #{type => error,
               content => Content,
+              category => beam_agent_error_core:infer_category(Content),
               error_type => tool_error,
               tool_name => ToolName};
         _ ->
@@ -193,7 +194,10 @@ normalize_event(#{<<"type">> := <<"session.error">>, <<"data">> := Data}) ->
         maps:get(<<"message">>,
                  Data,
                  maps:get(<<"error">>, Data, <<"session error">>)),
-    #{type => error, content => Message, error_type => session_error};
+    #{type => error,
+      content => Message,
+      category => beam_agent_error_core:infer_category(Message),
+      error_type => session_error};
 normalize_event(#{<<"type">> := <<"session.resume">>,
                   <<"data">> := Data}) ->
     #{type => system, subtype => resume, content => Data};
@@ -306,8 +310,10 @@ normalize_event(#{<<"type">> := <<"subagent.completed">>,
                   <<"data">> := Data}) ->
     #{type => system, subtype => subagent_completed, content => Data};
 normalize_event(#{<<"type">> := <<"subagent.failed">>, <<"data">> := Data}) ->
+    SubContent = maps:get(<<"error">>, Data, <<>>),
     #{type => error,
-      content => maps:get(<<"error">>, Data, <<>>),
+      content => SubContent,
+      category => beam_agent_error_core:infer_category(SubContent),
       error_type => subagent_failed};
 normalize_event(#{<<"type">> := <<"subagent.selected">>, <<"data">> := Data}) ->
     #{type => system, subtype => subagent_selected, content => Data};

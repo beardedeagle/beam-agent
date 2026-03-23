@@ -61,6 +61,7 @@
         beam_agent_config_core,
         beam_agent_content_core,
         beam_agent_credential,
+        beam_agent_error_core,
         beam_agent_control_core,
         beam_agent_context_core,
         beam_agent_ets,
