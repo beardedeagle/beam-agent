@@ -2,6 +2,12 @@
 -moduledoc false.
 
 -export([safe_decode_object/1, safe_decode/1, max_decode_size/0]).
+-export_type([json_error/0]).
+
+-type json_error() ::
+    {not_object, term()}
+  | {json_too_large, non_neg_integer()}
+  | {decode_failed, term()}.
 
 %% 50 MB — defense-in-depth limit for inputs without an upstream buffer bound.
 -define(MAX_JSON_DECODE_SIZE, 52_428_800).
@@ -21,7 +27,7 @@ or `{error, {decode_failed, Reason}}` if decoding fails.
 The 50 MB limit is defense-in-depth for call sites that do not have an
 upstream buffer bound (e.g. SSE buffer limit or WS frame limit).
 """.
--spec safe_decode_object(binary()) -> {ok, map()} | {error, term()}.
+-spec safe_decode_object(binary()) -> {ok, map()} | {error, json_error()}.
 safe_decode_object(Bin) when is_binary(Bin), byte_size(Bin) > ?MAX_JSON_DECODE_SIZE ->
     {error, {json_too_large, byte_size(Bin)}};
 safe_decode_object(Bin) when is_binary(Bin) ->
@@ -43,7 +49,7 @@ or `{error, {decode_failed, Reason}}` if decoding fails.
 
 Use `safe_decode_object/1` when the caller requires a JSON object (map).
 """.
--spec safe_decode(binary()) -> {ok, term()} | {error, term()}.
+-spec safe_decode(binary()) -> {ok, term()} | {error, json_error()}.
 safe_decode(Bin) when is_binary(Bin), byte_size(Bin) > ?MAX_JSON_DECODE_SIZE ->
     {error, {json_too_large, byte_size(Bin)}};
 safe_decode(Bin) when is_binary(Bin) ->

@@ -93,8 +93,12 @@ optional fields that vary by type. Common fields present on most messages:
 
 Result messages additionally carry `duration_ms`, `num_turns`,
 `stop_reason_atom`, `usage`, and `total_cost_usd`. Tool-use messages
-carry `tool_name` and `tool_input`. See beam_agent_core for the full
-field reference per message type.
+carry `tool_name` and `tool_input`. Error messages carry `category`
+(a `beam_agent_error_core:error_category()` atom for structured error
+handling), optionally `retry_after` (seconds), and optionally
+`error_type` (backend-specific: `tool_error`, `session_error`,
+`subagent_failed`). See beam_agent_core for the full field reference
+per message type.
 """.
 -type message() :: beam_agent_core:message().
 
