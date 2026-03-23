@@ -10,13 +10,30 @@ and passes it through on each call.
 
 ## Lifecycle
 
-The MCP session progresses through three states:
+The MCP session progresses through five states:
 
   1. `uninitialized` — only `initialize` and `ping` are accepted
   2. `initializing`  — waiting for `notifications/initialized`
   3. `ready`         — all capability-gated methods available
+  4. `error`         — unrecoverable error; only `ping` and `initialize` (re-init)
+  5. `shutting_down` — graceful shutdown in progress; only `ping` accepted
 
-The `handle_message/2` function enforces these rules.
+State transitions:
+
+```
+  uninitialized ──initialize──▸ initializing ──initialized──▸ ready
+       ▴                            │                          │ │
+       │                            │ mark_error               │ │
+       │                            ▾                          │ │
+       └──────── reset ◂──────── error ◂──── mark_error ──────┘ │
+                                                                 │
+                                              shutting_down ◂────┘
+                                              (terminal)      mark_shutting_down
+```
+
+The `handle_message/2` function enforces these rules. The owning process
+(typically a session handler) drives transitions via `mark_error/2`,
+`mark_shutting_down/1`, and `reset/1`.
 
 ## Provider Behaviour
 
@@ -45,6 +62,13 @@ State = beam_agent_mcp_dispatch:new(ServerInfo, ServerCaps, #{
     new/3,
     lifecycle_state/1,
     session_capabilities/1,
+
+    %% Lifecycle transitions
+    mark_error/2,
+    mark_shutting_down/1,
+    reset/1,
+    error_info/1,
+    is_operational/1,
 
     %% Message dispatch
     handle_message/2
@@ -136,7 +160,7 @@ will never be called.
 %% Types
 %%--------------------------------------------------------------------
 
--type lifecycle() :: uninitialized | initializing | ready.
+-type lifecycle() :: uninitialized | initializing | ready | error | shutting_down.
 
 -type dispatch_state() :: #{
     lifecycle := lifecycle(),
@@ -146,7 +170,8 @@ will never be called.
     tool_registry => beam_agent_tool_registry:mcp_registry(),
     handler_timeout => pos_integer(),
     provider => module(),
-    provider_state => term()
+    provider_state => term(),
+    error_info => term()
 }.
 
 -type dispatch_result() :: {map() | noreply, dispatch_state()}.
@@ -204,6 +229,68 @@ session_capabilities(State) ->
     maps:get(session_capabilities, State, undefined).
 
 %%====================================================================
+%% Lifecycle Transitions
+%%====================================================================
+
+-doc """
+Transition the dispatch state to `error`.
+
+Accepts any current lifecycle state. Stores `Reason` for later retrieval
+via `error_info/1`. The owning process should call this when an
+unrecoverable protocol or provider error is detected.
+
+In `error` state, only `ping` and `initialize` (re-init) are accepted.
+""".
+-spec mark_error(term(), dispatch_state()) -> dispatch_state().
+mark_error(Reason, State) ->
+    State#{lifecycle => error, error_info => Reason}.
+
+-doc """
+Transition the dispatch state to `shutting_down`.
+
+This is a terminal state — no further transitions are possible.
+Only `ping` requests are accepted. The owning process should call this
+when initiating a graceful shutdown sequence.
+""".
+-spec mark_shutting_down(dispatch_state()) -> dispatch_state().
+mark_shutting_down(State) ->
+    State#{lifecycle => shutting_down}.
+
+-doc """
+Reset the dispatch state from `error` back to `uninitialized`.
+
+Clears `error_info` and `session_capabilities`, allowing a fresh MCP
+handshake. Raises `{invalid_reset, Lifecycle}` if the current state
+is not `error`.
+""".
+-spec reset(dispatch_state()) -> dispatch_state().
+reset(#{lifecycle := error} = State) ->
+    maps:remove(error_info,
+        maps:remove(session_capabilities,
+            State#{lifecycle => uninitialized}));
+reset(#{lifecycle := Lifecycle}) ->
+    error({invalid_reset, Lifecycle}).
+
+-doc """
+Return the error reason stored when `mark_error/2` was called.
+
+Returns `undefined` if the dispatch is not in `error` state.
+""".
+-spec error_info(dispatch_state()) -> term() | undefined.
+error_info(#{lifecycle := error, error_info := Reason}) -> Reason;
+error_info(_State) -> undefined.
+
+-doc """
+Return `true` if the dispatch is in the `ready` state.
+
+This is a convenience for the owning process to check whether the
+MCP session is fully operational and accepting all methods.
+""".
+-spec is_operational(dispatch_state()) -> boolean().
+is_operational(#{lifecycle := ready}) -> true;
+is_operational(_State) -> false.
+
+%%====================================================================
 %% Message Dispatch
 %%====================================================================
 
@@ -252,12 +339,31 @@ handle_message(RawMsg, State) ->
 dispatch_request(Id, <<"ping">>, _Params, State) ->
     {beam_agent_mcp_protocol:ping_response(Id), State};
 
-%% -- initialize: only in uninitialized state --
+%% -- shutting_down: only ping accepted (handled above), reject all else --
+dispatch_request(Id, _Method, _Params,
+                 #{lifecycle := shutting_down} = State) ->
+    ErrMsg = <<"Server is shutting down">>,
+    {beam_agent_mcp_protocol:error_response(
+         Id, beam_agent_mcp_protocol:error_invalid_request(), ErrMsg),
+     State};
+
+%% -- initialize: allowed in uninitialized and error (re-init) --
 dispatch_request(Id, <<"initialize">>, Params,
                  #{lifecycle := uninitialized} = State) ->
     handle_initialize(Id, Params, State);
+dispatch_request(Id, <<"initialize">>, Params,
+                 #{lifecycle := error} = State) ->
+    handle_initialize(Id, Params, reset(State));
 dispatch_request(Id, <<"initialize">>, _Params, State) ->
     {method_error(Id, <<"initialize not allowed in current state">>), State};
+
+%% -- error: only ping and initialize accepted (both handled above) --
+dispatch_request(Id, _Method, _Params,
+                 #{lifecycle := error} = State) ->
+    ErrMsg = <<"Server in error state; re-initialize or check error_info">>,
+    {beam_agent_mcp_protocol:error_response(
+         Id, beam_agent_mcp_protocol:error_internal(), ErrMsg),
+     State};
 
 %% -- All other requests require ready state --
 dispatch_request(Id, _Method, _Params,
@@ -317,6 +423,17 @@ dispatch_request(Id, Method, _Params, State) ->
 
 -spec dispatch_notification(binary(), map(), dispatch_state()) ->
     dispatch_result().
+
+%% -- error/shutting_down: only cancelled notifications are meaningful --
+dispatch_notification(<<"notifications/cancelled">>, _Params,
+                      #{lifecycle := Lifecycle} = State)
+  when Lifecycle =:= error; Lifecycle =:= shutting_down ->
+    {noreply, State};
+dispatch_notification(_Method, _Params,
+                      #{lifecycle := Lifecycle} = State)
+  when Lifecycle =:= error; Lifecycle =:= shutting_down ->
+    %% Silently ignore all other notifications in terminal/error states
+    {noreply, State};
 
 %% -- initialized: transition from initializing to ready --
 dispatch_notification(<<"notifications/initialized">>, _Params,

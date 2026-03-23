@@ -3,8 +3,13 @@
 %%%
 %%% Tests cover:
 %%%   - State construction and accessors
-%%%   - Lifecycle state machine (uninitialized → initializing → ready)
+%%%   - Lifecycle state machine (uninitialized → initializing → ready
+%%%     → error | disconnected | shutting_down, error/disconnected → reset)
+%%%   - Lifecycle transitions (mark_error, mark_disconnected, mark_shutting_down, reset)
+%%%   - Lifecycle accessors (error_info, is_operational)
 %%%   - Lifecycle gating (send_* rejected in wrong state)
+%%%   - Lifecycle gating in error, disconnected, and shutting_down states
+%%%   - Initialize error response → error state transition
 %%%   - Ping in all states
 %%%   - Outgoing request generation (tools, resources, prompts,
 %%%     completions, logging)
@@ -692,3 +697,338 @@ find_pending_id(#{pending := Pending}) ->
         [Id | _] -> Id;
         [] -> error(no_pending_requests)
     end.
+
+%%====================================================================
+%% Lifecycle Transition Tests — mark_error
+%%====================================================================
+
+mark_error_from_ready_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(
+                     protocol_violation, State),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ErrorState)),
+    ?assertEqual(protocol_violation,
+                 beam_agent_mcp_client_dispatch:error_info(ErrorState)).
+
+mark_error_from_uninitialized_test() ->
+    State = make_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(
+                     startup_failure, State),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ErrorState)).
+
+mark_error_from_initializing_test() ->
+    {_Msg, State} = beam_agent_mcp_client_dispatch:send_initialize(
+                         make_state()),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(timeout, State),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ErrorState)).
+
+%%====================================================================
+%% Lifecycle Transition Tests — mark_disconnected
+%%====================================================================
+
+mark_disconnected_from_ready_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   transport_closed, State),
+    ?assertEqual(disconnected,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(DisState)),
+    ?assertEqual(transport_closed,
+                 beam_agent_mcp_client_dispatch:error_info(DisState)).
+
+mark_disconnected_from_initializing_test() ->
+    {_Msg, State} = beam_agent_mcp_client_dispatch:send_initialize(
+                         make_state()),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   tcp_reset, State),
+    ?assertEqual(disconnected,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(DisState)).
+
+mark_disconnected_from_uninitialized_raises_test() ->
+    State = make_state(),
+    ?assertError({invalid_disconnect, uninitialized},
+                 beam_agent_mcp_client_dispatch:mark_disconnected(
+                     closed, State)).
+
+mark_disconnected_from_error_raises_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State),
+    ?assertError({invalid_disconnect, error},
+                 beam_agent_mcp_client_dispatch:mark_disconnected(
+                     closed, ErrorState)).
+
+mark_disconnected_from_shutting_down_raises_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertError({invalid_disconnect, shutting_down},
+                 beam_agent_mcp_client_dispatch:mark_disconnected(
+                     closed, ShutState)).
+
+%%====================================================================
+%% Lifecycle Transition Tests — mark_shutting_down
+%%====================================================================
+
+mark_shutting_down_from_ready_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertEqual(shutting_down,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ShutState)).
+
+mark_shutting_down_from_uninitialized_test() ->
+    State = make_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertEqual(shutting_down,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ShutState)).
+
+%%====================================================================
+%% Lifecycle Transition Tests — reset
+%%====================================================================
+
+reset_from_error_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State),
+    ResetState = beam_agent_mcp_client_dispatch:reset(ErrorState),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:error_info(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:server_capabilities(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:session_capabilities(ResetState)),
+    ?assertEqual(0,
+                 beam_agent_mcp_client_dispatch:pending_count(ResetState)).
+
+reset_from_disconnected_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   transport_closed, State),
+    ResetState = beam_agent_mcp_client_dispatch:reset(DisState),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(ResetState)),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:error_info(ResetState)).
+
+reset_clears_pending_requests_test() ->
+    State = make_ready_state(),
+    {_Msg, State1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    ?assertEqual(1, beam_agent_mcp_client_dispatch:pending_count(State1)),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State1),
+    ResetState = beam_agent_mcp_client_dispatch:reset(ErrorState),
+    ?assertEqual(0, beam_agent_mcp_client_dispatch:pending_count(ResetState)).
+
+reset_preserves_next_id_test() ->
+    State = make_ready_state(),
+    %% Send a few requests to bump the ID counter
+    {_Msg1, State1} = beam_agent_mcp_client_dispatch:send_ping(State),
+    {_Msg2, State2} = beam_agent_mcp_client_dispatch:send_ping(State1),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State2),
+    ResetState = beam_agent_mcp_client_dispatch:reset(ErrorState),
+    %% After reset, send another ping — ID should be higher than before
+    {Msg3, _} = beam_agent_mcp_client_dispatch:send_ping(ResetState),
+    Id3 = maps:get(<<"id">>, Msg3),
+    ?assert(Id3 > 2).
+
+reset_from_ready_raises_test() ->
+    State = make_ready_state(),
+    ?assertError({invalid_reset, ready},
+                 beam_agent_mcp_client_dispatch:reset(State)).
+
+reset_from_uninitialized_raises_test() ->
+    State = make_state(),
+    ?assertError({invalid_reset, uninitialized},
+                 beam_agent_mcp_client_dispatch:reset(State)).
+
+reset_from_shutting_down_raises_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertError({invalid_reset, shutting_down},
+                 beam_agent_mcp_client_dispatch:reset(ShutState)).
+
+%%====================================================================
+%% Accessor Tests — error_info / is_operational
+%%====================================================================
+
+error_info_in_error_state_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(
+                     #{code => -1, reason => <<"bad">>}, State),
+    ?assertEqual(#{code => -1, reason => <<"bad">>},
+                 beam_agent_mcp_client_dispatch:error_info(ErrorState)).
+
+error_info_in_disconnected_state_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   tcp_reset, State),
+    ?assertEqual(tcp_reset,
+                 beam_agent_mcp_client_dispatch:error_info(DisState)).
+
+error_info_undefined_when_not_error_test() ->
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:error_info(make_state())),
+    ?assertEqual(undefined,
+                 beam_agent_mcp_client_dispatch:error_info(make_ready_state())).
+
+is_operational_ready_test() ->
+    ?assert(beam_agent_mcp_client_dispatch:is_operational(make_ready_state())).
+
+is_operational_uninitialized_test() ->
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(make_state())).
+
+is_operational_error_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(oops, State),
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(ErrorState)).
+
+is_operational_disconnected_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   closed, State),
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(DisState)).
+
+is_operational_shutting_down_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(ShutState)).
+
+%%====================================================================
+%% Lifecycle Gating — Error / Disconnected / Shutting Down
+%%====================================================================
+
+send_tools_list_rejected_in_error_state_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State),
+    ?assertError({not_ready, error, _},
+                 beam_agent_mcp_client_dispatch:send_tools_list(ErrorState)).
+
+send_tools_list_rejected_in_disconnected_state_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   closed, State),
+    ?assertError({not_ready, disconnected, _},
+                 beam_agent_mcp_client_dispatch:send_tools_list(DisState)).
+
+send_tools_list_rejected_in_shutting_down_state_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    ?assertError({not_ready, shutting_down, _},
+                 beam_agent_mcp_client_dispatch:send_tools_list(ShutState)).
+
+send_roots_list_changed_rejected_in_error_state_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State),
+    ?assertError({not_ready, error, _},
+                 beam_agent_mcp_client_dispatch:send_roots_list_changed(
+                     ErrorState)).
+
+%%====================================================================
+%% Ping — Error / Disconnected / Shutting Down States
+%%====================================================================
+
+ping_works_in_error_state_test() ->
+    State = make_ready_state(),
+    ErrorState = beam_agent_mcp_client_dispatch:mark_error(broken, State),
+    {Msg, _} = beam_agent_mcp_client_dispatch:send_ping(ErrorState),
+    ?assertEqual(<<"ping">>, maps:get(<<"method">>, Msg)).
+
+ping_works_in_disconnected_state_test() ->
+    State = make_ready_state(),
+    DisState = beam_agent_mcp_client_dispatch:mark_disconnected(
+                   closed, State),
+    {Msg, _} = beam_agent_mcp_client_dispatch:send_ping(DisState),
+    ?assertEqual(<<"ping">>, maps:get(<<"method">>, Msg)).
+
+ping_works_in_shutting_down_state_test() ->
+    State = make_ready_state(),
+    ShutState = beam_agent_mcp_client_dispatch:mark_shutting_down(State),
+    {Msg, _} = beam_agent_mcp_client_dispatch:send_ping(ShutState),
+    ?assertEqual(<<"ping">>, maps:get(<<"method">>, Msg)).
+
+%%====================================================================
+%% Initialize Error → Error State Transition
+%%====================================================================
+
+initialize_error_response_transitions_to_error_test() ->
+    State = make_state(),
+    {_InitMsg, State1} = beam_agent_mcp_client_dispatch:send_initialize(State),
+    ?assertEqual(initializing,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State1)),
+    %% Simulate server rejecting initialize with an error
+    ErrResp = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+                <<"error">> => #{<<"code">> => -32600,
+                                 <<"message">> => <<"Unsupported version">>}},
+    {error_response, 1, -32600, <<"Unsupported version">>, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(ErrResp, State1),
+    ?assertEqual(error,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)),
+    %% error_info should contain the error details
+    Info = beam_agent_mcp_client_dispatch:error_info(State2),
+    ?assertEqual(-32600, maps:get(code, Info)),
+    ?assertEqual(<<"Unsupported version">>, maps:get(message, Info)).
+
+non_init_error_response_stays_ready_test() ->
+    State = make_ready_state(),
+    {_Msg, State1} = beam_agent_mcp_client_dispatch:send_tools_list(State),
+    Id = find_pending_id(State1),
+    ErrResp = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => Id,
+                <<"error">> => #{<<"code">> => -32601,
+                                 <<"message">> => <<"Not found">>}},
+    {error_response, Id, -32601, <<"Not found">>, State2} =
+        beam_agent_mcp_client_dispatch:handle_message(ErrResp, State1),
+    %% Should still be ready — only init errors transition to error
+    ?assertEqual(ready,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)).
+
+%%====================================================================
+%% Full Lifecycle Round-Trip Tests
+%%====================================================================
+
+full_error_recovery_round_trip_test() ->
+    %% Start fresh, get to ready
+    State0 = make_ready_state(),
+    ?assert(beam_agent_mcp_client_dispatch:is_operational(State0)),
+
+    %% Mark error
+    State1 = beam_agent_mcp_client_dispatch:mark_error(provider_crash, State0),
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(State1)),
+    ?assertEqual(provider_crash,
+                 beam_agent_mcp_client_dispatch:error_info(State1)),
+
+    %% Reset
+    State2 = beam_agent_mcp_client_dispatch:reset(State1),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)),
+
+    %% Re-initialize
+    {_InitMsg, State3} = beam_agent_mcp_client_dispatch:send_initialize(State2),
+    Response = make_initialize_response(
+                   maps:get(<<"id">>, _InitMsg)),
+    {response, _, _Result, State4} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State3),
+    ?assert(beam_agent_mcp_client_dispatch:is_operational(State4)).
+
+full_disconnect_recovery_round_trip_test() ->
+    %% Start fresh, get to ready
+    State0 = make_ready_state(),
+    ?assert(beam_agent_mcp_client_dispatch:is_operational(State0)),
+
+    %% Disconnect
+    State1 = beam_agent_mcp_client_dispatch:mark_disconnected(
+                 tcp_reset, State0),
+    ?assertNot(beam_agent_mcp_client_dispatch:is_operational(State1)),
+    ?assertEqual(tcp_reset,
+                 beam_agent_mcp_client_dispatch:error_info(State1)),
+
+    %% Reset
+    State2 = beam_agent_mcp_client_dispatch:reset(State1),
+    ?assertEqual(uninitialized,
+                 beam_agent_mcp_client_dispatch:lifecycle_state(State2)),
+
+    %% Re-initialize
+    {InitMsg, State3} = beam_agent_mcp_client_dispatch:send_initialize(State2),
+    Response = make_initialize_response(maps:get(<<"id">>, InitMsg)),
+    {response, _, _Result, State4} =
+        beam_agent_mcp_client_dispatch:handle_message(Response, State3),
+    ?assert(beam_agent_mcp_client_dispatch:is_operational(State4)).

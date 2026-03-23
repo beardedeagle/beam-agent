@@ -13,14 +13,32 @@ state and passes it through on each call.
 
 ## Lifecycle
 
-The MCP client session progresses through three states:
+The MCP client session progresses through six states:
 
-  1. `uninitialized` — only `send_initialize/1` is valid
-  2. `initializing`  — waiting for the server's initialize response
-  3. `ready`         — all methods available
+  1. `uninitialized`  — only `send_initialize/1` is valid
+  2. `initializing`   — waiting for the server's initialize response
+  3. `ready`          — all methods available
+  4. `error`          — unrecoverable error (e.g. init failure, protocol error)
+  5. `disconnected`   — transport signalled loss of connection
+  6. `shutting_down`  — graceful shutdown in progress
+
+State transitions:
+
+```
+  uninitialized ──send_initialize──▸ initializing ──init_response──▸ ready
+       ▴                                 │                           │ │
+       │                                 │ init_error_response       │ │
+       │                                 ▾                           │ │
+       └──────── reset ◂──────────── error ◂── mark_error ──────────┘ │
+       └──────── reset ◂──── disconnected ◂── mark_disconnected ─────┘│
+                                                                      │
+                                                 shutting_down ◂──────┘
+                                                 (terminal)   mark_shutting_down
+```
 
 The `handle_message/2` function manages transitions, and `send_*` functions
-enforce lifecycle gating.
+enforce lifecycle gating. The owning process drives error/disconnect
+transitions via `mark_error/2`, `mark_disconnected/2`, and `reset/1`.
 
 ## Handler Behaviour
 
@@ -69,6 +87,14 @@ end,
     lifecycle_state/1,
     server_capabilities/1,
     session_capabilities/1,
+
+    %% Lifecycle transitions
+    mark_error/2,
+    mark_disconnected/2,
+    mark_shutting_down/1,
+    reset/1,
+    error_info/1,
+    is_operational/1,
 
     %% Outgoing requests (client → server)
     send_initialize/1,
@@ -156,7 +182,8 @@ layer handles encoding the response into the correct JSON-RPC format.
 %% Types
 %%--------------------------------------------------------------------
 
--type lifecycle() :: uninitialized | initializing | ready.
+-type lifecycle() :: uninitialized | initializing | ready
+                   | error | disconnected | shutting_down.
 
 -type pending_request() :: #{
     method := binary(),
@@ -174,7 +201,8 @@ layer handles encoding the response into the correct JSON-RPC format.
     pending := #{beam_agent_mcp_protocol:request_id() => pending_request()},
     default_timeout := pos_integer(),
     handler => module(),
-    handler_state => term()
+    handler_state => term(),
+    error_info => term()
 }.
 
 -type client_result() ::
@@ -257,6 +285,91 @@ Returns `undefined` if not yet negotiated.
     beam_agent_mcp_protocol:session_capabilities() | undefined.
 session_capabilities(State) ->
     maps:get(session_capabilities, State, undefined).
+
+%%====================================================================
+%% Lifecycle Transitions
+%%====================================================================
+
+-doc """
+Transition the client state to `error`.
+
+Accepts any current lifecycle state. Stores `Reason` for later retrieval
+via `error_info/1`. The owning process should call this when an
+unrecoverable error is detected (e.g. auth failure, protocol mismatch).
+""".
+-spec mark_error(term(), client_state()) -> client_state().
+mark_error(Reason, State) ->
+    State#{lifecycle => error, error_info => Reason}.
+
+-doc """
+Transition the client state to `disconnected`.
+
+The owning process should call this when the transport layer signals
+loss of connection. Only valid from `ready` or `initializing` state.
+Stores `Reason` for later retrieval via `error_info/1`.
+
+Raises `{invalid_disconnect, Lifecycle}` if called from `uninitialized`,
+`error`, or `shutting_down`.
+""".
+-spec mark_disconnected(term(), client_state()) -> client_state().
+mark_disconnected(Reason, #{lifecycle := ready} = State) ->
+    State#{lifecycle => disconnected, error_info => Reason};
+mark_disconnected(Reason, #{lifecycle := initializing} = State) ->
+    State#{lifecycle => disconnected, error_info => Reason};
+mark_disconnected(_Reason, #{lifecycle := Lifecycle}) ->
+    error({invalid_disconnect, Lifecycle}).
+
+-doc """
+Transition the client state to `shutting_down`.
+
+This is a terminal state — no further transitions are possible.
+The owning process should call this when initiating a graceful
+shutdown sequence.
+""".
+-spec mark_shutting_down(client_state()) -> client_state().
+mark_shutting_down(State) ->
+    State#{lifecycle => shutting_down}.
+
+-doc """
+Reset the client state from `error` or `disconnected` back to `uninitialized`.
+
+Clears `error_info`, `server_capabilities`, `session_capabilities`, and
+all `pending` requests, allowing a fresh MCP handshake. The `next_id`
+counter is preserved to avoid ID collisions with a reconnecting server.
+
+Raises `{invalid_reset, Lifecycle}` if the current state is not
+`error` or `disconnected`.
+""".
+-spec reset(client_state()) -> client_state().
+reset(#{lifecycle := Lifecycle} = State)
+  when Lifecycle =:= error; Lifecycle =:= disconnected ->
+    maps:remove(error_info,
+        maps:remove(server_capabilities,
+            maps:remove(session_capabilities,
+                State#{lifecycle => uninitialized, pending => #{}})));
+reset(#{lifecycle := Lifecycle}) ->
+    error({invalid_reset, Lifecycle}).
+
+-doc """
+Return the error reason stored when `mark_error/2` or `mark_disconnected/2`
+was called.
+
+Returns `undefined` if the client is not in `error` or `disconnected` state.
+""".
+-spec error_info(client_state()) -> term() | undefined.
+error_info(#{error_info := Reason, lifecycle := Lifecycle})
+  when Lifecycle =:= error; Lifecycle =:= disconnected -> Reason;
+error_info(_State) -> undefined.
+
+-doc """
+Return `true` if the client is in the `ready` state.
+
+This is a convenience for the owning process to check whether the
+MCP session is fully operational and methods can be sent.
+""".
+-spec is_operational(client_state()) -> boolean().
+is_operational(#{lifecycle := ready}) -> true;
+is_operational(_State) -> false.
 
 %%====================================================================
 %% Outgoing Requests — Lifecycle
@@ -644,7 +757,16 @@ handle_response(Id, Result, #{pending := Pending} = State) ->
                             integer(), binary(), client_state()) ->
     client_result().
 handle_error_response(Id, Code, Msg, #{pending := Pending} = State) ->
-    State1 = State#{pending => maps:remove(Id, Pending)},
+    Removed = maps:remove(Id, Pending),
+    %% If the initialize request itself failed, transition to error state
+    %% so the client doesn't stay stuck in `initializing` forever.
+    State1 = case maps:find(Id, Pending) of
+        {ok, #{method := <<"initialize">>}} ->
+            State#{pending => Removed, lifecycle => error,
+                   error_info => #{code => Code, message => Msg}};
+        _ ->
+            State#{pending => Removed}
+    end,
     {error_response, Id, Code, Msg, State1}.
 
 %%--------------------------------------------------------------------
@@ -897,6 +1019,12 @@ untrack_request(Id, #{pending := Pending} = State) ->
 
 -spec require_ready(client_state()) -> ok.
 require_ready(#{lifecycle := ready}) -> ok;
+require_ready(#{lifecycle := error}) ->
+    error({not_ready, error, <<"Client in error state; reset and re-initialize">>});
+require_ready(#{lifecycle := disconnected}) ->
+    error({not_ready, disconnected, <<"Client disconnected; reset and re-initialize">>});
+require_ready(#{lifecycle := shutting_down}) ->
+    error({not_ready, shutting_down, <<"Client is shutting down">>});
 require_ready(#{lifecycle := Lifecycle}) ->
     error({not_ready, Lifecycle}).
 
