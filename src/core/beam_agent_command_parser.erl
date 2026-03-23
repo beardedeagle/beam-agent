@@ -35,6 +35,10 @@ beam_agent_command_parser:parse(<<"git status && rm -rf /">>).
 """.
 
 -export([parse/1, categorize/1, flatten_commands/1]).
+
+-ifdef(TEST).
+-export([parse_list_form/1]).
+-endif.
 -export_type([command_struct/0, redirect_spec/0, command_category/0]).
 
 %%--------------------------------------------------------------------
@@ -146,7 +150,7 @@ flatten_commands(#{type := opaque} = Cmd) ->
 %% on the [Program | Args] = Bins pattern match below.
 parse_list_form([]) ->
     #{type => opaque, raw => <<>>, error => empty_command};
-parse_list_form(Segments) ->
+parse_list_form(Segments) when is_list(Segments) ->
     Bins = [to_binary(S) || S <- Segments],
     [Program | Args] = Bins,
     Raw = iolist_to_binary(lists:join(<<" ">>, Bins)),

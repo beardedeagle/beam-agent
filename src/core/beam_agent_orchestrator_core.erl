@@ -336,8 +336,8 @@ delegate(Parent, Task, Opts) when is_map(Opts) ->
                     case normalize_spawn_opts(Opts#{input => Task}) of
                         {ok, Normalized} ->
                             case spawn_child(ParentRun, delegated, Task, Normalized) of
-                                {ok, Child} ->
-                                    {ok, maps:get(run, Child)};
+                                {ok, #{run := ChildRun}} ->
+                                    {ok, ChildRun};
                                 {error, _} = Error ->
                                     Error
                             end;
@@ -404,8 +404,8 @@ collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
                         true ->
                             JournalRunIds = case maps:get(include_descendants, Normalized) of
                                 true ->
-                                    [RunId | [maps:get(run_id, maps:get(run, Child)) ||
-                                        Child <- Descendants]];
+                                    [RunId | [CRunId ||
+                                        #{run := #{run_id := CRunId}} <- Descendants]];
                                 false ->
                                     [RunId]
                             end,
@@ -469,13 +469,14 @@ status(RunId) when is_binary(RunId) ->
             {ok, Children} = list_children(RunId),
             {ActiveStepCount, StepCount} = step_counts(Steps),
             {ActiveChildCount, ChildCount} = child_counts(Children),
+            #{status := RunStatus} = Run,
             Base = #{
                 run => Run,
                 step_count => StepCount,
                 active_step_count => ActiveStepCount,
                 child_count => ChildCount,
                 active_child_count => ActiveChildCount,
-                awaitable => maps:get(status, Run) =:= running
+                awaitable => RunStatus =:= running
             },
             LinkInfo = case beam_agent_orchestrator_store:get_link(RunId) of
                 {ok, Link} ->
@@ -776,8 +777,7 @@ await_loop(RunId, Deadline) ->
     {ok, await_result()} | continue.
 terminal_await_result(#{status := running}) ->
     continue;
-terminal_await_result(Run) ->
-    Status = maps:get(status, Run),
+terminal_await_result(#{status := Status} = Run) ->
     Base = #{
         status => Status,
         run => Run
@@ -795,8 +795,8 @@ cancel_tree(RunId, Reason, Origin) ->
     case beam_agent_runs:get_run(RunId) of
         {ok, Run} ->
             {ok, Links} = beam_agent_orchestrator_store:list_children(RunId),
-            case lists:foldl(fun(Link, ok) ->
-                cancel_tree(maps:get(child_run_id, Link),
+            case lists:foldl(fun(#{child_run_id := ChildRunId} = _Link, ok) ->
+                cancel_tree(ChildRunId,
                     descendant_cancel_reason(RunId, Reason), {child_of, RunId});
                 (_Link, {error, _} = Error) ->
                     Error
@@ -817,11 +817,11 @@ cancel_single_run(#{run_id := RunId, status := running}, Reason, Origin) ->
     case beam_agent_runs:cancel_run(RunId, Reason) of
         {ok, _Cancelled} ->
             case beam_agent_orchestrator_store:get_link(RunId) of
-                {ok, Link} ->
+                {ok, #{parent_run_id := ParentRunId} = Link} ->
                     maybe_stop_link_session(Link),
                     ok = append_orchestrator_event(<<"orchestrator_cancelled">>, #{
                         child_run_id => RunId,
-                        parent_run_id => maps:get(parent_run_id, Link),
+                        parent_run_id => ParentRunId,
                         origin => Origin,
                         reason => Reason
                     }),
@@ -1033,13 +1033,13 @@ orchestrator_metadata(ParentRunId, Relation, Substrate, Metadata, Ctx) ->
     Metadata#{orchestrator => Orchestrator2}.
 
 -spec child_view(beam_agent_orchestrator_store:link_record()) -> child().
-child_view(Link) ->
-    case beam_agent_runs:get_run(maps:get(child_run_id, Link)) of
+child_view(#{child_run_id := ChildRunId} = Link) ->
+    case beam_agent_runs:get_run(ChildRunId) of
         {ok, Run} ->
             child_from_parts(Link, Run, undefined);
         {error, not_found} ->
             MissingRun = #{
-                run_id => maps:get(child_run_id, Link),
+                run_id => ChildRunId,
                 kind => missing,
                 status => cancelled,
                 metadata => #{},
@@ -1052,11 +1052,12 @@ child_view(Link) ->
 
 -spec child_from_parts(beam_agent_orchestrator_store:link_record(),
     beam_agent_runs_core:run(), map() | undefined) -> child().
-child_from_parts(Link, Run, Thread) ->
+child_from_parts(#{relation := Relation, substrate := Substrate,
+                   parent_run_id := ParentRunId} = Link, Run, Thread) ->
     Base = #{
-        relation => maps:get(relation, Link),
-        substrate => maps:get(substrate, Link),
-        parent_run_id => maps:get(parent_run_id, Link),
+        relation => Relation,
+        substrate => Substrate,
+        parent_run_id => ParentRunId,
         run => Run,
         metadata => maps:get(metadata, Link, #{})
     },
@@ -1116,8 +1117,7 @@ audit_orchestrator_event(Action, Link, Decision, Reason) ->
 list_descendants(ParentRunId) ->
     case list_children(ParentRunId) of
         {ok, Children} ->
-            lists:foldl(fun(Child, Acc) ->
-                ChildRunId = maps:get(run_id, maps:get(run, Child)),
+            lists:foldl(fun(#{run := #{run_id := ChildRunId}} = Child, Acc) ->
                 Acc ++ [Child | list_descendants(ChildRunId)]
             end, [], Children);
         {error, _} ->
