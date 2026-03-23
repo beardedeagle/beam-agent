@@ -73,6 +73,9 @@ defmodule BeamAgent.Capabilities do
   """
   @type capability() :: atom()
 
+  @typedoc "One of the five supported agent backends."
+  @type backend() :: :claude | :codex | :copilot | :gemini | :opencode
+
   @typedoc "Support level for a capability/backend pair."
   @type support_level() :: :missing | :partial | :baseline | :full
 
@@ -282,7 +285,7 @@ defmodule BeamAgent.Capabilities do
   @spec assert_capability(capability(), atom() | binary()) ::
           :ok
           | {:error,
-             {:unsupported_capability, capability(), atom()}
+             {:unsupported_capability, capability(), backend()}
              | {:unknown_capability, capability()}
              | {:unknown_backend, term()}}
   defdelegate assert_capability(capability, backend), to: :beam_agent_capabilities

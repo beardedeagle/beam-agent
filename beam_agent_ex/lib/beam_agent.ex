@@ -1394,9 +1394,11 @@ defmodule BeamAgent do
 
   ## Returns
 
-  - `{:ok, forked_thread_meta}` or `{:error, :not_found}`.
+  - `{:ok, forked_thread_meta}` on success.
+  - `{:error, :not_found}` if the source thread does not exist.
+  - `{:error, :message_limit_reached}` if the fork would exceed message limits.
   """
-  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, :not_found | :message_limit_reached}
   def thread_fork(session, thread_id), do: BeamAgent.Threads.thread_fork(session, thread_id)
 
   @doc """
@@ -1413,9 +1415,11 @@ defmodule BeamAgent do
 
   ## Returns
 
-  - `{:ok, forked_thread_meta}` or `{:error, :not_found}`.
+  - `{:ok, forked_thread_meta}` on success.
+  - `{:error, :not_found}` if the source thread does not exist.
+  - `{:error, :message_limit_reached}` if the fork would exceed message limits.
   """
-  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_found | :message_limit_reached}
   def thread_fork(session, thread_id, opts),
     do: BeamAgent.Threads.thread_fork(session, thread_id, opts)
 

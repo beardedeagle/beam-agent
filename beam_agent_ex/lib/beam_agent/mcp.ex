@@ -461,7 +461,7 @@ defmodule BeamAgent.MCP do
   ```
   """
   @spec build_registry(nil | [sdk_mcp_server()]) :: mcp_registry() | nil
-  def build_registry(nil), do: :beam_agent_mcp.build_registry(:undefined)
+  def build_registry(nil), do: nil
   def build_registry(servers), do: :beam_agent_mcp.build_registry(servers)
 
   # Tool registry — runtime management

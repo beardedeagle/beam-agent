@@ -413,7 +413,7 @@ defmodule OpencodeEx do
   end
 
   @doc "Initialize native OpenCode app state."
-  @spec app_init(pid()) :: {:ok, term()} | {:error, term()}
+  @spec app_init(pid()) :: {:ok, term()}
   def app_init(session) do
     :beam_agent_app_core.app_init(session)
   end
@@ -425,7 +425,7 @@ defmodule OpencodeEx do
   end
 
   @doc "List native OpenCode app modes."
-  @spec app_modes(pid()) :: {:ok, term()} | {:error, term()}
+  @spec app_modes(pid()) :: {:ok, [binary()]}
   def app_modes(session) do
     :beam_agent_app_core.app_modes(session)
   end
