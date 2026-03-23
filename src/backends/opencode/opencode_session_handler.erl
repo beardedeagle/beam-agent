@@ -28,6 +28,9 @@
 
 %% Exported for unit testing
 -export([is_remote_plaintext_http/1]).
+-ifdef(TEST).
+-export([check_transport_security/3]).
+-endif.
 
 %%--------------------------------------------------------------------
 %% Types
@@ -154,37 +157,44 @@ init_handler(Opts) ->
         {basic, U, P}                        -> opencode_http:encode_basic_auth(U, P);
         {basic, Encoded} when is_binary(Encoded) -> {basic, Encoded}
     end,
-    _ = maybe_warn_plaintext_http(Auth, BaseUrl),
-    {Host, Port, BasePath} = opencode_http:parse_base_url(BaseUrl),
-    ClientMod = maps:get(client_module, Opts, beam_agent_http_client),
-    HState = #hstate{
-        client_module         = ClientMod,
-        sse_state          = opencode_sse:new_state(),
-        rest_pending       = #{},
-        event_queue        = queue:new(),
-        max_event_queue_depth = MaxEventQueueDepth,
-        directory          = Directory,
-        opts               = Opts,
-        host               = Host,
-        port               = Port,
-        base_path          = BasePath,
-        auth               = Auth,
-        model              = Model,
-        buffer_max         = BufferMax,
-        permission_handler = PermissionHandler,
-        sdk_mcp_registry   = McpRegistry,
-        sdk_hook_registry  = HookRegistry,
-        current_state      = connecting
-    },
-    {ok, #{
-        transport_spec => {beam_agent_transport_http, #{
-            client_module => ClientMod,
-            host       => Host,
-            port       => Port
-        }},
-        initial_state  => connecting,
-        handler_state  => HState
-    }}.
+    case check_transport_security(Auth, BaseUrl, Opts) of
+        {error, plaintext_auth} ->
+            {error, {plaintext_auth,
+                     <<"Refusing to send auth credentials over plaintext HTTP "
+                       "to a remote host. Use HTTPS, restrict to localhost, "
+                       "or set allow_insecure_http => true in session opts.">>}};
+        ok ->
+            {Host, Port, BasePath} = opencode_http:parse_base_url(BaseUrl),
+            ClientMod = maps:get(client_module, Opts, beam_agent_http_client),
+            HState = #hstate{
+                client_module         = ClientMod,
+                sse_state          = opencode_sse:new_state(),
+                rest_pending       = #{},
+                event_queue        = queue:new(),
+                max_event_queue_depth = MaxEventQueueDepth,
+                directory          = Directory,
+                opts               = Opts,
+                host               = Host,
+                port               = Port,
+                base_path          = BasePath,
+                auth               = Auth,
+                model              = Model,
+                buffer_max         = BufferMax,
+                permission_handler = PermissionHandler,
+                sdk_mcp_registry   = McpRegistry,
+                sdk_hook_registry  = HookRegistry,
+                current_state      = connecting
+            },
+            {ok, #{
+                transport_spec => {beam_agent_transport_http, #{
+                    client_module => ClientMod,
+                    host       => Host,
+                    port       => Port
+                }},
+                initial_state  => connecting,
+                handler_state  => HState
+            }}
+    end.
 
 -doc "Stub — HTTP transport never produces {data, Binary} events.".
 -spec handle_data(binary(), term()) ->
@@ -717,27 +727,42 @@ enqueue_event(Msg, #hstate{event_consumer = From} = HState) ->
 %% Internal: security / configuration helpers
 %%====================================================================
 
-%% @doc Warn when auth credentials are configured but the BaseUrl uses
-%% plain HTTP to a non-localhost host.  Emits a logger:warning so that
-%% operators can detect unintended insecure configurations in production.
-%% The connection is NOT rejected — the caller may intentionally route
-%% through a VPN tunnel or a local TLS-terminating proxy.
--spec maybe_warn_plaintext_http(Auth, BaseUrl) -> ok when
+%% @doc M5: Reject auth over plaintext HTTP to remote hosts by default.
+%%
+%% Returns `ok` when the connection is safe (HTTPS, localhost, or no auth).
+%% Returns `{error, plaintext_auth}` when auth credentials would be sent
+%% over plaintext HTTP to a non-loopback host and `allow_insecure_http`
+%% is not set.  Callers that intentionally route through VPN tunnels or
+%% local TLS-terminating proxies can set `allow_insecure_http => true`
+%% in session opts to downgrade the error to a warning.
+-spec check_transport_security(Auth, BaseUrl, Opts) -> ok | {error, plaintext_auth} when
       Auth    :: {basic, binary()} | none,
-      BaseUrl :: string() | binary().
-maybe_warn_plaintext_http(none, _BaseUrl) ->
+      BaseUrl :: string() | binary(),
+      Opts    :: map().
+check_transport_security(none, _BaseUrl, _Opts) ->
     ok;
-maybe_warn_plaintext_http(_Auth, BaseUrl) ->
+check_transport_security(_Auth, BaseUrl, Opts) ->
     case is_remote_plaintext_http(BaseUrl) of
-        true ->
-            logger:warning(
-                "opencode_session: auth credentials are configured but the "
-                "base_url '~s' uses plaintext HTTP to a non-localhost host — "
-                "credentials will be transmitted in cleartext. "
-                "Use HTTPS or restrict the server to localhost.",
-                [BaseUrl]);
         false ->
-            ok
+            ok;
+        true ->
+            case maps:get(allow_insecure_http, Opts, false) of
+                true ->
+                    logger:warning(
+                        "opencode_session: auth credentials configured over "
+                        "plaintext HTTP to '~s' — proceeding because "
+                        "allow_insecure_http is set. Ensure a VPN or "
+                        "TLS-terminating proxy protects this traffic.",
+                        [BaseUrl]),
+                    ok;
+                false ->
+                    logger:error(
+                        "opencode_session: refusing to send auth credentials "
+                        "over plaintext HTTP to '~s'. Use HTTPS, restrict "
+                        "to localhost, or set allow_insecure_http => true.",
+                        [BaseUrl]),
+                    {error, plaintext_auth}
+            end
     end.
 
 %% @doc Pure predicate: returns true when the URL has scheme 'http' and

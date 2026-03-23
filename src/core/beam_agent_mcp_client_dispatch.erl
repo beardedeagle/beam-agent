@@ -132,7 +132,8 @@ end,
 
     %% Timeout management
     check_timeouts/2,
-    pending_count/1
+    pending_count/1,
+    max_pending/1
 ]).
 
 -export_type([
@@ -201,6 +202,11 @@ layer handles encoding the response into the correct JSON-RPC format.
     next_id := pos_integer(),
     pending := #{beam_agent_mcp_protocol:request_id() => pending_request()},
     default_timeout := pos_integer(),
+    %% H5: Maximum number of concurrent pending requests.
+    %% 0 = unlimited (default).  When the limit is reached, track_request/4
+    %% raises {max_pending_exceeded, CurrentCount, MaxPending}.  Callers can
+    %% pre-check with pending_count/1 vs max_pending/1.
+    max_pending := non_neg_integer(),
     handler => module(),
     handler_state => term(),
     error_info => term(),
@@ -246,6 +252,7 @@ Options:
   - `handler` — callback module implementing `beam_agent_mcp_client_dispatch`
   - `handler_state` — opaque state passed to handler callbacks
   - `default_timeout` — default timeout in ms for pending requests (default: 30000)
+  - `max_pending` — maximum concurrent pending requests; 0 = unlimited (default: 0)
 """.
 -spec new(beam_agent_mcp_protocol:implementation_info(),
           beam_agent_mcp_protocol:client_capabilities(),
@@ -260,6 +267,7 @@ new(ClientInfo, ClientCaps0, Opts)
         next_id => 1,
         pending => #{},
         default_timeout => maps:get(default_timeout, Opts, ?DEFAULT_TIMEOUT),
+        max_pending => maps:get(max_pending, Opts, 0),
         notification_window => {0, erlang:monotonic_time(millisecond)},
         max_notifications_per_interval =>
             maps:get(max_notifications_per_interval, Opts, 0),
@@ -749,6 +757,14 @@ check_timeouts(Now, #{pending := Pending} = State) ->
 pending_count(#{pending := Pending}) ->
     map_size(Pending).
 
+-doc """
+Return the configured maximum pending request limit.
+
+Returns `0` when unlimited (the default).
+""".
+-spec max_pending(client_state()) -> non_neg_integer().
+max_pending(#{max_pending := Max}) -> Max.
+
 %%--------------------------------------------------------------------
 %% Internal: Response Handling
 %%--------------------------------------------------------------------
@@ -1073,16 +1089,25 @@ next_request_id(#{next_id := Id} = State) ->
 %%--------------------------------------------------------------------
 
 %% Pure: accepts the current monotonic time from the caller.
+%% H5: Enforces max_pending limit.  Raises {max_pending_exceeded, Count, Max}
+%% when the pending map is at capacity and max_pending > 0.
 -spec track_request(beam_agent_mcp_protocol:request_id(), binary(),
                     integer(), client_state()) -> client_state().
 track_request(Id, Method, Now, #{pending := Pending,
+                                 max_pending := Max,
                                  default_timeout := Timeout} = State) ->
-    Req = #{
-        method => Method,
-        deadline => Now + Timeout,
-        sent_at => Now
-    },
-    State#{pending => Pending#{Id => Req}}.
+    Count = map_size(Pending),
+    case Max > 0 andalso Count >= Max of
+        true ->
+            error({max_pending_exceeded, Count, Max});
+        false ->
+            Req = #{
+                method => Method,
+                deadline => Now + Timeout,
+                sent_at => Now
+            },
+            State#{pending => Pending#{Id => Req}}
+    end.
 
 %% Boundary: reads the monotonic clock and delegates to the pure tracker.
 %% This is the sole point of impurity, kept at the outermost layer of the

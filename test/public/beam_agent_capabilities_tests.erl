@@ -135,3 +135,22 @@ assert_capability_uses_status_not_supports_test() ->
         beam_agent_capabilities:assert_capability(ghost_cap, claude)),
     ?assertMatch({error, {unknown_backend, _}},
         beam_agent_capabilities:assert_capability(hooks, phantom)).
+
+%%====================================================================
+%% H9: capability_ids/0 — pattern-matching extraction
+%%====================================================================
+
+capability_ids_returns_atom_list_test() ->
+    Ids = beam_agent_capabilities:capability_ids(),
+    ?assert(is_list(Ids)),
+    ?assert(length(Ids) > 0),
+    lists:foreach(fun(Id) -> ?assert(is_atom(Id)) end, Ids).
+
+capability_ids_matches_all_count_test() ->
+    Ids = beam_agent_capabilities:capability_ids(),
+    All = beam_agent_capabilities:all(),
+    ?assertEqual(length(All), length(Ids)).
+
+capability_ids_no_duplicates_test() ->
+    Ids = beam_agent_capabilities:capability_ids(),
+    ?assertEqual(length(Ids), length(lists:usort(Ids))).
