@@ -248,7 +248,12 @@ defmodule BeamAgent do
 
   Result messages additionally carry `:duration_ms`, `:num_turns`,
   `:stop_reason_atom`, `:usage`, and `:total_cost_usd`. Tool-use messages
-  carry `:tool_name` and `:tool_input`.
+  carry `:tool_name` and `:tool_input`. Error messages carry `:category`
+  (an atom for structured error handling: `:rate_limit`,
+  `:subscription_exhausted`, `:context_exceeded`, `:auth_expired`,
+  `:server_error`, or `:unknown`), optionally `:retry_after` (seconds),
+  and optionally `:error_type` (backend-specific: `:tool_error`,
+  `:session_error`, `:subagent_failed`).
   """
   @type message :: :beam_agent.message()
 
