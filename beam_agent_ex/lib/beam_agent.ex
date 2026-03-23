@@ -210,7 +210,11 @@ defmodule BeamAgent do
   `:prompt_suggestion`, `:raw`.
 
   The `:result` type signals query completion. The `:error` type signals
-  a backend error. The `:raw` type preserves unrecognized wire messages
+  a backend error; every error message carries a `:category` atom
+  (`:rate_limit`, `:subscription_exhausted`, `:context_exceeded`,
+  `:auth_expired`, `:server_error`, or `:unknown`) and optionally
+  `:retry_after` (seconds) when the backend provides it.
+  The `:raw` type preserves unrecognized wire messages
   verbatim so normalization stays lossless.
   """
   @type message_type :: :beam_agent.message_type()

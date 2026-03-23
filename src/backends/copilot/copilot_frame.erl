@@ -106,16 +106,22 @@ parse_cl_lines([Line | Rest]) ->
 -spec decode_body(binary(), binary()) ->
                      {ok, json_map(), binary()} |
                      {error, {invalid_json, not_object} |
+                             {json_too_large, non_neg_integer()} |
                              {json_decode, term()}}.
 decode_body(Body, Rest) ->
-    try json:decode(Body) of
-        Decoded when is_map(Decoded) ->
-            {ok, Decoded, Rest};
-        _Other ->
-            {error, {invalid_json, not_object}}
-    catch
-        error:Reason ->
-            {error, {json_decode, Reason}}
+    case byte_size(Body) > beam_agent_json:max_decode_size() of
+        true ->
+            {error, {json_too_large, byte_size(Body)}};
+        false ->
+            try json:decode(Body) of
+                Decoded when is_map(Decoded) ->
+                    {ok, Decoded, Rest};
+                _Other ->
+                    {error, {invalid_json, not_object}}
+            catch
+                error:Reason ->
+                    {error, {json_decode, Reason}}
+            end
     end.
 -spec extract_messages_acc(binary(), [json_map()]) ->
                              {[json_map()], binary()}.

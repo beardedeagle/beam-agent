@@ -298,12 +298,19 @@ sanitize_char(_) ->
     $-.
 -spec safe_decode(binary()) -> map() | undefined.
 safe_decode(Line) ->
-    try json:decode(Line) of
-        Decoded when is_map(Decoded) ->
-            Decoded;
-        _ ->
-            undefined
-    catch
-        _:_ ->
-            undefined
+    case byte_size(Line) > beam_agent_json:max_decode_size() of
+        true ->
+            logger:warning("claude_session_store: rejecting oversized JSON"
+                           " input (~B bytes)", [byte_size(Line)]),
+            undefined;
+        false ->
+            try json:decode(Line) of
+                Decoded when is_map(Decoded) ->
+                    Decoded;
+                _ ->
+                    undefined
+            catch
+                _:_ ->
+                    undefined
+            end
     end.

@@ -351,7 +351,8 @@ All adapters normalize messages to `beam_agent:message()`:
 #{type := tool_use, tool_name := <<"Bash">>, tool_input := #{...}}
 #{type := tool_result, tool_name := <<"Bash">>, content := <<"output...">>}
 #{type := result, content := <<"Final answer">>, duration_ms := 5432}
-#{type := error, content := <<"Something went wrong">>}
+#{type := error, content := <<"Something went wrong">>, category := unknown}
+#{type := error, content := <<"Rate limit exceeded">>, category := rate_limit, retry_after := 30}
 #{type := thinking, content := <<"Let me consider...">>}
 #{type := system, subtype := <<"init">>, system_info := #{...}}
 ```
@@ -363,6 +364,11 @@ handle_message(#{type := text, content := Content}) ->
     io:format("~s", [Content]);
 handle_message(#{type := tool_use, tool_name := Name}) ->
     io:format("Using tool: ~s~n", [Name]);
+handle_message(#{type := error, category := rate_limit} = Msg) ->
+    Retry = maps:get(retry_after, Msg, 60),
+    io:format("Rate limited — retry in ~B seconds~n", [Retry]);
+handle_message(#{type := error, category := Cat, content := Content}) ->
+    io:format("Error [~p]: ~s~n", [Cat, Content]);
 handle_message(#{type := result} = Msg) ->
     io:format("Done! Cost: $~.4f~n", [maps:get(total_cost_usd, Msg, 0.0)]);
 handle_message(_Other) ->
@@ -370,6 +376,37 @@ handle_message(_Other) ->
 ```
 
 ## SDK Features
+
+### Structured Error Categorization
+
+Every error message carries a `category` atom for structured error handling
+without content-text parsing. Categories are inferred automatically from
+wire-format data (when the backend provides structured error info) or from
+content text pattern matching as a universal fallback.
+
+| Category | Meaning |
+|----------|---------|
+| `rate_limit` | Too many requests / 429 / throttled |
+| `subscription_exhausted` | Quota, billing, or credit limit reached |
+| `context_exceeded` | Context window or token limit exceeded |
+| `auth_expired` | Authentication or authorization failure |
+| `server_error` | Backend 5xx / overloaded / unavailable |
+| `unknown` | Unrecognized error (fallback) |
+
+When available, `retry_after` (integer seconds) is also attached.
+
+```erlang
+handle_error(#{category := rate_limit, retry_after := Secs}) ->
+    timer:sleep(Secs * 1000),
+    retry;
+handle_error(#{category := context_exceeded}) ->
+    compact_and_retry;
+handle_error(#{category := auth_expired}) ->
+    {stop, reauthenticate};
+handle_error(#{category := Cat, content := Content}) ->
+    logger:warning("~p error: ~s", [Cat, Content]),
+    {stop, Cat}.
+```
 
 ### Backend Event Streams
 

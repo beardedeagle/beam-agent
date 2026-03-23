@@ -230,7 +230,11 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 %%                     stop_reason_atom, usage, model_usage, total_cost_usd,
 %%                     is_error, subtype, errors, structured_output,
 %%                     permission_denials, fast_mode_state
-%%   error:            content
+%%   error:            content, category (error_category atom: rate_limit,
+%%                     subscription_exhausted, context_exceeded, auth_expired,
+%%                     server_error, unknown), retry_after (seconds, when
+%%                     available), error_type (backend-specific: tool_error,
+%%                     session_error, subagent_failed)
 %%   user:             content, parent_tool_use_id, is_replay
 %%   control_request:  request_id, request
 %%   control_response: request_id, response
@@ -279,6 +283,10 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     structured_output => term(),
     permission_denials => list(),
     fast_mode_state => map(),
+    %% Error enrichment fields (beam_agent_error_core)
+    category => beam_agent_error_core:error_category(),
+    retry_after => non_neg_integer(),
+    error_type => atom(),
     %% User message fields
     is_replay => boolean(),
     %% Control protocol fields
@@ -1093,7 +1101,8 @@ add_fields(result, Raw, Base) ->
     enrich_result(M0, Raw);
 
 add_fields(error, Raw, Base) ->
-    Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw};
+    Base1 = Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw},
+    beam_agent_error_core:enrich(Base1, Raw);
 
 add_fields(user, Raw, Base) ->
     M0 = Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw},

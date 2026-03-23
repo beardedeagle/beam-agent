@@ -62,11 +62,16 @@ extract_line(Buffer) ->
 decode_line(<<>>) ->
     {error, empty_line};
 decode_line(Line) ->
-    try json:decode(Line) of
-        Map when is_map(Map) -> {ok, Map};
-        Other -> {error, {not_object, Other}}
-    catch
-        error:Reason -> {error, {json_decode, Reason}}
+    case byte_size(Line) > beam_agent_json:max_decode_size() of
+        true ->
+            {error, {json_too_large, byte_size(Line)}};
+        false ->
+            try json:decode(Line) of
+                Map when is_map(Map) -> {ok, Map};
+                Other -> {error, {not_object, Other}}
+            catch
+                error:Reason -> {error, {json_decode, Reason}}
+            end
     end.
 
 -doc "Encode an Erlang map as a JSONL line (with trailing newline).".

@@ -137,6 +137,7 @@ dispatch_event(<<"message.updated">>, Payload, Now) ->
                 iolist_to_binary([ErrName, <<": ">>, to_binary(ErrData)]),
             #{type => error,
               content => Content,
+              category => beam_agent_error_core:infer_category(Content),
               raw => Payload,
               timestamp => Now}
     end;
@@ -161,6 +162,7 @@ dispatch_event(<<"session.error">>, Payload, Now) ->
     Content = to_binary(ErrMsg),
     #{type => error,
       content => Content,
+      category => beam_agent_error_core:infer_category(Content),
       raw => Payload,
       timestamp => Now};
 dispatch_event(<<"question.asked">>, Payload, Now) ->
@@ -332,8 +334,10 @@ normalize_tool_part(<<"error">>, Part, State, Payload, Now) ->
         maps:get(<<"error">>,
                  State,
                  maps:get(<<"error">>, Part, <<"tool error">>)),
+    ToolErrContent = to_binary(ErrMsg),
     #{type => error,
-      content => to_binary(ErrMsg),
+      content => ToolErrContent,
+      category => beam_agent_error_core:infer_category(ToolErrContent),
       raw => Payload,
       timestamp => Now};
 normalize_tool_part(_OtherStatus, _Part, _State, Payload, Now) ->

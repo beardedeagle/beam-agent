@@ -96,8 +96,10 @@ interrupt_message() ->
 -doc "Normalize a server websocket event into canonical `beam_agent` messages.".
 -spec normalize_server_event(map()) -> [beam_agent_core:message()].
 normalize_server_event(#{<<"type">> := <<"error">>} = Json) ->
+    ErrContent = event_message(Json),
     [(base_message(error, Json))#{
-        content => event_message(Json),
+        content => ErrContent,
+        category => beam_agent_error_core:infer_category(ErrContent),
         raw => Json
     }];
 normalize_server_event(#{<<"type">> := <<"response.audio.delta">>} = Json) ->
@@ -243,12 +245,17 @@ decode_audio(Json) ->
 
 -spec parse_arguments(binary()) -> map().
 parse_arguments(Arguments) when is_binary(Arguments), byte_size(Arguments) > 0 ->
-    try json:decode(Arguments) of
-        Parsed when is_map(Parsed) -> Parsed;
-        _ -> #{<<"arguments">> => Arguments}
-    catch
-        _:_ ->
-            #{<<"arguments">> => Arguments}
+    case byte_size(Arguments) > beam_agent_json:max_decode_size() of
+        true ->
+            #{<<"arguments">> => Arguments};
+        false ->
+            try json:decode(Arguments) of
+                Parsed when is_map(Parsed) -> Parsed;
+                _ -> #{<<"arguments">> => Arguments}
+            catch
+                _:_ ->
+                    #{<<"arguments">> => Arguments}
+            end
     end;
 parse_arguments(_) ->
     #{}.

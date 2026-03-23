@@ -1270,10 +1270,17 @@ looks_like_json(_)                 -> false.
 -spec decode_settings_json(binary()) ->
     #{binary() => false | null | true | binary() | [any()] | number() | #{binary() => _}}.
 decode_settings_json(JsonBin) ->
-    try json:decode(JsonBin) of
-        Map when is_map(Map) -> Map;
-        _                    -> #{}
-    catch _:_ -> #{}
+    case byte_size(JsonBin) > beam_agent_json:max_decode_size() of
+        true ->
+            logger:warning("claude_session_handler: rejecting oversized"
+                           " settings JSON (~B bytes)", [byte_size(JsonBin)]),
+            #{};
+        false ->
+            try json:decode(JsonBin) of
+                Map when is_map(Map) -> Map;
+                _                    -> #{}
+            catch _:_ -> #{}
+            end
     end.
 
 -spec normalize_json_map(map()) -> #{binary() => _}.
