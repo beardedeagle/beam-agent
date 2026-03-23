@@ -824,10 +824,10 @@ maybe_fire_message_hooks(_Msg, HState) ->
 -spec track_message(beam_agent_core:message(), #hstate{}) -> ok.
 track_message(Msg, HState) ->
     SessionId = session_store_id(HState),
-    ok = beam_agent_session_store_core:register_session(
+    _ = beam_agent_session_store_core:register_session(
              SessionId, #{adapter => copilot}),
     StoredMsg = maybe_tag_session_id(Msg, SessionId),
-    case beam_agent_threads_core:active_thread(SessionId) of
+    _ = case beam_agent_threads_core:active_thread(SessionId) of
         {ok, ThreadId} ->
             beam_agent_threads_core:record_thread_message(
                 SessionId, ThreadId, StoredMsg);

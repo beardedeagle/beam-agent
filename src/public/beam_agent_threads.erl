@@ -267,7 +267,7 @@ does not exist.
 ```
 """.
 -spec fork_thread(binary(), binary(), thread_opts()) ->
-    {ok, thread_meta()} | {error, not_found}.
+    {ok, thread_meta()} | {error, not_found | message_limit_reached}.
 fork_thread(SessionId, ThreadId, Opts) ->
     beam_agent_threads_core:fork_thread(SessionId, ThreadId, Opts).
 

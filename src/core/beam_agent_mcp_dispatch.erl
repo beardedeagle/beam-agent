@@ -571,6 +571,26 @@ dispatch_provider(Id, Method, Capability, HandlerFun, Params, State) ->
     end.
 
 %%--------------------------------------------------------------------
+%% Internal: Safe Provider Call (crash isolation)
+%%--------------------------------------------------------------------
+
+%% Wrap any provider callback in try/catch so a crashing provider
+%% returns a JSON-RPC internal error instead of propagating the
+%% exception to the owning session process.
+-spec safe_provider_call(module(), atom(), [term()], dispatch_state()) ->
+    {ok, term()} | {ok, term(), term()} | {error, integer(), binary()}.
+safe_provider_call(Provider, Function, Args, _State) ->
+    try
+        erlang:apply(Provider, Function, Args)
+    catch
+        Class:Reason:Stacktrace ->
+            logger:error("MCP provider ~s:~s crashed: ~s:~p~n~p",
+                [Provider, Function, Class, Reason, Stacktrace]),
+            {error, beam_agent_mcp_protocol:error_internal(),
+             <<"Provider callback crashed">>}
+    end.
+
+%%--------------------------------------------------------------------
 %% Internal: Resource Handlers (delegate to provider)
 %%--------------------------------------------------------------------
 
@@ -580,7 +600,8 @@ handle_resources_list(Id, Params,
                       #{provider := Provider,
                         provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case Provider:handle_resources_list(Cursor, PState) of
+    case safe_provider_call(Provider, handle_resources_list,
+                            [Cursor, PState], State) of
         {ok, {Resources, undefined}, NewPState} ->
             Resp = beam_agent_mcp_protocol:resources_list_response(
                        Id, Resources),
@@ -607,7 +628,8 @@ handle_resources_read(Id, Params,
                           <<"Missing required parameter: uri">>),
             {ErrResp, State};
         _ ->
-            case Provider:handle_resources_read(Uri, PState) of
+            case safe_provider_call(Provider, handle_resources_read,
+                                    [Uri, PState], State) of
                 {ok, Contents, NewPState} ->
                     Resp = beam_agent_mcp_protocol:resources_read_response(
                                Id, Contents),
@@ -625,7 +647,8 @@ handle_resources_templates_list(Id, Params,
                                 #{provider := Provider,
                                   provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case Provider:handle_resources_templates_list(Cursor, PState) of
+    case safe_provider_call(Provider, handle_resources_templates_list,
+                            [Cursor, PState], State) of
         {ok, {Templates, undefined}, NewPState} ->
             Resp = beam_agent_mcp_protocol:resources_templates_list_response(
                        Id, Templates),
@@ -676,7 +699,8 @@ handle_prompts_list(Id, Params,
                     #{provider := Provider,
                       provider_state := PState} = State) ->
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    case Provider:handle_prompts_list(Cursor, PState) of
+    case safe_provider_call(Provider, handle_prompts_list,
+                            [Cursor, PState], State) of
         {ok, {Prompts, undefined}, NewPState} ->
             Resp = beam_agent_mcp_protocol:prompts_list_response(
                        Id, Prompts),
@@ -704,7 +728,8 @@ handle_prompts_get(Id, Params,
                           <<"Missing required parameter: name">>),
             {ErrResp, State};
         _ ->
-            case Provider:handle_prompts_get(Name, Arguments, PState) of
+            case safe_provider_call(Provider, handle_prompts_get,
+                                    [Name, Arguments, PState], State) of
                 {ok, {Messages, undefined}, NewPState} ->
                     Resp = beam_agent_mcp_protocol:prompts_get_response(
                                Id, Messages),
@@ -732,8 +757,8 @@ handle_completion_complete(Id, Params,
     Ref = maps:get(<<"ref">>, Params, #{}),
     Argument = maps:get(<<"argument">>, Params, #{}),
     Context = maps:get(<<"context">>, Params, undefined),
-    case Provider:handle_completion_complete(Ref, Argument, Context,
-                                             PState) of
+    case safe_provider_call(Provider, handle_completion_complete,
+                            [Ref, Argument, Context, PState], State) of
         {ok, CompResult, NewPState} ->
             Resp = beam_agent_mcp_protocol:completion_complete_response(
                        Id, CompResult),
@@ -754,7 +779,8 @@ handle_logging_set_level(Id, Params,
                            provider_state := PState} = State) ->
     LevelBin = maps:get(<<"level">>, Params, <<"info">>),
     Level = safe_log_level(LevelBin),
-    case Provider:handle_logging_set_level(Level, PState) of
+    case safe_provider_call(Provider, handle_logging_set_level,
+                            [Level, PState], State) of
         {ok, NewPState} ->
             Resp = beam_agent_mcp_protocol:logging_set_level_response(Id),
             {Resp, State#{provider_state => NewPState}};

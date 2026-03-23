@@ -31,7 +31,8 @@ default_model() ->
 -doc "Build the websocket request path for the realtime API.".
 -spec build_ws_path(binary()) -> binary().
 build_ws_path(Model) when is_binary(Model), byte_size(Model) > 0 ->
-    <<"/v1/realtime?model=", Model/binary>>.
+    QueryString = uri_string:compose_query([{"model", binary_to_list(Model)}]),
+    <<"/v1/realtime?", (unicode:characters_to_binary(QueryString))/binary>>.
 
 -doc "Build websocket upgrade headers for direct realtime sessions.".
 -spec build_headers(binary(), map()) -> [{binary(), binary()}].

@@ -673,6 +673,108 @@ cancelled_notification_accepted_in_shutting_down_state_test() ->
     {noreply, _} = beam_agent_mcp_dispatch:handle_message(Msg, ShutState).
 
 %%====================================================================
+%% Provider Crash Isolation Tests (H4)
+%%====================================================================
+
+%% Helper: state wired to the crash provider, fully initialized.
+make_state_with_crash_provider() ->
+    Info = beam_agent_mcp_protocol:implementation_info(
+               <<"test-server">>, <<"1.0.0">>),
+    Caps = #{tools => #{listChanged => true},
+             resources => #{subscribe => true, listChanged => true},
+             prompts => #{listChanged => true},
+             completions => #{},
+             logging => #{}},
+    State0 = beam_agent_mcp_dispatch:new(Info, Caps, #{
+        provider => beam_agent_mcp_dispatch_crash_provider,
+        provider_state => #{}
+    }),
+    do_initialize(State0).
+
+%% Verify the response is a JSON-RPC internal error (-32603).
+assert_internal_error(Resp) ->
+    ?assert(maps:is_key(<<"error">>, Resp),
+            {expected_error_response, Resp}),
+    Err = maps:get(<<"error">>, Resp),
+    ?assertEqual(-32603, maps:get(<<"code">>, Err)).
+
+provider_crash_resources_list_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 100,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_resources_read_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 101,
+            <<"method">> => <<"resources/read">>,
+            <<"params">> => #{<<"uri">> => <<"file:///crash.txt">>}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_resources_templates_list_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 102,
+            <<"method">> => <<"resources/templates/list">>,
+            <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_prompts_list_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 103,
+            <<"method">> => <<"prompts/list">>,
+            <<"params">> => #{}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_prompts_get_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 104,
+            <<"method">> => <<"prompts/get">>,
+            <<"params">> => #{<<"name">> => <<"any">>,
+                              <<"arguments">> => #{}}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_completion_complete_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 105,
+            <<"method">> => <<"completion/complete">>,
+            <<"params">> => #{<<"ref">> => #{<<"type">> => <<"ref/prompt">>,
+                                             <<"name">> => <<"any">>},
+                              <<"argument">> => #{<<"name">> => <<"x">>,
+                                                  <<"value">> => <<"y">>}}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+provider_crash_logging_set_level_returns_internal_error_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 106,
+            <<"method">> => <<"logging/setLevel">>,
+            <<"params">> => #{<<"level">> => <<"debug">>}},
+    {Resp, _} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    assert_internal_error(Resp).
+
+%% Verify that the session state is preserved (not crashed) after a
+%% provider crash — the dispatch state returned is still usable.
+provider_crash_does_not_corrupt_session_state_test() ->
+    State = make_state_with_crash_provider(),
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 107,
+            <<"method">> => <<"resources/list">>,
+            <<"params">> => #{}},
+    {_Resp, NewState} = beam_agent_mcp_dispatch:handle_message(Msg, State),
+    %% Lifecycle must still be ready after a provider crash
+    ?assertEqual(ready, beam_agent_mcp_dispatch:lifecycle_state(NewState)),
+    %% A subsequent ping must still work
+    PingMsg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 108,
+                <<"method">> => <<"ping">>, <<"params">> => #{}},
+    {PingResp, _} = beam_agent_mcp_dispatch:handle_message(PingMsg, NewState),
+    ?assertEqual(#{}, maps:get(<<"result">>, PingResp)).
+
+%%====================================================================
 %% Full Lifecycle Round-Trip: ready → error → reset → re-initialize
 %%====================================================================
 

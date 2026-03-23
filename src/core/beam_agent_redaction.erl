@@ -65,19 +65,24 @@ redact_term(Value, _Path) ->
 -spec is_sensitive_key_path([binary(), ...]) -> boolean().
 is_sensitive_key_path([Current | Ancestors]) ->
     lists:member(Current, [
-        <<"apikey">>,
         <<"accesstoken">>,
-        <<"refreshtoken">>,
-        <<"idtoken">>,
-        <<"token">>,
-        <<"oauthtoken">>,
-        <<"bearertoken">>,
-        <<"clientsecret">>,
-        <<"secret">>,
-        <<"password">>,
+        <<"apikey">>,
         <<"authorization">>,
         <<"authorizationcode">>,
-        <<"codeverifier">>
+        <<"bearertoken">>,
+        <<"clientsecret">>,
+        <<"codeverifier">>,
+        <<"credentialkey">>,
+        <<"githubtoken">>,
+        <<"idtoken">>,
+        <<"oauthtoken">>,
+        <<"password">>,
+        <<"personaltoken">>,
+        <<"privatekey">>,
+        <<"refreshtoken">>,
+        <<"secret">>,
+        <<"sessiontoken">>,
+        <<"token">>
     ]) orelse
         (Current =:= <<"code">> andalso lists:member(<<"oauthcallback">>, Ancestors)).
 

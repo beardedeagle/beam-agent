@@ -41,7 +41,9 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
 -export_type([runtime_state/0]).
 
 -dialyzer({no_underspecs, [{provider_catalog, 0},
-                           {fallback_provider_entry, 2}]}).
+                           {fallback_provider_entry, 2},
+                           {put_state_cas, 3},
+                           {update_state_cas, 3}]}).
 
 -type runtime_state() :: #{
     provider_id => binary(),
@@ -129,7 +131,7 @@ get_raw_state(Session) ->
     ensure_tables(),
     case ets:lookup(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)) of
         [{_, State}] when is_map(State) ->
-            {ok, State};
+            {ok, beam_agent_credential:unprotect(State)};
         [] ->
             {ok, #{}}
     end.
@@ -397,22 +399,70 @@ merge_query_opts(Session, Params) when is_map(Params) ->
 put_state(Session, Updates) when is_map(Updates) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    State = case ets:lookup(?RUNTIME_TABLE, Key) of
-        [{_, Existing}] when is_map(Existing) ->
-            maps:merge(Existing, defaulted_state(Updates));
-        [] ->
-            defaulted_state(Updates)
+    put_state_cas(Key, Updates, 5).
+
+-spec put_state_cas(pid() | binary(), map(), pos_integer()) -> ok.
+put_state_cas(_Key, _Updates, 0) ->
+    error(put_state_cas_exhausted);
+put_state_cas(Key, Updates, Retries) ->
+    OldRecord = case ets:lookup(?RUNTIME_TABLE, Key) of
+        [{_, Existing}] when is_map(Existing) -> {Key, Existing};
+        [] -> undefined
     end,
-    beam_agent_ets:insert(?RUNTIME_TABLE, {Key, State}),
-    ok.
+    NewState = case OldRecord of
+        undefined ->
+            beam_agent_credential:protect(defaulted_state(Updates));
+        {_, ExistingState} ->
+            Decrypted = beam_agent_credential:unprotect(ExistingState),
+            beam_agent_credential:protect(
+                maps:merge(Decrypted, defaulted_state(Updates)))
+    end,
+    case OldRecord of
+        undefined ->
+            case beam_agent_ets:insert_new(?RUNTIME_TABLE, {Key, NewState}) of
+                true -> ok;
+                false -> put_state_cas(Key, Updates, Retries - 1)
+            end;
+        _ ->
+            MatchSpec = [{OldRecord, [], [{const, {Key, NewState}}]}],
+            case beam_agent_ets:select_replace(?RUNTIME_TABLE, MatchSpec) of
+                1 -> ok;
+                0 -> put_state_cas(Key, Updates, Retries - 1)
+            end
+    end.
 
 -spec update_state(pid() | binary(), fun((map()) -> map())) -> ok.
 update_state(Session, Fun) ->
-    {ok, State} = get_raw_state(Session),
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    beam_agent_ets:insert(?RUNTIME_TABLE, {Key, defaulted_state(Fun(State))}),
-    ok.
+    update_state_cas(Key, Fun, 5).
+
+-spec update_state_cas(pid() | binary(), fun((map()) -> map()), pos_integer()) -> ok.
+update_state_cas(_Key, _Fun, 0) ->
+    error(update_state_cas_exhausted);
+update_state_cas(Key, Fun, Retries) ->
+    OldRecord = case ets:lookup(?RUNTIME_TABLE, Key) of
+        [{_, Existing}] when is_map(Existing) -> {Key, Existing};
+        [] -> undefined
+    end,
+    Decrypted = case OldRecord of
+        undefined -> #{};
+        {_, ExistingState} -> beam_agent_credential:unprotect(ExistingState)
+    end,
+    NewState = beam_agent_credential:protect(defaulted_state(Fun(Decrypted))),
+    case OldRecord of
+        undefined ->
+            case beam_agent_ets:insert_new(?RUNTIME_TABLE, {Key, NewState}) of
+                true -> ok;
+                false -> update_state_cas(Key, Fun, Retries - 1)
+            end;
+        _ ->
+            MatchSpec = [{OldRecord, [], [{const, {Key, NewState}}]}],
+            case beam_agent_ets:select_replace(?RUNTIME_TABLE, MatchSpec) of
+                1 -> ok;
+                0 -> update_state_cas(Key, Fun, Retries - 1)
+            end
+    end.
 
 -spec infer_provider(pid() | binary()) -> {ok, binary()} | {error, not_set}.
 infer_provider(Session) ->

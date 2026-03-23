@@ -57,7 +57,10 @@ beam_agent_session_store_core:record_message(SessionId, Message),
     get_session_messages/2,
     %% Convenience
     session_count/0,
-    message_count/1
+    message_count/1,
+    %% Limit configuration
+    max_sessions/0,
+    max_messages_per_session/0
 ]).
 
 -export_type([
@@ -130,6 +133,10 @@ beam_agent_session_store_core:record_message(SessionId, Message),
 %% Counter table for message sequence numbers per session.
 -define(COUNTERS_TABLE, beam_agent_session_counters).
 
+%% Default system-wide limits.
+-define(DEFAULT_MAX_SESSIONS, 10_000).
+-define(DEFAULT_MAX_MESSAGES_PER_SESSION, 100_000).
+
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
@@ -165,20 +172,28 @@ clear() ->
 Register a new session with metadata.
 If the session already exists, this is a no-op (use `update_session/2`
 to modify existing sessions).
+Returns `{error, session_limit_reached}` when the system-wide session
+limit (see `max_sessions/0`) has been reached.
 """.
--spec register_session(binary(), map()) -> ok.
+-spec register_session(binary(), map()) -> ok | {error, session_limit_reached}.
 register_session(SessionId, Meta) when is_binary(SessionId), is_map(Meta) ->
     ensure_tables(),
-    Now = erlang:system_time(millisecond),
-    Entry = Meta#{
-        session_id => SessionId,
-        created_at => maps:get(created_at, Meta, Now),
-        updated_at => Now,
-        message_count => 0
-    },
-    %% insert_new: only insert if not already present
-    beam_agent_ets:insert_new(?SESSIONS_TABLE, {SessionId, Entry}),
-    ok.
+    Max = max_sessions(),
+    case Max =:= infinity orelse session_count() < Max of
+        true ->
+            Now = erlang:system_time(millisecond),
+            Entry = Meta#{
+                session_id => SessionId,
+                created_at => maps:get(created_at, Meta, Now),
+                updated_at => Now,
+                message_count => 0
+            },
+            %% insert_new: only insert if not already present
+            beam_agent_ets:insert_new(?SESSIONS_TABLE, {SessionId, Entry}),
+            ok;
+        false ->
+            {error, session_limit_reached}
+    end.
 
 -doc """
 Update an existing session's metadata.
@@ -253,9 +268,13 @@ Create a fork of an existing session in the universal store.
 
 Copies the tracked session metadata and all stored messages into a new
 session id, preserving the source session in `extra.fork.parent_session_id`.
+Returns `{error, session_limit_reached}` if the session limit is reached,
+or `{error, message_limit_reached}` if the message limit is reached while
+copying messages into the fork.
 """.
 -spec fork_session(binary(), map()) ->
-    {ok, session_meta()} | {error, not_found}.
+    {ok, session_meta()} |
+    {error, not_found | session_limit_reached | message_limit_reached}.
 fork_session(SourceSessionId, Opts)
   when is_binary(SourceSessionId), is_map(Opts) ->
     case get_session(SourceSessionId) of
@@ -280,9 +299,17 @@ fork_session(SourceSessionId, Opts)
                     forked_at => Now
                 }
             },
-            ok = register_session(SessionId, ForkMeta#{extra => ForkExtra}),
-            ok = record_messages(SessionId, Messages),
-            get_session(SessionId);
+            case register_session(SessionId, ForkMeta#{extra => ForkExtra}) of
+                ok ->
+                    case record_messages(SessionId, Messages) of
+                        ok ->
+                            get_session(SessionId);
+                        {error, _} = Err ->
+                            Err
+                    end;
+                {error, _} = Err ->
+                    Err
+            end;
         {error, not_found} ->
             {error, not_found}
     end.
@@ -295,26 +322,42 @@ fork_session(SourceSessionId, Opts)
 Record a single message for a session.
 The message is stored with an auto-incrementing sequence number
 for ordering. Session metadata is auto-created if not present.
+Returns `{error, message_limit_reached}` when the per-session message
+limit (see `max_messages_per_session/0`) has been reached.
 """.
--spec record_message(binary(), beam_agent_core:message()) -> ok.
+-spec record_message(binary(), beam_agent_core:message()) ->
+    ok | {error, message_limit_reached}.
 record_message(SessionId, Message) when is_binary(SessionId), is_map(Message) ->
     ensure_tables(),
-    Seq = beam_agent_ets:update_counter(?COUNTERS_TABLE, SessionId, {2, 1},
-        {SessionId, 0}),
-    beam_agent_ets:insert(?MESSAGES_TABLE, {{SessionId, Seq}, Message}),
-    %% Update session metadata
-    update_message_count(SessionId, Message),
-    ok = publish_session_event(SessionId, Message),
-    ok.
+    Max = max_messages_per_session(),
+    case Max =:= infinity orelse message_count(SessionId) < Max of
+        true ->
+            Seq = beam_agent_ets:update_counter(?COUNTERS_TABLE, SessionId, {2, 1},
+                {SessionId, 0}),
+            beam_agent_ets:insert(?MESSAGES_TABLE, {{SessionId, Seq}, Message}),
+            %% Update session metadata
+            _ = update_message_count(SessionId, Message),
+            ok = publish_session_event(SessionId, Message),
+            ok;
+        false ->
+            {error, message_limit_reached}
+    end.
 
--doc "Record multiple messages for a session.".
--spec record_messages(binary(), [beam_agent_core:message()]) -> ok.
+-doc """
+Record multiple messages for a session.
+Stops and returns `{error, message_limit_reached}` if the per-session
+message limit is reached while recording.
+""".
+-spec record_messages(binary(), [beam_agent_core:message()]) ->
+    ok | {error, message_limit_reached}.
 record_messages(SessionId, Messages)
   when is_binary(SessionId), is_list(Messages) ->
-    lists:foreach(fun(Msg) ->
-        record_message(SessionId, Msg)
-    end, Messages),
-    ok.
+    lists:foldl(fun
+        (_Msg, {error, _} = Err) ->
+            Err;
+        (Msg, ok) ->
+            record_message(SessionId, Msg)
+    end, ok, Messages).
 
 -doc "Get all messages for a session, in order. Equivalent to `get_session_messages(SessionId, #{})`.".
 -spec get_session_messages(binary()) ->
@@ -515,6 +558,17 @@ message_count(SessionId) when is_binary(SessionId) ->
         [] -> 0
     end.
 
+-doc "Return the configured maximum number of sessions.".
+-spec max_sessions() -> pos_integer() | infinity.
+max_sessions() ->
+    application:get_env(beam_agent, max_sessions, ?DEFAULT_MAX_SESSIONS).
+
+-doc "Return the configured maximum messages per session.".
+-spec max_messages_per_session() -> pos_integer() | infinity.
+max_messages_per_session() ->
+    application:get_env(beam_agent, max_messages_per_session,
+                        ?DEFAULT_MAX_MESSAGES_PER_SESSION).
+
 %%--------------------------------------------------------------------
 %% Internal: Filter Matching
 %%--------------------------------------------------------------------
@@ -633,7 +687,8 @@ apply_session_view(SessionId, Messages, Opts) ->
 %% Internal: Session Metadata Updates
 %%--------------------------------------------------------------------
 
--spec update_message_count(binary(), beam_agent_core:message()) -> ok.
+-spec update_message_count(binary(), beam_agent_core:message()) ->
+    ok | {error, session_limit_reached}.
 update_message_count(SessionId, Message) ->
     Now = erlang:system_time(millisecond),
     case ets:lookup(?SESSIONS_TABLE, SessionId) of

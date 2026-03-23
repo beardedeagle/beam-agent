@@ -160,7 +160,7 @@ The new thread receives a copy of the source thread's visible message history
 with the `thread_id` rewritten to the fork id.
 """.
 -spec fork_thread(binary(), binary(), thread_opts()) ->
-    {ok, thread_meta()} | {error, not_found}.
+    {ok, thread_meta()} | {error, not_found | message_limit_reached}.
 fork_thread(SessionId, SourceThreadId, Opts)
   when is_binary(SessionId), is_binary(SourceThreadId), is_map(Opts) ->
     case get_thread(SessionId, SourceThreadId) of
@@ -176,16 +176,20 @@ fork_thread(SessionId, SourceThreadId, Opts)
             },
             {ok, _Forked} = start_thread(SessionId, ThreadOpts),
             Copied = [Message#{thread_id => ThreadId} || Message <- SourceMessages],
-            ok = lists:foreach(fun(Msg) ->
-                beam_agent_session_store_core:record_message(SessionId, Msg)
-            end, Copied),
-            update_thread(SessionId, ThreadId, fun(Thread0) ->
-                Thread0#{
-                    message_count => length(Copied),
-                    visible_message_count => length(Copied),
-                    parent_thread_id => ParentThreadId
-                }
-            end);
+            case beam_agent_session_store_core:record_messages(SessionId, Copied) of
+                ok ->
+                    update_thread(SessionId, ThreadId, fun(Thread0) ->
+                        Thread0#{
+                            message_count => length(Copied),
+                            visible_message_count => length(Copied),
+                            parent_thread_id => ParentThreadId
+                        }
+                    end);
+                {error, message_limit_reached} = Err ->
+                    %% Clean up the empty thread we just created
+                    delete_thread(SessionId, ThreadId),
+                    Err
+            end;
         {error, not_found} ->
             {error, not_found}
     end.
@@ -393,7 +397,7 @@ record_thread_message(SessionId, ThreadId, Message)
     end,
     %% Also record in the session-level message store
     TaggedMessage = Message#{thread_id => ThreadId},
-    beam_agent_session_store_core:record_message(SessionId, TaggedMessage),
+    _ = beam_agent_session_store_core:record_message(SessionId, TaggedMessage),
     ok.
 
 -doc """

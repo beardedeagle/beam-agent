@@ -262,7 +262,9 @@ defmodule BeamAgent.SessionStore do
   fork.session_id  # => "sess_fork_001"
   ```
   """
-  @spec fork_session(binary(), map()) :: {:ok, session_meta()} | {:error, :not_found}
+  @spec fork_session(binary(), map()) ::
+          {:ok, session_meta()}
+          | {:error, :not_found | :session_limit_reached | :message_limit_reached}
   defdelegate fork_session(session_id, opts), to: :beam_agent_session_store
 
   @doc """

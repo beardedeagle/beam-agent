@@ -734,7 +734,7 @@ track_message(Msg, #hstate{session_id = SessionId} = HState) ->
     StoredMsg = maybe_tag_session_id(Msg, StoreId),
     ok = beam_agent_session_store_core:update_session(
              StoreId, session_meta(HState)),
-    case beam_agent_threads_core:active_thread(StoreId) of
+    _ = case beam_agent_threads_core:active_thread(StoreId) of
         {ok, ThreadId} ->
             beam_agent_threads_core:record_thread_message(
                 StoreId, ThreadId, StoredMsg);

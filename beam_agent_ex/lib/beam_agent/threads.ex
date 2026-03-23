@@ -131,7 +131,9 @@ defmodule BeamAgent.Threads do
   - `:name` — human-readable name for the fork
   - `:parent_thread_id` — defaults to the source `thread_id`
 
-  Returns `{:ok, fork_meta}` or `{:error, :not_found}`.
+  Returns `{:ok, fork_meta}`, `{:error, :not_found}`, or
+  `{:error, :message_limit_reached}` if the per-session message limit
+  would be exceeded by copying messages into the fork.
 
   ## Example
 
@@ -141,7 +143,8 @@ defmodule BeamAgent.Threads do
   })
   ```
   """
-  @spec thread_fork(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec thread_fork(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_found | :message_limit_reached}
   defdelegate thread_fork(session, thread_id), to: :beam_agent_threads
 
   @doc """
@@ -150,7 +153,8 @@ defmodule BeamAgent.Threads do
   Same as `thread_fork/2` but accepts an `opts` map for the fork's name,
   explicit thread ID, and parent thread ID.
   """
-  @spec thread_fork(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_fork(pid(), binary(), map()) ::
+          {:ok, map()} | {:error, :not_found | :message_limit_reached}
   defdelegate thread_fork(session, thread_id, opts), to: :beam_agent_threads
 
   @doc """

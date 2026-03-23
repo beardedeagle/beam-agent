@@ -27,7 +27,8 @@
 -export([
     callback_mode/0,
     init/1,
-    terminate/3
+    terminate/3,
+    format_status/1
 ]).
 
 -export([
@@ -37,6 +38,19 @@
     active_query/3,
     error/3
 ]).
+
+-ifdef(TEST).
+-export([
+    redact_engine_data/1,
+    enforce_queue_max/1,
+    drop_oldest/2,
+    make_test_engine/1,
+    test_get_handler_state/1,
+    test_get_opts/1,
+    test_get_msg_queue/1,
+    test_get_queue_max/1
+]).
+-endif.
 
 %%--------------------------------------------------------------------
 %% Types
@@ -62,6 +76,7 @@
     consumer  :: gen_statem:from() | undefined,
     query_ref :: reference() | undefined,
     msg_queue = queue:new() :: queue:queue(),
+    queue_max = 10_000      :: pos_integer() | infinity,
 
     %% Session identity
     session_id      :: binary(),
@@ -174,6 +189,7 @@ init({HandlerMod, Opts}) ->
                         transport_ref = TRef,
                         buffer_max    = maps:get(buffer_max, Opts1,
                                                  ?BUFFER_MAX_DEFAULT),
+                        queue_max     = maps:get(queue_max, Opts1, 10_000),
                         session_id    = SessionId,
                         model         = maps:get(model, Opts1, undefined),
                         permission_mode = maps:get(permission_mode, Opts1,
@@ -190,13 +206,25 @@ init({HandlerMod, Opts}) ->
     end.
 
 -spec terminate(term(), state_name(), #engine{}) -> ok.
-terminate(Reason, _State, #engine{handler_mod   = H,
+terminate(Reason, _State, #engine{consumer      = Consumer,
+                                   handler_mod   = H,
                                    handler_state = HState,
                                    transport_mod = TMod,
                                    transport_ref = TRef}) ->
+    %% Reply to any pending consumer so callers don't hang
+    case Consumer of
+        undefined -> ok;
+        From -> gen_statem:reply(From, {error, {session_terminated, Reason}})
+    end,
     _ = H:terminate_handler(Reason, HState),
     _ = TMod:close(TRef),
     ok.
+
+-doc "Redact sensitive fields from crash logs and sys:get_status output.".
+-spec format_status(gen_statem:format_status()) -> gen_statem:format_status().
+format_status(Status) ->
+    Data = maps:get(data, Status, undefined),
+    Status#{data => redact_engine_data(Data)}.
 
 %%====================================================================
 %% State: connecting
@@ -725,7 +753,7 @@ deliver_messages([Msg | Rest], Data) ->
 
 -spec try_deliver_message(beam_agent_core:message(), #engine{}) -> #engine{}.
 try_deliver_message(Msg, #engine{consumer = undefined} = Data) ->
-    Data#engine{msg_queue = queue:in(Msg, Data#engine.msg_queue)};
+    enforce_queue_max(Data#engine{msg_queue = queue:in(Msg, Data#engine.msg_queue)});
 try_deliver_message(Msg, #engine{consumer = From} = Data) ->
     gen_statem:reply(From, {ok, Msg}),
     Data#engine{consumer = undefined}.
@@ -872,7 +900,7 @@ queue_messages([], Data) ->
     Data;
 queue_messages([Msg | Rest], Data) ->
     Q = queue:in(Msg, Data#engine.msg_queue),
-    queue_messages(Rest, Data#engine{msg_queue = Q}).
+    queue_messages(Rest, enforce_queue_max(Data#engine{msg_queue = Q})).
 
 %%====================================================================
 %% Internal: session info builder
@@ -944,3 +972,78 @@ maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+%%====================================================================
+%% Internal: format_status redaction
+%%====================================================================
+
+-spec redact_engine_data(#engine{} | term()) -> #engine{} | term().
+redact_engine_data(#engine{} = Data) ->
+    Data#engine{
+        handler_state = redacted,
+        opts = beam_agent_redaction:map(Data#engine.opts)
+    };
+redact_engine_data(Other) ->
+    Other.
+
+%%====================================================================
+%% Internal: queue_max enforcement
+%%====================================================================
+
+-spec enforce_queue_max(#engine{}) -> #engine{}.
+enforce_queue_max(#engine{queue_max = infinity} = Data) ->
+    Data;
+enforce_queue_max(#engine{msg_queue = Q, queue_max = Max} = Data) ->
+    case queue:len(Q) > Max of
+        false -> Data;
+        true ->
+            %% Drop oldest messages until within limit
+            Q1 = drop_oldest(Q, queue:len(Q) - Max),
+            Data#engine{msg_queue = Q1}
+    end.
+
+-spec drop_oldest(queue:queue(), non_neg_integer()) -> queue:queue().
+drop_oldest(Q, 0) -> Q;
+drop_oldest(Q, N) ->
+    {_, Q1} = queue:out(Q),
+    drop_oldest(Q1, N - 1).
+
+%%====================================================================
+%% Test-only helpers (ifdef TEST)
+%%====================================================================
+
+-ifdef(TEST).
+
+-doc false.
+-spec make_test_engine(map()) -> #engine{}.
+make_test_engine(Overrides) ->
+    #engine{
+        handler_mod   = maps:get(handler_mod, Overrides, undefined),
+        handler_state = maps:get(handler_state, Overrides, undefined),
+        transport_mod = maps:get(transport_mod, Overrides, undefined),
+        transport_ref = maps:get(transport_ref, Overrides, undefined),
+        consumer      = maps:get(consumer, Overrides, undefined),
+        query_ref     = maps:get(query_ref, Overrides, undefined),
+        msg_queue     = maps:get(msg_queue, Overrides, queue:new()),
+        queue_max     = maps:get(queue_max, Overrides, 10_000),
+        session_id    = maps:get(session_id, Overrides, <<"test">>),
+        opts          = maps:get(opts, Overrides, #{})
+    }.
+
+-doc false.
+-spec test_get_handler_state(#engine{}) -> term().
+test_get_handler_state(#engine{handler_state = V}) -> V.
+
+-doc false.
+-spec test_get_opts(#engine{}) -> map().
+test_get_opts(#engine{opts = V}) -> V.
+
+-doc false.
+-spec test_get_msg_queue(#engine{}) -> queue:queue().
+test_get_msg_queue(#engine{msg_queue = V}) -> V.
+
+-doc false.
+-spec test_get_queue_max(#engine{}) -> pos_integer() | infinity.
+test_get_queue_max(#engine{queue_max = V}) -> V.
+
+-endif.

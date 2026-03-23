@@ -15,12 +15,17 @@
 %%====================================================================
 
 -record(state, {
-    owner     :: pid(),
-    owner_mon :: reference(),
-    base_url  :: string(),
-    ssl_opts  :: list(),
+    owner         :: pid(),
+    owner_mon     :: reference(),
+    base_url      :: string(),
+    ssl_opts      :: list(),
+    timeout       :: pos_integer(),
+    connect_timeout :: pos_integer(),
+    max_body_size :: pos_integer(),
     %% httpc RequestId → our StreamRef
-    pending   :: #{reference() => reference()}
+    pending       :: #{reference() => reference()},
+    %% httpc RequestId → accumulated body byte count
+    body_sizes    :: #{reference() => non_neg_integer()}
 }).
 
 %%====================================================================
@@ -78,14 +83,21 @@ init({Owner, Host, Port, Opts}) ->
             case build_ssl_opts(Scheme, Host, Opts) of
                 {ok, SslOpts} ->
                     MonRef = erlang:monitor(process, Owner),
+                    Timeout = maps:get(timeout, Opts, 30000),
+                    ConnectTimeout = maps:get(connect_timeout, Opts, 10000),
+                    MaxBodySize = maps:get(max_body_size, Opts, 104_857_600),
                     %% Signal readiness — analogous to TCP connect completing.
                     Owner ! {transport_up, self(), http},
                     {ok, #state{
-                        owner     = Owner,
-                        owner_mon = MonRef,
-                        base_url  = BaseUrl,
-                        ssl_opts  = SslOpts,
-                        pending   = #{}
+                        owner           = Owner,
+                        owner_mon       = MonRef,
+                        base_url        = BaseUrl,
+                        ssl_opts        = SslOpts,
+                        timeout         = Timeout,
+                        connect_timeout = ConnectTimeout,
+                        max_body_size   = MaxBodySize,
+                        pending         = #{},
+                        body_sizes      = #{}
                     }};
                 {error, unsafe_tls_opts} ->
                     {stop, unsafe_tls_opts}
@@ -101,9 +113,11 @@ handle_call({request, Method, Path, Headers, Body}, _From, State) ->
     Url = State#state.base_url ++
           binary_to_list(iolist_to_binary(Path)),
     HdrList = headers_to_httpc(Headers),
+    HttpOpts0 = [{timeout, State#state.timeout},
+                 {connect_timeout, State#state.connect_timeout}],
     HttpOpts = case State#state.ssl_opts of
-        [] -> [];
-        Ssl -> [{ssl, Ssl}]
+        [] -> HttpOpts0;
+        Ssl -> [{ssl, Ssl} | HttpOpts0]
     end,
     Request = build_request(Method, Url, HdrList, Body),
     AsyncOpts = [{sync, false}, {stream, self}],
@@ -142,9 +156,23 @@ handle_info({http, {ReqId, stream, Data}}, State) ->
         undefined ->
             {noreply, State};
         StreamRef ->
-            State#state.owner !
-                {http_data, self(), StreamRef, nofin, Data},
-            {noreply, State}
+            Prev = maps:get(ReqId, State#state.body_sizes, 0),
+            Size = Prev + byte_size(Data),
+            case Size > State#state.max_body_size of
+                true ->
+                    catch httpc:cancel_request(ReqId),
+                    State#state.owner !
+                        {transport_down, self(), {body_too_large, Size}},
+                    Pending1 = maps:remove(ReqId, State#state.pending),
+                    BodySizes1 = maps:remove(ReqId, State#state.body_sizes),
+                    {noreply, State#state{pending = Pending1,
+                                         body_sizes = BodySizes1}};
+                false ->
+                    State#state.owner !
+                        {http_data, self(), StreamRef, nofin, Data},
+                    BodySizes1 = maps:put(ReqId, Size, State#state.body_sizes),
+                    {noreply, State#state{body_sizes = BodySizes1}}
+            end
     end;
 handle_info({http, {ReqId, stream_end, _Headers}}, State) ->
     case maps:get(ReqId, State#state.pending, undefined) of
@@ -154,7 +182,9 @@ handle_info({http, {ReqId, stream_end, _Headers}}, State) ->
             State#state.owner !
                 {http_data, self(), StreamRef, fin, <<>>},
             Pending1 = maps:remove(ReqId, State#state.pending),
-            {noreply, State#state{pending = Pending1}}
+            BodySizes1 = maps:remove(ReqId, State#state.body_sizes),
+            {noreply, State#state{pending = Pending1,
+                                  body_sizes = BodySizes1}}
     end;
 %% --- httpc full response: non-2xx or non-streaming ---
 handle_info({http, {ReqId, {{_, Status, _}, RawHeaders, Body}}},
@@ -179,7 +209,9 @@ handle_info({http, {ReqId, {{_, Status, _}, RawHeaders, Body}}},
                          iolist_to_binary(Body)}
             end,
             Pending1 = maps:remove(ReqId, State#state.pending),
-            {noreply, State#state{pending = Pending1}}
+            BodySizes1 = maps:remove(ReqId, State#state.body_sizes),
+            {noreply, State#state{pending = Pending1,
+                                  body_sizes = BodySizes1}}
     end;
 %% --- httpc request error ---
 handle_info({http, {ReqId, {error, Reason}}}, State) ->
@@ -190,7 +222,9 @@ handle_info({http, {ReqId, {error, Reason}}}, State) ->
             State#state.owner !
                 {transport_down, self(), {request_error, Reason}},
             Pending1 = maps:remove(ReqId, State#state.pending),
-            {noreply, State#state{pending = Pending1}}
+            BodySizes1 = maps:remove(ReqId, State#state.body_sizes),
+            {noreply, State#state{pending = Pending1,
+                                  body_sizes = BodySizes1}}
     end;
 %% --- Owner died ---
 handle_info({'DOWN', MonRef, process, _Pid, _Reason},
