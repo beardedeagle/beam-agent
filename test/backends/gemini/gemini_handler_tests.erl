@@ -38,7 +38,7 @@ set_model_no_session_empty_actions_test() ->
 %%====================================================================
 
 set_model_params_shape_test() ->
-    Params = beam_agent_gemini_wire:set_model_params(
+    Params = gemini_wire:set_model_params(
                  <<"sess-42">>, <<"gemini-2.5-pro">>),
     ?assertEqual(<<"sess-42">>, maps:get(<<"sessionId">>, Params)),
     ?assertEqual(<<"gemini-2.5-pro">>, maps:get(<<"modelId">>, Params)),
@@ -75,7 +75,7 @@ prompt_result_with_full_token_usage_test() ->
             }
         }
     },
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assertEqual(result, maps:get(type, Msg)),
     ?assert(maps:is_key(token_usage, Msg)),
     Usage = maps:get(token_usage, Msg),
@@ -84,7 +84,7 @@ prompt_result_with_full_token_usage_test() ->
 
 prompt_result_without_meta_no_token_usage_test() ->
     Response = #{<<"stopReason">> => <<"end_turn">>},
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assertEqual(result, maps:get(type, Msg)),
     ?assertNot(maps:is_key(token_usage, Msg)).
 
@@ -93,7 +93,7 @@ prompt_result_empty_quota_no_token_usage_test() ->
         <<"stopReason">> => <<"end_turn">>,
         <<"_meta">> => #{<<"quota">> => #{}}
     },
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assertNot(maps:is_key(token_usage, Msg)).
 
 prompt_result_partial_input_only_test() ->
@@ -107,7 +107,7 @@ prompt_result_partial_input_only_test() ->
             }
         }
     },
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assert(maps:is_key(token_usage, Msg)),
     Usage = maps:get(token_usage, Msg),
     ?assertEqual(100, maps:get(input_tokens, Usage)),
@@ -124,7 +124,7 @@ prompt_result_partial_output_only_test() ->
             }
         }
     },
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assert(maps:is_key(token_usage, Msg)),
     Usage = maps:get(token_usage, Msg),
     ?assertEqual(77, maps:get(output_tokens, Usage)),
@@ -142,7 +142,7 @@ prompt_result_preserves_stop_reason_with_meta_test() ->
             }
         }
     },
-    Msg = beam_agent_gemini_translate:prompt_result_message(<<"s1">>, Response),
+    Msg = gemini_translate:prompt_result_message(<<"s1">>, Response),
     ?assertEqual(<<"max_tokens">>, maps:get(stop_reason, Msg)).
 
 %%====================================================================

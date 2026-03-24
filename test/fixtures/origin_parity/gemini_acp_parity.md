@@ -8,11 +8,11 @@ Current baseline:
 - persistent multi-turn Gemini ACP session management via
   `src/backends/gemini/gemini_cli_session.erl`
 - ACP wire normalization via
-  `src/backends/gemini/beam_agent_gemini_wire.erl`
+  `src/backends/gemini/gemini_wire.erl`
 - Gemini message/event translation via
-  `src/backends/gemini/beam_agent_gemini_translate.erl`
+  `src/backends/gemini/gemini_translate.erl`
 - reverse permission request mediation via
-  `src/backends/gemini/beam_agent_gemini_reverse_requests.erl`
+  `src/backends/gemini/gemini_reverse_requests.erl`
 - participation in shared BeamAgent runtime, callback, attachment, and event
   pathways where universal layers currently provide the canonical surface
 

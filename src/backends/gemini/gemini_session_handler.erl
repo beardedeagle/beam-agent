@@ -160,7 +160,7 @@ encode_query(Prompt, Params,
                     PromptData = beam_agent_jsonrpc:encode_request(
                                      PromptId,
                                      <<"session/prompt">>,
-                                     beam_agent_gemini_wire:prompt_params(
+                                     gemini_wire:prompt_params(
                                          SessionId, Blocks)),
                     Pending = (HState1#hstate.pending)#{
                                   PromptId => prompt},
@@ -259,7 +259,7 @@ encode_interrupt(#hstate{session_id = SessionId,
   when SessionId =/= undefined ->
     CancelData = beam_agent_jsonrpc:encode_notification(
                      <<"session/cancel">>,
-                     beam_agent_gemini_wire:cancel_params(SessionId)),
+                     gemini_wire:cancel_params(SessionId)),
     HState1 = HState#hstate{cancel_requested = true},
     Actions = [{send, CancelData}],
     %% Also send OS SIGINT if port is available
@@ -282,7 +282,7 @@ handle_set_model(Model, HState) ->
             Encoded = beam_agent_jsonrpc:encode_request(
                           Id,
                           <<"session/setModel">>,
-                          beam_agent_gemini_wire:set_model_params(
+                          gemini_wire:set_model_params(
                               SessionId, Model)),
             Pending = (HState#hstate.pending)#{
                           Id => {set_model, undefined, Model}},
@@ -318,7 +318,7 @@ handle_set_permission_mode(Mode, HState) ->
             Encoded = beam_agent_jsonrpc:encode_request(
                           Id,
                           <<"session/setMode">>,
-                          beam_agent_gemini_wire:set_mode_params(
+                          gemini_wire:set_mode_params(
                               SessionId, RequestedMode)),
             Pending = (HState#hstate.pending)#{
                           Id => {set_mode, undefined, RequestedMode}},
@@ -378,7 +378,7 @@ process_init_lines(Buffer, HState) ->
             case beam_agent_jsonl:decode_line(Line) of
                 {ok, Map} ->
                     case handle_init_frame(
-                             beam_agent_gemini_wire:decode_message(Map),
+                             gemini_wire:decode_message(Map),
                              HState) of
                         {ready, Actions, HState1} ->
                             %% Transition to ready, pass leftover buffer
@@ -412,7 +412,7 @@ process_init_lines_with_actions(Buffer, HState, PriorActions) ->
             case beam_agent_jsonl:decode_line(Line) of
                 {ok, Map} ->
                     case handle_init_frame(
-                             beam_agent_gemini_wire:decode_message(Map),
+                             gemini_wire:decode_message(Map),
                              HState) of
                         {ready, Actions, HState1} ->
                             {next_state, ready,
@@ -428,7 +428,7 @@ process_init_lines_with_actions(Buffer, HState, PriorActions) ->
             end
     end.
 
--spec handle_init_frame(beam_agent_gemini_wire:decoded_message(), #hstate{}) ->
+-spec handle_init_frame(gemini_wire:decoded_message(), #hstate{}) ->
     {ready, [beam_agent_session_handler:handler_action()], #hstate{}}
   | {continue, [beam_agent_session_handler:handler_action()], #hstate{}}
   | {error, term(), #hstate{}}.
@@ -473,7 +473,7 @@ send_initialize(HState) ->
     Encoded = beam_agent_jsonrpc:encode_request(
                   Id,
                   <<"initialize">>,
-                  beam_agent_gemini_wire:initialize_params()),
+                  gemini_wire:initialize_params()),
     Pending = (HState#hstate.pending)#{Id => init},
     {[{send, Encoded}], HState#hstate{pending = Pending}}.
 
@@ -500,17 +500,17 @@ maybe_send_auth_or_start(#hstate{opts = Opts} = HState) ->
     {[beam_agent_session_handler:handler_action()], #hstate{}}.
 send_session_start(#hstate{opts = Opts} = HState) ->
     Id = beam_agent_jsonrpc:next_id(),
-    Method = beam_agent_gemini_wire:session_start_method(Opts),
+    Method = gemini_wire:session_start_method(Opts),
     Encoded = beam_agent_jsonrpc:encode_request(
                   Id,
                   Method,
-                  beam_agent_gemini_wire:session_start_params(Opts, [])),
+                  gemini_wire:session_start_params(Opts, [])),
     Pending = (HState#hstate.pending)#{Id => session_start},
     {[{send, Encoded}], HState#hstate{pending = Pending}}.
 
 -spec apply_session_start(map(), #hstate{}) -> #hstate{}.
 apply_session_start(Result, HState) ->
-    Parsed = beam_agent_gemini_wire:parse_start_result(Result),
+    Parsed = gemini_wire:parse_start_result(Result),
     SessionId = maps:get(session_id, Parsed, undefined),
     Modes = maps:get(modes, Parsed, undefined),
     Models = maps:get(models, Parsed, undefined),
@@ -555,7 +555,7 @@ extract_messages(Buffer, HState, MsgsAcc, ActionsAcc) ->
                 {ok, Map} ->
                     {NewMsgs, NewActions, HState1} =
                         handle_runtime_frame(
-                            beam_agent_gemini_wire:decode_message(Map),
+                            gemini_wire:decode_message(Map),
                             HState),
                     extract_messages(Rest, HState1,
                                     lists:reverse(NewMsgs) ++ MsgsAcc,
@@ -565,7 +565,7 @@ extract_messages(Buffer, HState, MsgsAcc, ActionsAcc) ->
             end
     end.
 
--spec handle_runtime_frame(beam_agent_gemini_wire:decoded_message(),
+-spec handle_runtime_frame(gemini_wire:decoded_message(),
                            #hstate{}) ->
     {[beam_agent_core:message()],
      [beam_agent_session_handler:handler_action()],
@@ -604,7 +604,7 @@ handle_response(Id, Result, HState) ->
                           false -> Result
                       end,
             StoreId = session_store_id(HState#hstate.session_id),
-            Msg = beam_agent_gemini_translate:prompt_result_message(
+            Msg = gemini_translate:prompt_result_message(
                       StoreId, Result1),
             HState1 = HState#hstate{pending = Pending1,
                                     cancel_requested = false},
@@ -682,11 +682,11 @@ handle_error_response(Id, Code, Message, ErrData, HState) ->
      [beam_agent_session_handler:handler_action()],
      #hstate{}}.
 handle_session_update(Params, HState) ->
-    case beam_agent_gemini_wire:parse_session_update(Params) of
+    case gemini_wire:parse_session_update(Params) of
         {ok, SessionId, Kind, Update} ->
             HState1 = maybe_set_session_id(SessionId, HState),
             HState2 = apply_update_meta(Kind, Update, HState1),
-            Messages = beam_agent_gemini_translate:session_update_messages(
+            Messages = gemini_translate:session_update_messages(
                            SessionId, Update),
             TrackedMsgs = observe_and_track(Messages, HState2),
             {TrackedMsgs, [], HState2};
@@ -701,9 +701,9 @@ handle_session_update(Params, HState) ->
 -spec handle_permission_request(integer(), map(), #hstate{}) ->
     [beam_agent_session_handler:handler_action()].
 handle_permission_request(Id, Params, _HState) ->
-    case beam_agent_gemini_wire:parse_permission_request(Params) of
+    case gemini_wire:parse_permission_request(Params) of
         {ok, SessionId, ToolCall, Options} ->
-            Response = beam_agent_gemini_reverse_requests:permission_response(
+            Response = gemini_reverse_requests:permission_response(
                            SessionId, ToolCall, Options),
             [{send, beam_agent_jsonrpc:encode_response(Id, Response)}];
         {error, Reason} ->
@@ -891,7 +891,7 @@ maybe_apply_query_mode(Params, HState) ->
             ModeEncoded = beam_agent_jsonrpc:encode_request(
                               Id,
                               <<"session/setMode">>,
-                              beam_agent_gemini_wire:set_mode_params(
+                              gemini_wire:set_mode_params(
                                   SessionId, RequestedMode)),
             Pending = (HState#hstate.pending)#{
                           Id => {set_mode_auto, RequestedMode}},
