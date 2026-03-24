@@ -34,11 +34,18 @@ default_tls_opts_includes_versions_key_test() ->
         "example.test", [], false),
     ?assertNotEqual(undefined, proplists:get_value(versions, Opts)).
 
-default_tls_opts_versions_are_tls12_and_tls13_only_test() ->
+default_tls_opts_version_is_tls13_only_test() ->
     {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
         "example.test", [], false),
-    Versions = proplists:get_value(versions, Opts),
-    ?assertEqual(lists:sort(['tlsv1.2', 'tlsv1.3']), lists:sort(Versions)).
+    ?assertEqual(['tlsv1.3'], proplists:get_value(versions, Opts)).
+
+tls_client_opts_allows_tls12_opt_in_test() ->
+    {ok, Opts} = beam_agent_transport_utils:tls_client_opts(
+        "example.test",
+        [{versions, ['tlsv1.2', 'tlsv1.3']}],
+        false),
+    ?assertEqual(lists:sort(['tlsv1.2', 'tlsv1.3']),
+                 lists:sort(proplists:get_value(versions, Opts))).
 
 tls_client_opts_rejects_legacy_version_test() ->
     ?assertEqual({error, unsafe_tls_opts},

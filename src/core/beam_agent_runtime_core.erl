@@ -399,7 +399,7 @@ merge_query_opts(Session, Params) when is_map(Params) ->
 put_state(Session, Updates) when is_map(Updates) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    put_state_cas(Key, Updates, 5).
+    put_state_cas(Key, Updates, 10).
 
 -spec put_state_cas(pid() | binary(), map(), pos_integer()) -> ok.
 put_state_cas(_Key, _Updates, 0) ->
@@ -435,7 +435,7 @@ put_state_cas(Key, Updates, Retries) ->
 update_state(Session, Fun) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    update_state_cas(Key, Fun, 5).
+    update_state_cas(Key, Fun, 10).
 
 -spec update_state_cas(pid() | binary(), fun((map()) -> map()), pos_integer()) -> ok.
 update_state_cas(_Key, _Fun, 0) ->

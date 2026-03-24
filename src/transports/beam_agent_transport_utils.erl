@@ -25,6 +25,25 @@ status(ConnPid) ->
 ensure_list(B) when is_binary(B) -> binary_to_list(B);
 ensure_list(L) when is_list(L) -> L.
 
+-doc """
+Build a merged TLS option list from secure defaults and caller overrides.
+
+The SDK defaults to TLS 1.3 only. If your deployment target requires TLS 1.2
+(e.g. a self-hosted backend behind a corporate proxy that has not been upgraded),
+pass `{versions, ['tlsv1.2', 'tlsv1.3']}` in the `Custom` option list to
+re-enable it:
+
+```erlang
+beam_agent:start_session(#{
+    backend  => claude,
+    tls_opts => [{versions, ['tlsv1.2', 'tlsv1.3']}]
+}).
+```
+
+Certificate verification (`verify_peer`) is enforced by default. Passing
+`{verify, verify_none}` in `Custom` is rejected unless `AllowInsecure` is
+`true`, in which case a warning is logged.
+""".
 -spec tls_client_opts(string(), list(), boolean()) ->
     {ok, list()} | {error, unsafe_tls_opts}.
 tls_client_opts(Host, Custom, AllowInsecure) ->
@@ -53,7 +72,7 @@ default_tls_opts(Host) ->
      {cacerts, public_key:cacerts_get()},
      {depth, 4},
      {server_name_indication, Host},
-     {versions, ['tlsv1.2', 'tlsv1.3']}].
+     {versions, ['tlsv1.3']}].
 
 -spec merge_tls_opt(term(), list()) -> list().
 merge_tls_opt(Opt, Acc) when is_tuple(Opt), tuple_size(Opt) >= 2 ->
