@@ -112,6 +112,7 @@
         beam_agent_ws_client,
         beam_agent_http_client,
         beam_agent_account_core,
+        beam_agent_adapter_types,
         beam_agent_artifacts_core,
         beam_agent_artifacts_store,
         beam_agent_app_core,
