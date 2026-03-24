@@ -391,7 +391,9 @@ direct_write(update_counter, Table, {Key, UpdateOp}) ->
 direct_write(update_counter, Table, {Key, UpdateOp, Default}) ->
     ets:update_counter(Table, Key, UpdateOp, Default);
 direct_write(select_replace, Table, MatchSpec) ->
-    ets:select_replace(Table, MatchSpec).
+    ets:select_replace(Table, MatchSpec);
+direct_write(match_delete, Table, Pattern) ->
+    ets:match_delete(Table, Pattern).
 
 %%--------------------------------------------------------------------
 %% Internal: Cleanup

@@ -74,7 +74,7 @@ clear_session(Session) ->
     ensure_tables(),
     SKey = beam_agent_ets:session_key(Session),
     %% Search sessions are stored under {SKey, SearchSessionId}.
-    ets:match_delete(?SESSIONS_TABLE, {{SKey, '_'}, '_'}),
+    beam_agent_ets:match_delete(?SESSIONS_TABLE, {{SKey, '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------

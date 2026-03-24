@@ -2,9 +2,11 @@
 -moduledoc """
 Transparent ETS access layer for the BEAM Agent SDK.
 
-Provides drop-in replacements for `ets:insert/2`, `ets:delete/2`,
-`ets:update_counter/3,4`, and other write operations that automatically
-route through the table owner process when running in hardened mode.
+Provides drop-in replacements for all ETS write operations (`insert/2`,
+`insert_new/2`, `delete/2`, `delete_object/2`, `delete_all_objects/1`,
+`update_counter/3,4`, `select_replace/2`, `match_delete/2`) that
+automatically route through the table owner process when running in
+hardened mode.
 
 Read operations (`lookup/2`, `foldl/3`, `select/2`, etc.) are passed
 through directly to `ets` — they work on protected tables from any
@@ -12,8 +14,9 @@ process with zero overhead.
 
 ## Migration
 
-Replace direct `ets:insert` / `ets:delete` / `ets:update_counter` calls
-in SDK modules with the corresponding `beam_agent_ets` function:
+Replace direct ETS write calls (`ets:insert`, `ets:delete`,
+`ets:update_counter`, `ets:match_delete`, etc.) in SDK modules with the
+corresponding `beam_agent_ets` function:
 
 ```erlang
 %% Before:
@@ -59,6 +62,7 @@ beam_agent_ets:ensure_table(?TABLE, [set, named_table,
     update_counter/3,
     update_counter/4,
     select_replace/2,
+    match_delete/2,
 
     %% Read operations (always direct — no proxy needed)
     lookup/2,
@@ -181,6 +185,14 @@ select_replace(Table, MatchSpec) ->
         false -> ets:select_replace(Table, MatchSpec);
         true  -> beam_agent_table_owner:write_proxy_sync(
                      select_replace, Table, MatchSpec)
+    end.
+
+-doc "Delete all records matching a pattern. Proxied in hardened mode.".
+-spec match_delete(atom(), ets:match_pattern()) -> true.
+match_delete(Table, Pattern) ->
+    case needs_proxy(Table) of
+        false -> ets:match_delete(Table, Pattern);
+        true  -> beam_agent_table_owner:write_proxy_sync(match_delete, Table, Pattern)
     end.
 
 %%--------------------------------------------------------------------
