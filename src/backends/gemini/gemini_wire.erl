@@ -1,4 +1,4 @@
--module(beam_agent_gemini_wire).
+-module(gemini_wire).
 -moduledoc false.
 
 -dialyzer({no_underspecs,

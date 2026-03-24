@@ -1,4 +1,4 @@
--module(beam_agent_gemini_translate).
+-module(gemini_translate).
 -moduledoc false.
 
 -dialyzer({no_underspecs,

@@ -1,4 +1,4 @@
--module(beam_agent_gemini_reverse_requests).
+-module(gemini_reverse_requests).
 -moduledoc false.
 
 -dialyzer({no_underspecs, [permission_response/3, selected/1, cancelled/0]}).
