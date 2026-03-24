@@ -36,8 +36,11 @@
     initializing/3,
     ready/3,
     active_query/3,
+    reconnecting/3,
     error/3
 ]).
+
+-export_type([reconnect_config/0]).
 
 -ifdef(TEST).
 -export([
@@ -49,7 +52,11 @@
     test_get_opts/1,
     test_get_msg_queue/1,
     test_get_queue_max/1,
-    ensure_session_id/1
+    test_get_reconnect_config/1,
+    test_get_reconnect_attempts/1,
+    ensure_session_id/1,
+    base_reconnect_delay/2,
+    validate_reconnect_config/1
 ]).
 -endif.
 
@@ -58,6 +65,14 @@
 %%--------------------------------------------------------------------
 
 -type state_name() :: beam_agent_session_handler:state_name().
+
+-type reconnect_config() :: #{
+    enabled := boolean(),
+    max_attempts => pos_integer(),
+    base_delay_ms => pos_integer(),
+    max_delay_ms => pos_integer(),
+    backoff => exponential | linear
+}.
 
 -record(engine, {
     %% Handler
@@ -89,7 +104,11 @@
     query_start_time :: integer() | undefined,
 
     %% Query outcome for ready-state drain
-    query_status = complete :: complete | interrupted | cancelled
+    query_status = complete :: complete | interrupted | cancelled,
+
+    %% Reconnection
+    reconnect_config = #{enabled => false} :: reconnect_config(),
+    reconnect_attempts = 0 :: non_neg_integer()
 }).
 
 %%--------------------------------------------------------------------
@@ -186,6 +205,8 @@ init({HandlerMod, Opts}) ->
                         {ok, TRef} ->
                             HState1 = notify_transport_started(HandlerMod,
                                                                TRef, HState),
+                            ReconnectCfg = validate_reconnect_config(
+                                                maps:get(reconnect, Opts1, #{})),
                             Data = #engine{
                                 handler_mod   = HandlerMod,
                                 handler_state = HState1,
@@ -196,6 +217,7 @@ init({HandlerMod, Opts}) ->
                                 queue_max     = validate_queue_max(
                                                     maps:get(queue_max, Opts1,
                                                              10_000)),
+                                reconnect_config = ReconnectCfg,
                                 session_id    = SessionId,
                                 model         = maps:get(model, Opts1,
                                                          undefined),
@@ -397,6 +419,31 @@ active_query({call, From}, Request, Data) ->
     handle_common_call(From, Request, active_query, Data).
 
 %%====================================================================
+%% State: reconnecting
+%%====================================================================
+
+-spec reconnecting(gen_statem:event_type(), term(), #engine{}) ->
+    gen_statem:state_enter_result(state_name()) |
+    gen_statem:event_handler_result(state_name()).
+reconnecting(enter, OldState,
+             #engine{reconnect_attempts = Attempts,
+                     reconnect_config = Config} = Data) ->
+    Delay = jittered_reconnect_delay(Attempts, Config),
+    fire_state_enter(reconnecting, OldState, Data,
+                     [{state_timeout, Delay, attempt}]);
+reconnecting(state_timeout, attempt, Data) ->
+    attempt_reconnect(Data);
+reconnecting({call, From}, health, _Data) ->
+    {keep_state_and_data, [{reply, From, reconnecting}]};
+reconnecting({call, From}, session_info, Data) ->
+    Info = build_engine_session_info(reconnecting, Data),
+    {keep_state_and_data, [{reply, From, {ok, Info}}]};
+reconnecting({call, From}, _Request, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, reconnecting}}]};
+reconnecting(info, _Msg, _Data) ->
+    keep_state_and_data.
+
+%%====================================================================
 %% State: error
 %%====================================================================
 
@@ -409,8 +456,16 @@ error(enter, OldState, #engine{transport_mod = TMod,
     _ = TMod:close(TRef),
     reply_consumer_error(session_error, Data),
     Data1 = Data#engine{consumer = undefined},
-    fire_state_enter(error, OldState, Data1,
-                     [{state_timeout, ?ERROR_AUTO_STOP, auto_stop}]);
+    case should_reconnect(Data1) of
+        true ->
+            fire_state_enter(error, OldState, Data1,
+                             [{next_event, internal, start_reconnect}]);
+        false ->
+            fire_state_enter(error, OldState, Data1,
+                             [{state_timeout, ?ERROR_AUTO_STOP, auto_stop}])
+    end;
+error(internal, start_reconnect, Data) ->
+    {next_state, reconnecting, Data};
 error(state_timeout, auto_stop, _Data) ->
     {stop, {shutdown, session_error}};
 error(internal, Reason, #engine{handler_mod = H}) ->
@@ -892,6 +947,120 @@ maybe_span_stop(#engine{handler_mod = H,
     beam_agent_telemetry_core:span_stop(H:backend_name(), query, StartTime).
 
 %%====================================================================
+%% Internal: reconnection logic
+%%====================================================================
+
+-spec should_reconnect(#engine{}) -> boolean().
+should_reconnect(#engine{reconnect_config = #{enabled := true,
+                                              max_attempts := Max},
+                         reconnect_attempts = Attempts}) ->
+    Attempts < Max;
+should_reconnect(_) ->
+    false.
+
+-spec attempt_reconnect(#engine{}) ->
+    gen_statem:event_handler_result(state_name()).
+attempt_reconnect(#engine{handler_mod = HandlerMod, opts = Opts} = Data) ->
+    case HandlerMod:init_handler(Opts) of
+        {ok, #{transport_spec := {TMod, TOpts},
+               initial_state := InitState,
+               handler_state := HState}} ->
+            case TMod:start(TOpts) of
+                {ok, TRef} ->
+                    HState1 = notify_transport_started(HandlerMod, TRef, HState),
+                    Data1 = Data#engine{
+                        handler_state  = HState1,
+                        transport_mod  = TMod,
+                        transport_ref  = TRef,
+                        buffer         = <<>>,
+                        reconnect_attempts = 0
+                    },
+                    TimeoutAction = timeout_action(InitState, Opts),
+                    {next_state, InitState, Data1, TimeoutAction};
+                {error, _Reason} ->
+                    bump_or_exhaust(Data)
+            end;
+        {stop, _Reason} ->
+            bump_or_exhaust(Data)
+    end.
+
+-spec bump_or_exhaust(#engine{}) ->
+    gen_statem:event_handler_result(state_name()).
+bump_or_exhaust(#engine{reconnect_attempts = Attempts,
+                        reconnect_config = Config} = Data) ->
+    Next = Attempts + 1,
+    Max = maps:get(max_attempts, Config, 5),
+    Data1 = Data#engine{reconnect_attempts = Next},
+    case Next >= Max of
+        true ->
+            %% Exhausted — transition to error which will auto-stop
+            %% since should_reconnect returns false when attempts >= max.
+            {next_state, error, Data1};
+        false ->
+            %% Stay in reconnecting with new delay
+            Delay = jittered_reconnect_delay(Next, Config),
+            {keep_state, Data1, [{state_timeout, Delay, attempt}]}
+    end.
+
+-doc """
+Calculate the base reconnection delay for a given attempt number.
+
+Uses exponential backoff (`base * 2^attempt`, capped at `2^20` to avoid
+overflow) or linear backoff (`base * (attempt + 1)`), capped at `max_delay_ms`.
+
+This is a pure function suitable for unit testing.
+""".
+-spec base_reconnect_delay(non_neg_integer(), reconnect_config()) ->
+    pos_integer().
+base_reconnect_delay(Attempt, Config) ->
+    Base = maps:get(base_delay_ms, Config, 1000),
+    MaxDelay = maps:get(max_delay_ms, Config, 30_000),
+    RawDelay = case maps:get(backoff, Config, exponential) of
+        exponential ->
+            Base * (1 bsl min(Attempt, 20));
+        linear ->
+            Base * (Attempt + 1)
+    end,
+    min(RawDelay, MaxDelay).
+
+%% Apply ±25% jitter to prevent thundering herd on reconnection.
+-spec jittered_reconnect_delay(non_neg_integer(), reconnect_config()) ->
+    pos_integer().
+jittered_reconnect_delay(Attempt, Config) ->
+    Delay = base_reconnect_delay(Attempt, Config),
+    Jitter = max(1, Delay div 4),
+    max(1, Delay - Jitter + rand:uniform(Jitter * 2)).
+
+-doc """
+Validate and normalize a reconnection configuration map.
+
+Accepts a map from session opts and returns a fully-populated
+`reconnect_config()` with defaults applied. Invalid or missing fields
+fall back to safe defaults.
+""".
+-spec validate_reconnect_config(map()) -> reconnect_config().
+validate_reconnect_config(#{enabled := true} = Config) ->
+    #{
+        enabled       => true,
+        max_attempts  => validate_pos_int(maps:get(max_attempts, Config, 5)),
+        base_delay_ms => validate_pos_int(maps:get(base_delay_ms, Config, 1000)),
+        max_delay_ms  => validate_pos_int(maps:get(max_delay_ms, Config, 30_000)),
+        backoff       => validate_backoff_type(
+                             maps:get(backoff, Config, exponential))
+    };
+validate_reconnect_config(_) ->
+    #{enabled => false}.
+
+-spec validate_pos_int(term()) -> pos_integer().
+validate_pos_int(N) when is_integer(N), N > 0 -> N;
+validate_pos_int(_) -> 5.
+
+-spec validate_backoff_type(term()) -> exponential | linear.
+validate_backoff_type(exponential) -> exponential;
+validate_backoff_type(linear)      -> linear;
+validate_backoff_type(_)           -> exponential.
+
+%%====================================================================
 %% Internal: error state transition
 %%====================================================================
 
@@ -956,7 +1125,7 @@ build_engine_session_info(StateName,
                                   handler_state = HState,
                                   session_id = SessionId,
                                   model = Model,
-                                  permission_mode = PermMode}) ->
+                                  permission_mode = PermMode} = Data) ->
     HandlerInfo = H:build_session_info(HState),
     EngineInfo = #{
         session_id      => SessionId,
@@ -965,7 +1134,8 @@ build_engine_session_info(StateName,
     },
     EngineInfo1 = maybe_put(model, Model, EngineInfo),
     EngineInfo2 = maybe_put(permission_mode, PermMode, EngineInfo1),
-    maps:merge(HandlerInfo, EngineInfo2).
+    EngineInfo3 = maybe_put_reconnect(Data, EngineInfo2),
+    maps:merge(HandlerInfo, EngineInfo3).
 
 %%====================================================================
 %% Internal: handler notification helpers
@@ -1046,6 +1216,15 @@ maybe_put(_Key, undefined, Map) ->
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
+maybe_put_reconnect(#engine{reconnect_config = #{enabled := true} = Cfg,
+                            reconnect_attempts = Attempts}, Map) ->
+    Map#{reconnect => #{
+        config   => Cfg,
+        attempts => Attempts
+    }};
+maybe_put_reconnect(_, Map) ->
+    Map.
+
 %%====================================================================
 %% Internal: format_status redaction
 %%====================================================================
@@ -1100,16 +1279,19 @@ drop_oldest(Q, N) ->
 -spec make_test_engine(map()) -> #engine{}.
 make_test_engine(Overrides) ->
     #engine{
-        handler_mod   = maps:get(handler_mod, Overrides, undefined),
-        handler_state = maps:get(handler_state, Overrides, undefined),
-        transport_mod = maps:get(transport_mod, Overrides, undefined),
-        transport_ref = maps:get(transport_ref, Overrides, undefined),
-        consumer      = maps:get(consumer, Overrides, undefined),
-        query_ref     = maps:get(query_ref, Overrides, undefined),
-        msg_queue     = maps:get(msg_queue, Overrides, queue:new()),
-        queue_max     = maps:get(queue_max, Overrides, 10_000),
-        session_id    = maps:get(session_id, Overrides, <<"test">>),
-        opts          = maps:get(opts, Overrides, #{})
+        handler_mod        = maps:get(handler_mod, Overrides, undefined),
+        handler_state      = maps:get(handler_state, Overrides, undefined),
+        transport_mod      = maps:get(transport_mod, Overrides, undefined),
+        transport_ref      = maps:get(transport_ref, Overrides, undefined),
+        consumer           = maps:get(consumer, Overrides, undefined),
+        query_ref          = maps:get(query_ref, Overrides, undefined),
+        msg_queue          = maps:get(msg_queue, Overrides, queue:new()),
+        queue_max          = maps:get(queue_max, Overrides, 10_000),
+        session_id         = maps:get(session_id, Overrides, <<"test">>),
+        opts               = maps:get(opts, Overrides, #{}),
+        reconnect_config   = maps:get(reconnect_config, Overrides,
+                                      #{enabled => false}),
+        reconnect_attempts = maps:get(reconnect_attempts, Overrides, 0)
     }.
 
 -doc false.
@@ -1127,5 +1309,13 @@ test_get_msg_queue(#engine{msg_queue = V}) -> V.
 -doc false.
 -spec test_get_queue_max(#engine{}) -> pos_integer() | infinity.
 test_get_queue_max(#engine{queue_max = V}) -> V.
+
+-doc false.
+-spec test_get_reconnect_config(#engine{}) -> reconnect_config().
+test_get_reconnect_config(#engine{reconnect_config = V}) -> V.
+
+-doc false.
+-spec test_get_reconnect_attempts(#engine{}) -> non_neg_integer().
+test_get_reconnect_attempts(#engine{reconnect_attempts = V}) -> V.
 
 -endif.

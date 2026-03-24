@@ -66,7 +66,7 @@ exports_state_functions_test() ->
     Exports = beam_agent_session_engine:module_info(exports),
     lists:foreach(fun(Export) -> ?assert(lists:member(Export, Exports)) end,
         [{connecting, 3}, {initializing, 3}, {ready, 3},
-         {active_query, 3}, {error, 3}]).
+         {active_query, 3}, {reconnecting, 3}, {error, 3}]).
 
 callback_mode_includes_state_functions_test() ->
     Mode = beam_agent_session_engine:callback_mode(),
@@ -264,3 +264,138 @@ ensure_session_id_generated_ids_are_unique_test() ->
     {ok, Id1} = beam_agent_session_engine:ensure_session_id(undefined),
     {ok, Id2} = beam_agent_session_engine:ensure_session_id(undefined),
     ?assertNotEqual(Id1, Id2).
+
+%%====================================================================
+%% Reconnection: exports
+%%====================================================================
+
+exports_reconnecting_3_test() ->
+    Exports = beam_agent_session_engine:module_info(exports),
+    ?assert(lists:member({reconnecting, 3}, Exports)).
+
+%%====================================================================
+%% Reconnection: validate_reconnect_config/1
+%%====================================================================
+
+validate_reconnect_config_disabled_by_default_test() ->
+    ?assertEqual(#{enabled => false},
+        beam_agent_session_engine:validate_reconnect_config(#{})).
+
+validate_reconnect_config_disabled_explicit_test() ->
+    ?assertEqual(#{enabled => false},
+        beam_agent_session_engine:validate_reconnect_config(#{enabled => false})).
+
+validate_reconnect_config_enabled_defaults_test() ->
+    Config = beam_agent_session_engine:validate_reconnect_config(
+        #{enabled => true}),
+    ?assertEqual(true, maps:get(enabled, Config)),
+    ?assertEqual(5, maps:get(max_attempts, Config)),
+    ?assertEqual(1000, maps:get(base_delay_ms, Config)),
+    ?assertEqual(30000, maps:get(max_delay_ms, Config)),
+    ?assertEqual(exponential, maps:get(backoff, Config)).
+
+validate_reconnect_config_custom_values_test() ->
+    Config = beam_agent_session_engine:validate_reconnect_config(#{
+        enabled => true,
+        max_attempts => 10,
+        base_delay_ms => 500,
+        max_delay_ms => 60000,
+        backoff => linear
+    }),
+    ?assertEqual(10, maps:get(max_attempts, Config)),
+    ?assertEqual(500, maps:get(base_delay_ms, Config)),
+    ?assertEqual(60000, maps:get(max_delay_ms, Config)),
+    ?assertEqual(linear, maps:get(backoff, Config)).
+
+validate_reconnect_config_invalid_values_fallback_test() ->
+    Config = beam_agent_session_engine:validate_reconnect_config(#{
+        enabled => true,
+        max_attempts => -1,
+        base_delay_ms => zero,
+        backoff => invalid
+    }),
+    ?assertEqual(true, maps:get(enabled, Config)),
+    ?assertEqual(5, maps:get(max_attempts, Config)),
+    ?assertEqual(5, maps:get(base_delay_ms, Config)),
+    ?assertEqual(exponential, maps:get(backoff, Config)).
+
+validate_reconnect_config_non_map_returns_disabled_test() ->
+    ?assertEqual(#{enabled => false},
+        beam_agent_session_engine:validate_reconnect_config(not_a_map)).
+
+%%====================================================================
+%% Reconnection: base_reconnect_delay/2
+%%====================================================================
+
+base_delay_exponential_attempt_0_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 30000, backoff => exponential},
+    ?assertEqual(1000,
+        beam_agent_session_engine:base_reconnect_delay(0, Config)).
+
+base_delay_exponential_attempt_1_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 30000, backoff => exponential},
+    ?assertEqual(2000,
+        beam_agent_session_engine:base_reconnect_delay(1, Config)).
+
+base_delay_exponential_attempt_3_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 30000, backoff => exponential},
+    ?assertEqual(8000,
+        beam_agent_session_engine:base_reconnect_delay(3, Config)).
+
+base_delay_exponential_capped_at_max_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 5000, backoff => exponential},
+    ?assertEqual(5000,
+        beam_agent_session_engine:base_reconnect_delay(4, Config)).
+
+base_delay_linear_attempt_0_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 30000, backoff => linear},
+    ?assertEqual(1000,
+        beam_agent_session_engine:base_reconnect_delay(0, Config)).
+
+base_delay_linear_attempt_2_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 30000, backoff => linear},
+    ?assertEqual(3000,
+        beam_agent_session_engine:base_reconnect_delay(2, Config)).
+
+base_delay_linear_capped_at_max_test() ->
+    Config = #{enabled => true, base_delay_ms => 1000,
+               max_delay_ms => 3000, backoff => linear},
+    ?assertEqual(3000,
+        beam_agent_session_engine:base_reconnect_delay(10, Config)).
+
+base_delay_defaults_when_keys_missing_test() ->
+    %% Missing keys fall back to defaults
+    Config = #{enabled => true},
+    ?assertEqual(1000,
+        beam_agent_session_engine:base_reconnect_delay(0, Config)).
+
+%%====================================================================
+%% Reconnection: make_test_engine reconnect fields
+%%====================================================================
+
+default_reconnect_config_disabled_test() ->
+    E = beam_agent_session_engine:make_test_engine(#{}),
+    ?assertEqual(#{enabled => false},
+        beam_agent_session_engine:test_get_reconnect_config(E)).
+
+default_reconnect_attempts_zero_test() ->
+    E = beam_agent_session_engine:make_test_engine(#{}),
+    ?assertEqual(0,
+        beam_agent_session_engine:test_get_reconnect_attempts(E)).
+
+custom_reconnect_config_in_test_engine_test() ->
+    Cfg = #{enabled => true, max_attempts => 3,
+            base_delay_ms => 500, max_delay_ms => 5000,
+            backoff => linear},
+    E = beam_agent_session_engine:make_test_engine(
+        #{reconnect_config => Cfg, reconnect_attempts => 2}),
+    ?assertEqual(Cfg,
+        beam_agent_session_engine:test_get_reconnect_config(E)),
+    ?assertEqual(2,
+        beam_agent_session_engine:test_get_reconnect_attempts(E)).

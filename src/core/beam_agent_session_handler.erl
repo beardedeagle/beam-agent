@@ -7,7 +7,8 @@
 %% Types
 %%--------------------------------------------------------------------
 
--type state_name() :: connecting | initializing | ready | active_query | error.
+-type state_name() :: connecting | initializing | ready | active_query
+                    | reconnecting | error.
 
 -type transport_event() ::
     {data, binary()}
