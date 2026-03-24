@@ -4,7 +4,8 @@
 %%% Tests cover:
 %%%   - Table creation with ensure_table/2 in both public and hardened modes
 %%%   - Write operations (insert, insert_new, delete, delete_object,
-%%%     delete_all_objects, update_counter) in both modes
+%%%     delete_all_objects, update_counter, select_replace, match_delete)
+%%%     in both modes
 %%%   - Read operations passthrough (lookup, foldl, select, match, etc.)
 %%%   - Proxy bypass when caller IS the owner process
 %%%   - Idempotent table creation (ensure_table on existing table)
