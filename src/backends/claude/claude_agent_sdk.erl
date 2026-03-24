@@ -1,18 +1,14 @@
 -module(claude_agent_sdk).
 -moduledoc false.
--type session_meta() :: beam_agent_session_store_core:session_meta().
--type session_share() :: beam_agent_session_store_core:session_share().
--type session_summary() :: beam_agent_session_store_core:session_summary().
--type thread_meta() :: beam_agent_threads_core:thread_meta().
--type thread_read_result() :: #{
-    thread := thread_meta(),
-    messages => [beam_agent_core:message()]
-}.
--type init_response_key() :: account | agents | commands | models.
--type system_info_key() :: account | agents | models | slash_commands.
--type init_default() :: [] | #{}.
--type session_health() ::
-          ready | connecting | initializing | active_query | error.
+-type session_meta() :: beam_agent_adapter_types:session_meta().
+-type session_share() :: beam_agent_adapter_types:session_share().
+-type session_summary() :: beam_agent_adapter_types:session_summary().
+-type thread_meta() :: beam_agent_adapter_types:thread_meta().
+-type thread_read_result() :: beam_agent_adapter_types:thread_read_result().
+-type init_response_key() :: beam_agent_adapter_types:init_response_key().
+-type system_info_key() :: beam_agent_adapter_types:system_info_key().
+-type init_default() :: beam_agent_adapter_types:init_default().
+-type session_health() :: beam_agent_adapter_types:session_health().
 -type adapter_status() :: #{
     backend := claude,
     source  := universal,
