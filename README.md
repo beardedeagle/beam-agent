@@ -336,8 +336,9 @@ The Elixir `BeamAgent` wrapper exposes those stores directly through
 the runtime/catalog layers through `BeamAgent.Runtime`,
 `BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.
 Internally, the newer canonical stores route through `beam_agent_store` with
-`beam_agent_store_ets` as the default adapter, preserving the existing
-process-free ETS plus hardened table-owner behavior.
+`beam_agent_store_ets` as the default adapter and `beam_agent_store_dets` as
+a durable disk-backed alternative. Both adapters preserve the existing
+process-free reads plus hardened table-owner write sharding behavior.
 
 For a domain-by-domain explanation of ownership, storage, and process
 boundaries, see [docs/guides/canonical_domain_guide.md](docs/guides/canonical_domain_guide.md).

@@ -154,6 +154,10 @@ Entries are ETS-backed runtime data seeded from compiled-in defaults.
 -type assert_capability_error() ::
     {unsupported_capability, capability(), beam_agent_backend:backend()} |
     status_error().
+%% Suppress underspec warnings for support/3,4: the return type is intentionally
+%% broader than what Dialyzer infers because callers may extend the registry
+%% with custom capability entries whose support_info() maps contain additional
+%% optional keys (available_paths, notes).
 -dialyzer({no_underspecs, [support/3, support/4]}).
 
 -type capability_info() :: #{

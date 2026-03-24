@@ -14,47 +14,77 @@
 -define(BAG_TABLE, beam_agent_dets_test_bag).
 -define(ORDERED_TABLE, beam_agent_dets_test_ordered).
 
--define(OPTS, #{data_dir => test_data_dir(), ram_file => true}).
+-define(OPTS, #{data_dir => ?DATA_DIR, ram_file => true}).
 
 %%====================================================================
 %% Helpers
 %%====================================================================
 
-test_data_dir() ->
-    filename:join(["/tmp", "beam_agent_dets_test_" ++
-        integer_to_list(erlang:unique_integer([positive]))]).
+%% Single stable temp directory per test run so every ?OPTS reference resolves
+%% to the same path instead of generating a new unique dir on each call.
+-define(DATA_DIR, (persistent_term:get({?MODULE, data_dir}))).
+
+test_data_dir_init() ->
+    Dir = filename:join(["/tmp", "beam_agent_dets_test_" ++
+        integer_to_list(erlang:unique_integer([positive]))]),
+    persistent_term:put({?MODULE, data_dir}, Dir),
+    Dir.
+
+test_data_dir_cleanup() ->
+    case persistent_term:get({?MODULE, data_dir}, undefined) of
+        undefined -> ok;
+        Dir ->
+            %% Remove DETS files and the temp directory itself.
+            case file:list_dir(Dir) of
+                {ok, Files} ->
+                    lists:foreach(
+                        fun(F) -> file:delete(filename:join(Dir, F)) end,
+                        Files),
+                    file:del_dir(Dir);
+                {error, _} -> ok
+            end,
+            persistent_term:erase({?MODULE, data_dir})
+    end.
 
 cleanup_table(Table) ->
     beam_agent_store_dets:close_table(Table).
 
 cleanup_all() ->
     lists:foreach(fun cleanup_table/1,
-        [?TABLE, ?COUNTER_TABLE, ?BAG_TABLE, ?ORDERED_TABLE]).
+        [?TABLE, ?COUNTER_TABLE, ?BAG_TABLE, ?ORDERED_TABLE]),
+    test_data_dir_cleanup().
+
+%% Call at the start of every test: tears down previous state, then
+%% allocates a fresh stable temp directory for ?DATA_DIR / ?OPTS.
+setup() ->
+    cleanup_all(),
+    test_data_dir_init(),
+    ok.
 
 %%====================================================================
 %% ensure_table/3
 %%====================================================================
 
 ensure_table_creates_dets_file_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ?assertNotEqual(undefined, dets:info(?TABLE, type)),
     cleanup_all().
 
 ensure_table_idempotent_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     cleanup_all().
 
 ensure_table_bag_type_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?BAG_TABLE, [bag], ?OPTS),
     ?assertEqual(bag, dets:info(?BAG_TABLE, type)),
     cleanup_all().
 
 ensure_table_ordered_set_downgrades_to_set_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?ORDERED_TABLE,
         [ordered_set], ?OPTS),
     ?assertEqual(set, dets:info(?ORDERED_TABLE, type)),
@@ -65,7 +95,7 @@ ensure_table_ordered_set_downgrades_to_set_test() ->
 %%====================================================================
 
 insert_and_lookup_roundtrip_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {<<"k1">>, v1}, #{}),
     ?assertEqual([{<<"k1">>, v1}],
@@ -73,7 +103,7 @@ insert_and_lookup_roundtrip_test() ->
     cleanup_all().
 
 insert_overwrites_existing_key_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {key, old}, #{}),
     true = beam_agent_store_dets:insert(?TABLE, {key, new}, #{}),
@@ -82,7 +112,7 @@ insert_overwrites_existing_key_test() ->
     cleanup_all().
 
 delete_removes_key_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {<<"k1">>, v1}, #{}),
     true = beam_agent_store_dets:delete(?TABLE, <<"k1">>, #{}),
@@ -91,7 +121,7 @@ delete_removes_key_test() ->
     cleanup_all().
 
 lookup_missing_key_returns_empty_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ?assertEqual([],
         beam_agent_store_dets:lookup(?TABLE, nonexistent, #{})),
@@ -102,13 +132,13 @@ lookup_missing_key_returns_empty_test() ->
 %%====================================================================
 
 insert_new_succeeds_on_new_key_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ?assert(beam_agent_store_dets:insert_new(?TABLE, {key, val}, #{})),
     cleanup_all().
 
 insert_new_fails_on_existing_key_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {key, val}, #{}),
     ?assertNot(beam_agent_store_dets:insert_new(?TABLE, {key, other}, #{})),
@@ -119,7 +149,7 @@ insert_new_fails_on_existing_key_test() ->
 %%====================================================================
 
 delete_object_removes_specific_record_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?BAG_TABLE, [bag], ?OPTS),
     true = beam_agent_store_dets:insert(?BAG_TABLE, {key, a}, #{}),
     true = beam_agent_store_dets:insert(?BAG_TABLE, {key, b}, #{}),
@@ -133,7 +163,7 @@ delete_object_removes_specific_record_test() ->
 %%====================================================================
 
 delete_all_objects_empties_table_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {a, 1}, #{}),
     true = beam_agent_store_dets:insert(?TABLE, {b, 2}, #{}),
@@ -147,7 +177,7 @@ delete_all_objects_empties_table_test() ->
 %%====================================================================
 
 update_counter_with_default_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
     Result = beam_agent_store_dets:update_counter(
         ?COUNTER_TABLE, counter, {2, 1}, {counter, 0}, #{}),
@@ -155,7 +185,7 @@ update_counter_with_default_test() ->
     cleanup_all().
 
 update_counter_increments_existing_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 10}, #{}),
     Result = beam_agent_store_dets:update_counter(
@@ -164,7 +194,7 @@ update_counter_increments_existing_test() ->
     cleanup_all().
 
 update_counter_simple_increment_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
     Result = beam_agent_store_dets:update_counter(
@@ -177,7 +207,7 @@ update_counter_simple_increment_test() ->
 %%====================================================================
 
 foldl_accumulates_all_records_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {a, 1}, #{}),
     true = beam_agent_store_dets:insert(?TABLE, {b, 2}, #{}),
@@ -192,7 +222,7 @@ foldl_accumulates_all_records_test() ->
 %%====================================================================
 
 first_and_next_iterate_all_keys_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {a, 1}, #{}),
     true = beam_agent_store_dets:insert(?TABLE, {b, 2}, #{}),
@@ -207,7 +237,7 @@ first_and_next_iterate_all_keys_test() ->
     cleanup_all().
 
 first_on_empty_table_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ?assertEqual('$end_of_table',
         beam_agent_store_dets:first(?TABLE, #{})),
@@ -218,7 +248,7 @@ first_on_empty_table_test() ->
 %%====================================================================
 
 close_table_makes_info_undefined_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     ok = beam_agent_store_dets:close_table(?TABLE),
     ?assertEqual(undefined, dets:info(?TABLE, type)).
@@ -227,7 +257,7 @@ close_table_idempotent_test() ->
     ok = beam_agent_store_dets:close_table(nonexistent_table_xyz).
 
 sync_table_flushes_without_error_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store_dets:ensure_table(?TABLE, [set], ?OPTS),
     true = beam_agent_store_dets:insert(?TABLE, {key, val}, #{}),
     ok = beam_agent_store_dets:sync_table(?TABLE),
@@ -238,7 +268,7 @@ sync_table_flushes_without_error_test() ->
 %%====================================================================
 
 store_boundary_dets_roundtrip_test() ->
-    cleanup_all(),
+    setup(),
     ok = beam_agent_store:ensure_tables(),
     ok = beam_agent_store:configure_domain(dets_test_domain, #{
         adapter => beam_agent_store_dets,
