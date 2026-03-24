@@ -160,6 +160,10 @@ modify ETS state that the session engine reads on its next tick.
     list_server_agents/1
 ]).
 
+-dialyzer({no_underspecs, [turn_steer/4, turn_steer/5, turn_interrupt/3,
+    experimental_feature_list/1, experimental_feature_list/2, server_health/1,
+    delete_server_session/2, list_server_agents/1]}).
+
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
@@ -608,7 +612,7 @@ Parameters:
 Returns {ok, ResultMap} or {error, Reason}.
 """.
 -spec turn_steer(pid(), binary(), binary(), binary() | [map()]) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 turn_steer(Session, ThreadId, TurnId, Input) ->
     turn_steer(Session, ThreadId, TurnId, Input, #{}).
 
@@ -628,7 +632,7 @@ Parameters:
 Returns {ok, ResultMap} or {error, Reason}.
 """.
 -spec turn_steer(pid(), binary(), binary(), binary() | [map()], map()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 turn_steer(Session, ThreadId, TurnId, Input, Opts) ->
     beam_agent_core:native_or(Session, turn_steer, [ThreadId, TurnId, Input, Opts], fun() ->
         %% Universal: record steer intent as a thread message
@@ -657,7 +661,7 @@ Parameters:
 
 Returns {ok, ResultMap} with status => interrupted, or {error, Reason}.
 """.
--spec turn_interrupt(pid() | binary(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec turn_interrupt(pid() | binary(), binary(), binary()) -> {ok, map()} | {error, term()}.
 turn_interrupt(Session, ThreadId, TurnId) ->
     beam_agent_core:native_or(Session, turn_interrupt, [ThreadId, TurnId], fun() ->
         universal_turn_interrupt(Session, ThreadId, TurnId)
@@ -866,7 +870,7 @@ Session is the pid of a running beam_agent session.
 
 Returns {ok, List} of feature maps, or {error, Reason} on failure.
 """.
--spec experimental_feature_list(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec experimental_feature_list(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 experimental_feature_list(Session) ->
     experimental_feature_list(Session, #{}).
 
@@ -892,7 +896,7 @@ Returns {ok, List} of feature maps on success. Each map contains
 at minimum id, name, description, and enabled (boolean). Returns
 {error, Reason} on failure.
 """.
--spec experimental_feature_list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec experimental_feature_list(pid() | binary(), map()) -> {ok, [map()]} | {error, term()}.
 experimental_feature_list(Session, Opts) ->
     beam_agent_core:native_or(Session, experimental_feature_list, [Opts], fun() ->
         beam_agent_collaboration:experimental_features(
@@ -911,7 +915,7 @@ name, session identifier, and uptime in milliseconds. The universal
 fallback derives health from session_info/1. Returns
 status => unknown when session info is unavailable.
 """.
--spec server_health(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec server_health(pid() | binary()) -> {ok, map()} | {error, term()}.
 server_health(Session) ->
     beam_agent_core:native_or(Session, server_health, [], fun() ->
         case beam_agent_core:session_info(Session) of
@@ -970,7 +974,7 @@ Removes the session identified by SessionId from the session store.
 Returns a confirmation map with the session_id and deleted flag on
 success. Does not affect the currently running in-memory session.
 """.
--spec delete_server_session(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec delete_server_session(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 delete_server_session(Session, SessionId) ->
     beam_agent_core:native_or(Session, delete_server_session, [SessionId], fun() ->
         ok = beam_agent_core:delete_session(SessionId),
@@ -985,7 +989,7 @@ specialized assistants (e.g., a code reviewer or test writer) that the
 primary agent can delegate to. The universal fallback queries the
 in-memory agent registry.
 """.
--spec list_server_agents(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec list_server_agents(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 list_server_agents(Session) ->
     beam_agent_core:native_or(Session, list_server_agents, [], fun() ->
         beam_agent_core:list_agents(Session)

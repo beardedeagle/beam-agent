@@ -1068,7 +1068,7 @@ defmodule BeamAgent.MCP do
       server = %{name: "my-tools", tools: [%{name: "greet", description: "Say hello"}]}
       {:ok, _} = BeamAgent.MCP.add_server(session, server)
   """
-  @spec add_server(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec add_server(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate add_server(session, body), to: :beam_agent_mcp
 
   @doc """
@@ -1103,7 +1103,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_set_servers(pid(), [map()]) :: {:ok, term()} | {:error, term()}
+  @spec session_set_servers(pid(), [map()]) :: {:ok, map()} | {:error, term()}
   defdelegate session_set_servers(session, servers), to: :beam_agent_mcp, as: :set_servers
 
   @doc """
@@ -1121,7 +1121,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  @spec session_reconnect_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec session_reconnect_server(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def session_reconnect_server(session, server_name) do
     :beam_agent_mcp.reconnect_server(server_name, session)
   end
@@ -1142,7 +1142,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, result}` or `{:error, {:server_not_found, server_name}}`.
   """
-  @spec session_toggle_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  @spec session_toggle_server(pid(), binary(), boolean()) :: {:ok, map()} | {:error, term()}
   def session_toggle_server(session, server_name, enabled) do
     :beam_agent_mcp.toggle_server(server_name, enabled, session)
   end
@@ -1162,7 +1162,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec server_oauth_login(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec server_oauth_login(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate server_oauth_login(session, opts), to: :beam_agent_mcp
 
   @doc """
@@ -1178,7 +1178,7 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec server_reload(pid()) :: {:ok, term()} | {:error, term()}
+  @spec server_reload(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate server_reload(session), to: :beam_agent_mcp
 
   @doc """
@@ -1196,6 +1196,6 @@ defmodule BeamAgent.MCP do
 
   - `{:ok, status_map}` or `{:error, reason}`.
   """
-  @spec status_list(pid()) :: {:ok, term()} | {:error, term()}
+  @spec status_list(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate status_list(session), to: :beam_agent_mcp
 end
