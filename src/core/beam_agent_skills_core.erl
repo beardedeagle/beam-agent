@@ -87,7 +87,7 @@ clear_session(Session) ->
     Key = beam_agent_ets:session_key(Session),
     %% Skills are stored under {Key, skill, SkillId}; configs under
     %% {Key, config, SkillId}. A single match on {Key, _, _} covers both.
-    ets:match_delete(?SKILLS_TABLE, {{Key, '_', '_'}, '_'}),
+    beam_agent_ets:match_delete(?SKILLS_TABLE, {{Key, '_', '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------

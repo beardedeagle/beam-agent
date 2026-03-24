@@ -352,3 +352,51 @@ batch_insert_test() ->
 
 whereis_nonexistent_test() ->
     ?assertEqual(undefined, beam_agent_ets:whereis(beam_agent_ets_no_such_table)).
+
+%%====================================================================
+%% match_delete tests
+%%====================================================================
+
+match_delete_public_mode_test() ->
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => public}),
+    T = beam_agent_ets_test_match_del_pub,
+    delete_table(T),
+    ok = beam_agent_ets:ensure_table(T, [set, named_table]),
+    beam_agent_ets:insert(T, {k1, v1}),
+    beam_agent_ets:insert(T, {k2, v2}),
+    beam_agent_ets:insert(T, {k3, v3}),
+    ?assertEqual(true, beam_agent_ets:match_delete(T, {k2, '_'})),
+    ?assertEqual([], beam_agent_ets:lookup(T, k2)),
+    ?assertEqual(2, length(beam_agent_ets:tab2list(T))),
+    delete_table(T),
+    cleanup().
+
+match_delete_hardened_mode_test() ->
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => hardened}),
+    T = beam_agent_ets_test_match_del_hard,
+    delete_table(T),
+    ok = beam_agent_ets:ensure_table(T, [set, named_table]),
+    beam_agent_ets:insert(T, {{sess1, skill, s1}, data1}),
+    beam_agent_ets:insert(T, {{sess1, skill, s2}, data2}),
+    beam_agent_ets:insert(T, {{sess2, skill, s3}, data3}),
+    %% Delete all sess1 entries — mirrors the skills_core pattern.
+    ?assertEqual(true, beam_agent_ets:match_delete(T, {{sess1, '_', '_'}, '_'})),
+    ?assertEqual([], beam_agent_ets:lookup(T, {sess1, skill, s1})),
+    ?assertEqual([], beam_agent_ets:lookup(T, {sess1, skill, s2})),
+    ?assertEqual([{{sess2, skill, s3}, data3}], beam_agent_ets:lookup(T, {sess2, skill, s3})),
+    cleanup().
+
+match_delete_no_matches_test() ->
+    cleanup(),
+    ok = beam_agent_table_owner:init(#{table_access => public}),
+    T = beam_agent_ets_test_match_del_none,
+    delete_table(T),
+    ok = beam_agent_ets:ensure_table(T, [set, named_table]),
+    beam_agent_ets:insert(T, {k1, v1}),
+    %% Pattern that matches nothing — should return true without deleting.
+    ?assertEqual(true, beam_agent_ets:match_delete(T, {no_such_key, '_'})),
+    ?assertEqual([{k1, v1}], beam_agent_ets:lookup(T, k1)),
+    delete_table(T),
+    cleanup().
