@@ -76,7 +76,7 @@ big-bang rewrite of every canonical domain.
 %% Note: atomicity of update_counter is adapter-dependent. The default
 %% ETS adapter provides atomic updates via ets:update_counter/3,4. The
 %% DETS adapter uses a read-modify-write cycle which is NOT atomic under
-%% concurrent access unless `atomic_counters => true` is set. Callers
+%% concurrent access unless atomic_counters => true is set. Callers
 %% requiring atomic counters should verify their configured adapter
 %% guarantees atomicity.
 -callback update_counter(table_name(), store_key(), update_op(),
