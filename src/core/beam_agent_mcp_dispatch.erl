@@ -637,7 +637,9 @@ handle_tools_call(Id, Params, State) ->
                     catch
                         Class:CrashReason:Stacktrace ->
                             logger:error("MCP tool ~s crashed: ~s:~p~n~p",
-                                [ToolName, Class, CrashReason, Stacktrace]),
+                                [ToolName, Class,
+                                 beam_agent_redaction:reason(CrashReason),
+                                 beam_agent_redaction:stacktrace(Stacktrace)]),
                             ErrResp = beam_agent_mcp_protocol:error_response(
                                           Id,
                                           beam_agent_mcp_protocol:error_internal(),
@@ -687,7 +689,9 @@ safe_provider_call(Provider, Function, Args, _State) ->
     catch
         Class:Reason:Stacktrace ->
             logger:error("MCP provider ~s:~s crashed: ~s:~p~n~p",
-                [Provider, Function, Class, Reason, Stacktrace]),
+                [Provider, Function, Class,
+                 beam_agent_redaction:reason(Reason),
+                 beam_agent_redaction:stacktrace(Stacktrace)]),
             {error, beam_agent_mcp_protocol:error_internal(),
              <<"Provider callback crashed">>}
     end.
@@ -999,3 +1003,4 @@ safe_log_level(_) -> info.
     #{inputSchema := map(), name := binary(), description => _}.
 maybe_put(_Key, undefined, Map) -> Map;
 maybe_put(Key, Value, Map) -> Map#{Key => Value}.
+

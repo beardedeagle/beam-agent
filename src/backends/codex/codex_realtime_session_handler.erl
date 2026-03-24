@@ -85,7 +85,7 @@ init_handler(Opts) ->
                 session_id     = SessionId,
                 model          = Model,
                 voice          = Voice,
-                opts           = Opts
+                opts           = maps:remove(api_key, Opts)
             },
             {ok, #{
                 transport_spec => {beam_agent_transport_ws, TransportOpts},

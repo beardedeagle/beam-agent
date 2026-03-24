@@ -486,6 +486,12 @@ defmodule BeamAgent do
     `:allowed_tools`, `:disallowed_tools`, `:output_format`, `:thinking`,
     `:max_budget_usd`, `:agent`, and `:attachments`.
 
+  > #### Security {: .warning}
+  >
+  > Attachment file paths are read without sandboxing. Do not pass untrusted
+  > user input directly into the `:attachments` list. Path validation and
+  > directory confinement, when required, are the caller's responsibility.
+
   ## Returns
 
   - `{:ok, messages}` or `{:error, reason}`.

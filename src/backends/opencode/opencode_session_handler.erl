@@ -28,6 +28,9 @@
 
 %% Exported for unit testing
 -export([is_remote_plaintext_http/1]).
+
+%% Engine format_status callback — redact credentials from crash dumps
+-export([redact_handler_state/1]).
 -ifdef(TEST).
 -export([check_transport_security/3]).
 -endif.
@@ -248,6 +251,23 @@ terminate_handler(Reason, #hstate{} = HState) ->
                   #{event => session_end, reason => Reason},
                   HState),
     ok.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        auth = case HState#hstate.auth of
+            none         -> none;
+            {basic, _}   -> {basic, <<"redacted">>}
+        end,
+        opts = beam_agent_redaction:map(HState#hstate.opts)
+    };
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Optional callbacks

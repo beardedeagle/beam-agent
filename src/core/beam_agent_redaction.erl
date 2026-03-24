@@ -5,7 +5,9 @@
     map/1,
     pending_entry/1,
     provider_config/1,
-    runtime_state/1
+    reason/1,
+    runtime_state/1,
+    stacktrace/1
 ]).
 
 -spec runtime_state(map()) -> map().
@@ -98,3 +100,31 @@ canonical_key(Key) when is_binary(Key) ->
                    (Char >= $0 andalso Char =< $9)) >>;
 canonical_key(Key) ->
     canonical_key(unicode:characters_to_binary(io_lib:format("~tp", [Key]))).
+
+%% @doc Redact a crash reason before logging.
+%%
+%% Map-shaped reasons are walked through `map/1' to strip sensitive
+%% keys.  Non-map reasons (atoms, binaries, tuples) are left as-is
+%% since they carry no keyed secrets.
+-spec reason(term()) -> term().
+reason(Reason) when is_map(Reason) ->
+    map(Reason);
+reason(Reason) ->
+    Reason.
+
+%% @doc Strip function arguments from stacktrace frames.
+%%
+%% Replaces argument lists with the arity integer, preserving the
+%% diagnostic value of the trace (module, function, arity, location)
+%% while preventing callback arguments from leaking into log output.
+-spec stacktrace([{module(), atom(), non_neg_integer() | [term()], [tuple()]}]) ->
+    [{module(), atom(), non_neg_integer(), [tuple()]}].
+stacktrace(Frames) ->
+    [redact_frame(Frame) || Frame <- Frames].
+
+-spec redact_frame({module(), atom(), non_neg_integer() | [term()], [tuple()]}) ->
+    {module(), atom(), non_neg_integer(), [tuple()]}.
+redact_frame({M, F, Args, Loc}) when is_list(Args) ->
+    {M, F, length(Args), Loc};
+redact_frame({M, F, Arity, Loc}) ->
+    {M, F, Arity, Loc}.

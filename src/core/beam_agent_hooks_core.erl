@@ -278,10 +278,10 @@ safe_call(#{callback := Callback}, Context) ->
         _Other -> ok
     catch
         Class:Reason:Stack ->
-            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                         || {M, F, A, L} <- Stack],
             logger:warning("SDK hook callback crashed: ~p:~p~n~p",
-                           [Class, Reason, SafeStack]),
+                           [Class,
+                            beam_agent_redaction:reason(Reason),
+                            beam_agent_redaction:stacktrace(Stack)]),
             ok
     end.
 
