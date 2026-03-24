@@ -203,6 +203,101 @@ update_counter_simple_increment_test() ->
     cleanup_all().
 
 %%====================================================================
+%% atomic_counters mode
+%%====================================================================
+
+-define(ATOMIC_OPTS, #{data_dir => ?DATA_DIR, ram_file => true,
+                       atomic_counters => true}).
+
+atomic_counter_basic_increment_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
+    R1 = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 1}, ?ATOMIC_OPTS),
+    ?assertEqual(1, R1),
+    R2 = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 5}, ?ATOMIC_OPTS),
+    ?assertEqual(6, R2),
+    cleanup_all().
+
+atomic_counter_simple_integer_increment_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 10}, #{}),
+    R = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, 3, ?ATOMIC_OPTS),
+    ?assertEqual(13, R),
+    cleanup_all().
+
+atomic_counter_with_default_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    R = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, new_key, {2, 1}, {new_key, 0}, ?ATOMIC_OPTS),
+    ?assertEqual(1, R),
+    cleanup_all().
+
+atomic_counter_flush_persists_to_dets_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
+    %% Increment via atomics — DETS still has 0.
+    _ = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 7}, ?ATOMIC_OPTS),
+    ?assertEqual([{counter, 0}], dets:lookup(?COUNTER_TABLE, counter)),
+    %% Flush writes the atomics value back to DETS.
+    ok = beam_agent_store_dets:flush_counters(?COUNTER_TABLE),
+    ?assertEqual([{counter, 7}], dets:lookup(?COUNTER_TABLE, counter)),
+    cleanup_all().
+
+atomic_counter_close_flushes_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
+    _ = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 3}, ?ATOMIC_OPTS),
+    %% Close flushes atomics to DETS before closing.
+    ok = beam_agent_store_dets:close_table(?COUNTER_TABLE),
+    %% Re-open and verify the flushed value persisted.
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    ?assertEqual([{counter, 3}], dets:lookup(?COUNTER_TABLE, counter)),
+    cleanup_all().
+
+atomic_counter_concurrent_increments_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
+    %% Seed the atomics ref.
+    _ = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 0}, ?ATOMIC_OPTS),
+    Self = self(),
+    N = 100,
+    Workers = [spawn_link(fun() ->
+        lists:foreach(fun(_) ->
+            beam_agent_store_dets:update_counter(
+                ?COUNTER_TABLE, counter, {2, 1}, ?ATOMIC_OPTS)
+        end, lists:seq(1, N)),
+        Self ! {done, self()}
+    end) || _ <- lists:seq(1, 4)],
+    lists:foreach(fun(Pid) ->
+        receive {done, Pid} -> ok
+        after 5000 -> error({timeout, Pid})
+        end
+    end, Workers),
+    ok = beam_agent_store_dets:flush_counters(?COUNTER_TABLE),
+    ?assertEqual([{counter, 4 * N}],
+        dets:lookup(?COUNTER_TABLE, counter)),
+    cleanup_all().
+
+atomic_counter_flush_noop_when_disabled_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    %% flush_counters is a no-op when no atomics have been created.
+    ok = beam_agent_store_dets:flush_counters(?COUNTER_TABLE),
+    cleanup_all().
+
+%%====================================================================
 %% foldl/4
 %%====================================================================
 

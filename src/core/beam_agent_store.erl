@@ -38,26 +38,14 @@ big-bang rewrite of every canonical domain.
     domain/0,
     adapter_module/0,
     store_options/0,
-    store_config/0
+    store_config/0,
+    store_key/0,
+    table_name/0,
+    table_opt/0,
+    update_op/0
 ]).
 
--callback ensure_table(atom(), [term()], store_options()) -> ok.
--callback insert(atom(), tuple() | [tuple()], store_options()) -> true.
--callback insert_new(atom(), tuple() | [tuple()], store_options()) -> boolean().
--callback delete(atom(), term(), store_options()) -> true.
--callback delete_object(atom(), term(), store_options()) -> true.
--callback delete_all_objects(atom(), store_options()) -> true.
-%% Note: atomicity of update_counter is adapter-dependent. The default
-%% ETS adapter provides atomic updates via ets:update_counter/3,4. The
-%% DETS adapter uses a read-modify-write cycle which is NOT atomic under
-%% concurrent access. Callers requiring atomic counters should verify
-%% their configured adapter guarantees atomicity.
--callback update_counter(atom(), term(), term(), store_options()) -> integer().
--callback update_counter(atom(), term(), term(), tuple(), store_options()) -> integer().
--callback lookup(atom(), term(), store_options()) -> [tuple()].
--callback foldl(fun((tuple(), term()) -> term()), term(), atom(), store_options()) -> term().
--callback first(atom(), store_options()) -> term() | '$end_of_table'.
--callback next(atom(), term(), store_options()) -> term() | '$end_of_table'.
+%% --- Store types ---
 
 -type domain() :: atom().
 -type adapter_module() :: module().
@@ -66,6 +54,41 @@ big-bang rewrite of every canonical domain.
     adapter := adapter_module(),
     options => store_options()
 }.
+
+-type table_name() :: atom().
+-type table_opt() :: set | ordered_set | bag | duplicate_bag
+                   | named_table | {read_concurrency, boolean()}
+                   | {write_concurrency, boolean() | auto}
+                   | public | protected | private.
+-type store_key() :: atom() | binary() | tuple() | pid() | integer().
+-type update_op() :: integer()
+                   | {pos_integer(), integer()}
+                   | {pos_integer(), integer(), integer(), integer()}.
+
+%% --- Callbacks ---
+
+-callback ensure_table(table_name(), [table_opt()], store_options()) -> ok.
+-callback insert(table_name(), tuple() | [tuple()], store_options()) -> true.
+-callback insert_new(table_name(), tuple() | [tuple()], store_options()) -> boolean().
+-callback delete(table_name(), store_key(), store_options()) -> true.
+-callback delete_object(table_name(), tuple(), store_options()) -> true.
+-callback delete_all_objects(table_name(), store_options()) -> true.
+%% Note: atomicity of update_counter is adapter-dependent. The default
+%% ETS adapter provides atomic updates via ets:update_counter/3,4. The
+%% DETS adapter uses a read-modify-write cycle which is NOT atomic under
+%% concurrent access unless `atomic_counters => true` is set. Callers
+%% requiring atomic counters should verify their configured adapter
+%% guarantees atomicity.
+-callback update_counter(table_name(), store_key(), update_op(),
+                         store_options()) -> integer().
+-callback update_counter(table_name(), store_key(), update_op(),
+                         tuple(), store_options()) -> integer().
+-callback lookup(table_name(), store_key(), store_options()) -> [tuple()].
+-callback foldl(fun((tuple(), Acc) -> Acc), Acc, table_name(),
+                store_options()) -> Acc when Acc :: term().
+-callback first(table_name(), store_options()) -> store_key() | '$end_of_table'.
+-callback next(table_name(), store_key(), store_options()) ->
+    store_key() | '$end_of_table'.
 
 -define(CONFIG_TABLE, beam_agent_store_config).
 
@@ -124,7 +147,7 @@ reset_domain(Domain) when is_atom(Domain) ->
     ok.
 
 -doc "Ensure a named table or equivalent backing store exists for a domain.".
--spec ensure_table(domain(), atom(), [term()]) -> ok.
+-spec ensure_table(domain(), table_name(), [table_opt()]) -> ok.
 ensure_table(Domain, Table, Opts)
   when is_atom(Domain), is_atom(Table), is_list(Opts) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
@@ -132,42 +155,43 @@ ensure_table(Domain, Table, Opts)
     end).
 
 -doc "Insert a record through the configured domain store.".
--spec insert(domain(), atom(), tuple() | [tuple()]) -> true.
+-spec insert(domain(), table_name(), tuple() | [tuple()]) -> true.
 insert(Domain, Table, Record) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:insert(Table, Record, AdapterOpts)
     end).
 
 -doc "Insert a record only if its key does not yet exist.".
--spec insert_new(domain(), atom(), tuple() | [tuple()]) -> boolean().
+-spec insert_new(domain(), table_name(), tuple() | [tuple()]) -> boolean().
 insert_new(Domain, Table, Record) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:insert_new(Table, Record, AdapterOpts)
     end).
 
 -doc "Delete a key through the configured domain store.".
--spec delete(domain(), atom(), term()) -> true.
+-spec delete(domain(), table_name(), store_key()) -> true.
 delete(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:delete(Table, Key, AdapterOpts)
     end).
 
 -doc "Delete a specific object from a bag-like store.".
--spec delete_object(domain(), atom(), term()) -> true.
+-spec delete_object(domain(), table_name(), tuple()) -> true.
 delete_object(Domain, Table, ObjOrKey) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:delete_object(Table, ObjOrKey, AdapterOpts)
     end).
 
 -doc "Delete every object from a domain store table.".
--spec delete_all_objects(domain(), atom()) -> true.
+-spec delete_all_objects(domain(), table_name()) -> true.
 delete_all_objects(Domain, Table) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:delete_all_objects(Table, AdapterOpts)
     end).
 
 -doc "Update a counter through the configured domain store.".
--spec update_counter(domain(), atom(), term(), term()) -> integer().
+-spec update_counter(domain(), table_name(), store_key(), update_op()) ->
+    integer().
 update_counter(Domain, Table, Key, UpdateOp)
   when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
@@ -175,7 +199,8 @@ update_counter(Domain, Table, Key, UpdateOp)
     end).
 
 -doc "Update a counter with a default record through the configured domain store.".
--spec update_counter(domain(), atom(), term(), term(), tuple()) -> integer().
+-spec update_counter(domain(), table_name(), store_key(), update_op(),
+                     tuple()) -> integer().
 update_counter(Domain, Table, Key, UpdateOp, Default)
   when is_atom(Domain), is_atom(Table), is_tuple(Default) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
@@ -183,29 +208,31 @@ update_counter(Domain, Table, Key, UpdateOp, Default)
     end).
 
 -doc "Look up records by key through the configured domain store.".
--spec lookup(domain(), atom(), term()) -> [tuple()].
+-spec lookup(domain(), table_name(), store_key()) -> [tuple()].
 lookup(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:lookup(Table, Key, AdapterOpts)
     end).
 
 -doc "Fold over a domain store table.".
--spec foldl(domain(), fun((tuple(), Acc) -> Acc), Acc, atom()) -> Acc when Acc :: term().
+-spec foldl(domain(), fun((tuple(), Acc) -> Acc), Acc, table_name()) ->
+    Acc when Acc :: term().
 foldl(Domain, Fun, Acc, Table)
   when is_atom(Domain), is_function(Fun, 2), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:foldl(Fun, Acc, Table, AdapterOpts)
     end).
 
--doc "Return the first key in an ordered domain store table.".
--spec first(domain(), atom()) -> term() | '$end_of_table'.
+-doc "Return the first key in a domain store table.".
+-spec first(domain(), table_name()) -> store_key() | '$end_of_table'.
 first(Domain, Table) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:first(Table, AdapterOpts)
     end).
 
--doc "Return the next key in an ordered domain store table.".
--spec next(domain(), atom(), term()) -> term() | '$end_of_table'.
+-doc "Return the next key in a domain store table.".
+-spec next(domain(), table_name(), store_key()) ->
+    store_key() | '$end_of_table'.
 next(Domain, Table, Key) when is_atom(Domain), is_atom(Table) ->
     with_adapter(Domain, fun(Adapter, AdapterOpts) ->
         Adapter:next(Table, Key, AdapterOpts)
