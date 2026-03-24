@@ -7,16 +7,30 @@ Provides two operational modes for ETS table access control:
   - `public` (default) — All tables use public access. Any process can
     read and write.
 
-  - `hardened` — Five single-writer tables are unconditionally protected.
-    The remaining 17 multi-writer tables are protected and writes are
-    proxied through a linked owner process. Reads remain zero-cost from
+  - `hardened` — All tables are protected and writes are proxied through
+    one or more linked shard owner processes. Reads remain zero-cost from
     any process.
 
-The owner process is a plain `proc_lib:spawn_link` — not a gen_server,
-not a supervisor, not an OTP application. It lives and dies with the
-consumer process that called `init/1`, exactly like an Erlang port or
-a linked NIF resource. Tables are garbage-collected by the BEAM when
-the owner exits.
+## Write Sharding
+
+In hardened mode, writes can be distributed across N shard processes
+to reduce mailbox contention under high-concurrency workloads. Each
+table is assigned to exactly one shard via consistent hashing
+(`erlang:phash2(Table, N)`). Writes for a given table always route
+to the same shard, preserving per-table write ordering.
+
+Configure sharding via the `shard_count` option:
+
+```erlang
+ok = beam_agent_table_owner:init(#{
+    table_access => hardened,
+    shard_count  => 4
+}).
+```
+
+When `shard_count` is 1 (the default), behavior is identical to a
+single owner process. Increasing the count distributes write load
+across independent mailboxes.
 
 ## Usage
 
@@ -30,45 +44,24 @@ init(Args) ->
 ## Security Properties
 
 In hardened mode:
-  - Only the owner process can write to protected tables via `ets:insert`
+  - Only shard owner processes can write to protected tables via `ets:insert`
   - All other processes must route writes through `beam_agent_ets` wrappers
   - Reads (`ets:lookup`, `ets:foldl`, `ets:select`, etc.) work from any
     process with zero overhead — no message passing for reads
-  - The owner process traps exits and sets the consumer as ETS heir
+  - Each shard process traps exits and sets the consumer as ETS heir
     via `{heir, Consumer, TableName}` on each created table, so tables
-    survive owner crashes and transfer to the consumer for graceful
-    recovery. The consumer will receive `{'ETS-TRANSFER', Table, OldOwner, TableName}`
-    messages if this occurs and can respawn the owner if needed.
-
-## Performance Characteristics
-
-In hardened mode, all proxied writes serialize through the owner process's
-mailbox. ETS writes are sub-microsecond operations, so the owner loop
-processes writes at roughly 1-2 million operations per second — well beyond
-what agent session workloads demand. However, if the SDK is used in an
-application with hundreds of concurrent sessions all writing simultaneously,
-the single owner could become a bottleneck.
-
-Future mitigation paths if this proves to be an issue:
-  - Shard the owner into N owner processes (one per table or table group)
-  - Keep hot-path tables (session_messages, session_counters) as `public`
-    even in hardened mode via `#{table_access => hardened, hot_path => public}`
-  - Use per-session ETS tables owned by the session engine (architectural
-    change that trades global queryability for write isolation)
-
-For now, the single owner is the simplest correct implementation.
+    survive shard crashes and transfer to the consumer for graceful
+    recovery.
 
 ## Process Monitoring
 
-In hardened mode, the owner process can monitor arbitrary pids on behalf
-of SDK modules via `monitor_for_cleanup/2`. When a monitored process
-dies, the owner executes the registered `{Module, Function, Args}` callback
-to perform ETS cleanup. This piggybacks on the existing owner loop with
-zero new processes.
+In hardened mode, the primary shard (shard 0) can monitor arbitrary pids
+on behalf of SDK modules via `monitor_for_cleanup/2`. When a monitored
+process dies, the primary shard executes the registered
+`{Module, Function, Args}` callback to perform ETS cleanup.
 
 In public mode (no owner process), `monitor_for_cleanup/2` returns
-`ignored` — the consumer is responsible for monitoring subscriber
-processes and calling cleanup functions directly.
+`ignored`.
 
 ## Audit Classification
 
@@ -84,7 +77,7 @@ consumer-facing APIs or the router):
 Note: the session engine may also write to these tables during lifecycle
 events (e.g., termination cleanup). In `public` mode all tables use public
 access so any process can write. In `hardened` mode all tables are protected
-and writes are proxied through the owner process.
+and writes are proxied through the shard owner processes.
 """.
 
 -export([
@@ -92,6 +85,10 @@ and writes are proxied through the owner process.
     init/1,
     access_mode/0,
     owner_pid/0,
+    shard_count/0,
+    shard_pids/0,
+    shard_for_table/1,
+    is_owner_process/0,
     is_always_protected/1,
     resolve_access/1,
     write_proxy_sync/3,
@@ -108,7 +105,8 @@ and writes are proxied through the owner process.
 -type access_mode() :: public | hardened.
 
 -type init_opts() :: #{
-    table_access => access_mode()
+    table_access => access_mode(),
+    shard_count  => pos_integer()
 }.
 
 %%--------------------------------------------------------------------
@@ -117,12 +115,13 @@ and writes are proxied through the owner process.
 
 -define(PT_MODE, beam_agent_table_access_mode).
 -define(PT_OWNER, beam_agent_table_owner_pid).
+-define(PT_SHARDS, beam_agent_table_owner_shards).
 -define(PT_INIT, beam_agent_tables_initialized).
 
 %% Write proxy timeout — generous default for backpressure safety.
 -define(WRITE_TIMEOUT, 5000).
 
-%% Init ready timeout.
+%% Init ready timeout per shard.
 -define(INIT_TIMEOUT, 5000).
 
 %%--------------------------------------------------------------------
@@ -142,10 +141,13 @@ Initialize ETS tables with the given options.
 
 Options:
   - `table_access` — `public` (default) or `hardened`
+  - `shard_count`  — number of shard owner processes in hardened mode
+    (default 1). Ignored in public mode.
 
 In `public` mode, tables are created in the calling process with public
-access. In `hardened` mode, a linked helper process is spawned to own
-the protected tables and proxy writes.
+access. In `hardened` mode, `shard_count` linked helper processes are
+spawned to own the protected tables and proxy writes. Each table is
+assigned to a shard via consistent hashing.
 
 This function is idempotent. Calling it again after initialization is
 a no-op that returns `ok`.
@@ -160,7 +162,8 @@ init(Opts) ->
             ok;
         false ->
             Mode = maps:get(table_access, Opts, public),
-            do_init(Mode)
+            ShardCount = maps:get(shard_count, Opts, 1),
+            do_init(Mode, ShardCount)
     end.
 
 -doc "Return the current access mode. Defaults to `public` if not initialized.".
@@ -168,10 +171,60 @@ init(Opts) ->
 access_mode() ->
     persistent_term:get(?PT_MODE, public).
 
--doc "Return the table owner pid, or `undefined` if in public mode.".
+-doc """
+Return the primary shard owner pid, or `undefined` if in public mode.
+
+In sharded configurations this returns the shard 0 (primary) pid.
+Use `shard_for_table/1` for write routing and `shard_pids/0` for
+the full shard tuple.
+""".
 -spec owner_pid() -> pid() | undefined.
 owner_pid() ->
     persistent_term:get(?PT_OWNER, undefined).
+
+-doc "Return the number of shard owner processes. Returns 0 in public mode.".
+-spec shard_count() -> non_neg_integer().
+shard_count() ->
+    case shard_pids() of
+        undefined -> 0;
+        Shards    -> tuple_size(Shards)
+    end.
+
+-doc """
+Return the tuple of all shard owner pids, or `undefined` in public mode.
+""".
+-spec shard_pids() -> tuple() | undefined.
+shard_pids() ->
+    persistent_term:get(?PT_SHARDS, undefined).
+
+-doc """
+Return the shard owner pid responsible for a given table.
+
+Uses consistent hashing (`erlang:phash2(Table, N)`) to assign each
+table to exactly one shard. Returns `undefined` in public mode.
+""".
+-spec shard_for_table(atom()) -> pid() | undefined.
+shard_for_table(Table) ->
+    case shard_pids() of
+        undefined -> undefined;
+        Shards ->
+            N = tuple_size(Shards),
+            Idx = erlang:phash2(Table, N) + 1,
+            element(Idx, Shards)
+    end.
+
+-doc """
+Return whether the calling process is any shard owner.
+
+Used by `beam_agent_ets` to short-circuit the write proxy when the
+caller is already a shard owner (direct write is safe).
+""".
+-spec is_owner_process() -> boolean().
+is_owner_process() ->
+    case shard_pids() of
+        undefined -> false;
+        Shards    -> is_member_of_tuple(self(), Shards)
+    end.
 
 -doc "Return whether `init/1` has been called.".
 -spec initialized() -> boolean().
@@ -203,7 +256,8 @@ always-protected tables. Without an owner process there is no write
 proxy, so every process must be able to write directly.
 
 In `hardened` mode, all tables are protected. Writes are serialized
-through the owner process regardless of which table is being written to.
+through the shard owner process regardless of which table is being
+written to.
 """.
 -spec resolve_access(atom()) -> public | protected.
 resolve_access(_TableName) ->
@@ -213,19 +267,20 @@ resolve_access(_TableName) ->
     end.
 
 -doc """
-Send a synchronous write command to the table owner and wait for the result.
+Send a synchronous write command to the shard owner for `Table` and
+wait for the result.
 
-This is the sole write path in hardened mode. All ETS mutations (insert,
-delete, update_counter, etc.) are serialized through the owner to
-guarantee write ordering. The caller blocks until the owner acknowledges
+This is the sole write path in hardened mode. Each table is routed to
+its assigned shard via consistent hashing, distributing write load
+across shard mailboxes. The caller blocks until the shard acknowledges
 the write.
 
-In public mode (or if the owner is not running), falls back to a direct
+In public mode (or if no shards are running), falls back to a direct
 ETS call.
 """.
 -spec write_proxy_sync(atom(), atom(), term()) -> term().
 write_proxy_sync(Op, Table, Arg) ->
-    case owner_pid() of
+    case shard_for_table(Table) of
         undefined ->
             direct_write(Op, Table, Arg);
         Pid ->
@@ -240,20 +295,19 @@ write_proxy_sync(Op, Table, Arg) ->
     end.
 
 -doc """
-Ask the owner process to monitor `Pid` and execute `MFA` when it dies.
+Ask the primary shard to monitor `Pid` and execute `MFA` when it dies.
 
-In hardened mode, sends an asynchronous message to the owner process.
-The owner calls `erlang:monitor(process, Pid)` and stores the MFA
-callback. When the monitored process exits, the owner executes the
-callback directly — since the owner owns the ETS tables, cleanup
-writes have zero proxy overhead.
+In hardened mode, sends an asynchronous message to the primary shard
+(shard 0). The shard calls `erlang:monitor(process, Pid)` and stores
+the MFA callback. When the monitored process exits, the shard executes
+the callback. Cleanup writes within the callback use `beam_agent_ets`
+wrappers which route to the correct shard automatically.
 
-In public mode (no owner process), returns `ignored`. The consumer
-is responsible for monitoring processes and calling cleanup functions.
+In public mode (no owner process), returns `ignored`.
 
 Monitoring a pid that is already dead is safe — the BEAM immediately
 delivers a `'DOWN'` message, so the cleanup callback fires on the
-next owner loop iteration.
+next shard loop iteration.
 """.
 -spec monitor_for_cleanup(pid(), {module(), atom(), [term()]}) -> ok | ignored.
 monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
@@ -261,8 +315,8 @@ monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
     case owner_pid() of
         undefined ->
             ignored;
-        OwnerPid ->
-            OwnerPid ! {monitor_for_cleanup, Pid, MFA},
+        PrimaryPid ->
+            PrimaryPid ! {monitor_for_cleanup, Pid, MFA},
             ok
     end.
 
@@ -270,38 +324,45 @@ monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
 %% Internal: Initialization
 %%--------------------------------------------------------------------
 
--spec do_init(access_mode()) -> ok.
-do_init(public) ->
+-spec do_init(access_mode(), pos_integer()) -> ok.
+do_init(public, _ShardCount) ->
     persistent_term:put(?PT_MODE, public),
     persistent_term:put(?PT_INIT, true),
     ok;
-do_init(hardened) ->
+do_init(hardened, ShardCount) when is_integer(ShardCount), ShardCount >= 1 ->
     Consumer = self(),
-    Pid = proc_lib:spawn_link(fun() ->
-        process_flag(trap_exit, true),
-        persistent_term:put(?PT_MODE, hardened),
-        persistent_term:put(?PT_OWNER, self()),
-        persistent_term:put(?PT_INIT, true),
-        Consumer ! {self(), tables_ready},
-        owner_loop(Consumer, #{})
-    end),
-    receive
-        {Pid, tables_ready} ->
-            ok
-    after ?INIT_TIMEOUT ->
-        error(beam_agent_table_init_timeout)
-    end.
+    ShardPids = lists:map(fun(Idx) ->
+        IsPrimary = Idx =:= 0,
+        Pid = proc_lib:spawn_link(fun() ->
+            process_flag(trap_exit, true),
+            Consumer ! {self(), shard_ready},
+            receive {Consumer, go} -> ok end,
+            shard_loop(Consumer, #{}, IsPrimary)
+        end),
+        receive
+            {Pid, shard_ready} -> Pid
+        after ?INIT_TIMEOUT ->
+            error({beam_agent_shard_init_timeout, Idx})
+        end
+    end, lists:seq(0, ShardCount - 1)),
+    ShardTuple = list_to_tuple(ShardPids),
+    persistent_term:put(?PT_MODE, hardened),
+    persistent_term:put(?PT_SHARDS, ShardTuple),
+    persistent_term:put(?PT_OWNER, element(1, ShardTuple)),
+    persistent_term:put(?PT_INIT, true),
+    lists:foreach(fun(Pid) -> Pid ! {Consumer, go} end, ShardPids),
+    ok.
 
 %%--------------------------------------------------------------------
-%% Internal: Owner Process Loop
+%% Internal: Shard Process Loop
 %%--------------------------------------------------------------------
 
--spec owner_loop(pid(), #{reference() => {module(), atom(), [term()]}}) ->
-    no_return().
-owner_loop(Consumer, Monitors) ->
+-spec shard_loop(pid(), #{reference() => {module(), atom(), [term()]}},
+                 boolean()) -> no_return().
+shard_loop(Consumer, Monitors, IsPrimary) ->
     receive
         %% Table creation request — we must create it so we own it.
-        %% Set the consumer as heir so tables survive owner crashes.
+        %% Set the consumer as heir so tables survive shard crashes.
         {create_table, Name, Opts, From, Ref} ->
             HeirOpts = [{heir, Consumer, Name} | Opts],
             _ = try
@@ -312,25 +373,24 @@ owner_loop(Consumer, Monitors) ->
                     %% Already exists — that's fine.
                     From ! {table_created, Ref, ok}
             end,
-            owner_loop(Consumer, Monitors);
+            shard_loop(Consumer, Monitors, IsPrimary);
 
         %% Synchronous write — caller needs the result.
         {write_sync, Op, Table, Arg, From, Ref} ->
             Result = safe_write(Op, Table, Arg),
             From ! {write_ack, Ref, Result},
-            owner_loop(Consumer, Monitors);
+            shard_loop(Consumer, Monitors, IsPrimary);
 
-        %% Monitor a process for cleanup — called by SDK modules
-        %% (e.g., beam_agent_events) to get automatic ETS cleanup
-        %% when a subscriber dies.
+        %% Monitor a process for cleanup — only the primary shard
+        %% handles this to avoid duplicate monitors.
         {monitor_for_cleanup, Pid, MFA} ->
             MonRef = erlang:monitor(process, Pid),
-            owner_loop(Consumer, Monitors#{MonRef => MFA});
+            shard_loop(Consumer, Monitors#{MonRef => MFA}, IsPrimary);
 
         %% Monitored process died — execute the cleanup callback.
-        %% The callback runs inside the owner, so ETS writes are
-        %% direct (no proxy overhead). Errors are caught to protect
-        %% the owner from faulty callbacks.
+        %% The callback runs inside the shard, so ETS writes for tables
+        %% owned by this shard are direct. Writes to other shards' tables
+        %% route through beam_agent_ets wrappers automatically.
         {'DOWN', MonRef, process, _Pid, _Reason} ->
             case maps:take(MonRef, Monitors) of
                 {{Mod, Fun, Args}, Monitors1} ->
@@ -341,21 +401,22 @@ owner_loop(Consumer, Monitors) ->
                             "callback ~p:~p/~p failed: ~p:~p~n~p",
                             [Mod, Fun, length(Args), Class, Err, Stack])
                     end,
-                    owner_loop(Consumer, Monitors1);
+                    shard_loop(Consumer, Monitors1, IsPrimary);
                 error ->
-                    owner_loop(Consumer, Monitors)
+                    shard_loop(Consumer, Monitors, IsPrimary)
             end;
 
-        %% Consumer died — we follow.
+        %% Consumer died — primary cleans up persistent terms, all exit.
         {'EXIT', Consumer, Reason} ->
-            cleanup_persistent_terms(),
+            case IsPrimary of
+                true  -> cleanup_persistent_terms();
+                false -> ok
+            end,
             exit(Reason);
 
         %% Any other linked process exit — continue.
-        {'EXIT', _Other, normal} ->
-            owner_loop(Consumer, Monitors);
         {'EXIT', _Other, _Reason} ->
-            owner_loop(Consumer, Monitors)
+            shard_loop(Consumer, Monitors, IsPrimary)
     end.
 
 %%--------------------------------------------------------------------
@@ -396,6 +457,24 @@ direct_write(match_delete, Table, Pattern) ->
     ets:match_delete(Table, Pattern).
 
 %%--------------------------------------------------------------------
+%% Internal: Helpers
+%%--------------------------------------------------------------------
+
+-spec is_member_of_tuple(pid(), tuple()) -> boolean().
+is_member_of_tuple(Val, Tuple) ->
+    is_member_of_tuple(Val, Tuple, 1, tuple_size(Tuple)).
+
+-spec is_member_of_tuple(pid(), tuple(), pos_integer(), non_neg_integer()) ->
+    boolean().
+is_member_of_tuple(_Val, _Tuple, Idx, Size) when Idx > Size ->
+    false;
+is_member_of_tuple(Val, Tuple, Idx, Size) ->
+    case element(Idx, Tuple) =:= Val of
+        true  -> true;
+        false -> is_member_of_tuple(Val, Tuple, Idx + 1, Size)
+    end.
+
+%%--------------------------------------------------------------------
 %% Internal: Cleanup
 %%--------------------------------------------------------------------
 
@@ -403,5 +482,6 @@ direct_write(match_delete, Table, Pattern) ->
 cleanup_persistent_terms() ->
     _ = persistent_term:erase(?PT_MODE),
     _ = persistent_term:erase(?PT_OWNER),
+    _ = persistent_term:erase(?PT_SHARDS),
     _ = persistent_term:erase(?PT_INIT),
     ok.

@@ -1,6 +1,6 @@
 -module(beam_agent_capabilities).
 -moduledoc """
-Canonical capability metadata for `beam_agent`.
+Pluggable capability registry for `beam_agent`.
 
 This module is the single source of truth for which features each backend
 supports and how. It answers questions like "can I use checkpointing with
@@ -14,9 +14,33 @@ Every capability/backend pair is described across three orthogonal dimensions:
   - `implementation` — `direct_backend | universal | direct_backend_and_universal`
   - `fidelity` — `exact | validated_equivalent`
 
-All 22 capabilities are at `full` support level across all 5 backends. The
-`implementation` field records whether the route is a direct backend call, a
-BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
+All 22 built-in capabilities are at `full` support level across all 5 built-in
+backends. The `implementation` field records whether the route is a direct backend
+call, a BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
+
+## Pluggable Registration
+
+The capability matrix is stored in ETS at runtime, seeded from built-in
+defaults on first access. Additional backends can register capabilities
+via `register_backend/2`, and individual capability entries can be
+overridden via `register_capability/3`.
+
+```erlang
+%% Register a new backend with all 22 capabilities:
+ok = beam_agent_capabilities:register_backend(my_backend, #{
+    session_lifecycle => #{support_level => full,
+                           implementation => direct_backend,
+                           fidelity => exact},
+    %% ... remaining 21 capabilities
+}).
+
+%% Override a single capability for an existing backend:
+ok = beam_agent_capabilities:register_capability(gemini, checkpointing, #{
+    support_level => full,
+    implementation => direct_backend,
+    fidelity => exact
+}).
+```
 
 ## The 22 capabilities
 
@@ -45,47 +69,11 @@ attachments             event_streaming
 {ok, Caps} = beam_agent_capabilities:for_session(SessionPid).
 ```
 
-## Core concepts
-
-Every capability/backend combination has three attributes: support level
-(missing, partial, baseline, or full), implementation route (direct
-backend call, universal OTP shim, or both), and fidelity (exact match
-or validated equivalent behavior).
-
-All 22 capabilities are at full support across all 5 backends. Use
-supports/2 to check if a feature works with a backend, and status/2 to
-see how it is implemented. for_session/1 returns the full capability map
-for a live session.
-
-This module is read-only metadata. It does not execute features -- it
-tells you whether a feature is available and how it is wired.
-
-## Architecture deep dive
-
-beam_agent_capabilities is the sole capability registry for the project
-and the normative source for docs/architecture matrix artifacts. All
-entries are compiled-in static data -- there is no ETS or runtime state.
-
-The implementation field distinguishes three routes: direct_backend
-(the backend CLI handles it natively), universal (the OTP-layer shim
-in a core module handles it), and direct_backend_and_universal (both
-paths exist and the native_or pattern selects at runtime).
-
-When adding a new backend, all 22 capabilities must be registered.
-Missing entries cause for_session/1 to return incomplete maps, which
-downstream code treats as unsupported.
-
 ## Architecture note
 
 `beam_agent_capabilities` is the sole capability registry for the project and
 the normative source for the `docs/architecture/*matrix*.md` artifacts.
-All entries are compiled-in static data — there is no ETS or runtime state.
-
-## Backend Integration
-
-When adding a new backend, register all 22 capabilities with support level,
-implementation route, and fidelity. See docs/guides/backend_integration_guide.md
-for details.
+Entries are ETS-backed runtime data seeded from compiled-in defaults.
 """.
 
 -export([
@@ -98,7 +86,12 @@ for details.
     for_session/1,
     status/2,
     supports/2,
-    assert_capability/2
+    assert_capability/2,
+    register_backend/2,
+    register_capability/3,
+    unregister_backend/1,
+    reset/0,
+    ensure_tables/0
 ]).
 
 -export_type([
@@ -169,218 +162,137 @@ for details.
     support := #{beam_agent_backend:backend() => support_info()}
 }.
 
+-define(CAP_TABLE, beam_agent_capabilities_registry).
+-define(CAP_META_TABLE, beam_agent_capabilities_meta).
+
+%%--------------------------------------------------------------------
+%% Table Management
+%%--------------------------------------------------------------------
+
+-doc "Ensure the capability registry ETS tables exist and are seeded.".
+-spec ensure_tables() -> ok.
+ensure_tables() ->
+    case ets:whereis(?CAP_TABLE) of
+        undefined ->
+            _ = ets:new(?CAP_TABLE, [set, public, named_table,
+                {read_concurrency, true}]),
+            _ = ets:new(?CAP_META_TABLE, [set, public, named_table,
+                {read_concurrency, true}]),
+            seed_defaults(),
+            ok;
+        _Tid ->
+            ok
+    end.
+
+-doc """
+Clear the registry and re-seed from built-in defaults.
+
+Removes all custom backend registrations and capability overrides.
+""".
+-spec reset() -> ok.
+reset() ->
+    ensure_tables(),
+    ets:delete_all_objects(?CAP_TABLE),
+    ets:delete_all_objects(?CAP_META_TABLE),
+    seed_defaults(),
+    ok.
+
+%%--------------------------------------------------------------------
+%% Registration API
+%%--------------------------------------------------------------------
+
+-doc """
+Register a new backend with a full set of capability support entries.
+
+`Capabilities` is a map from capability atom to `support_info()`. All
+22 built-in capabilities should be present. Missing entries will be
+treated as unsupported by `for_backend/1` and `status/2`.
+
+```erlang
+ok = beam_agent_capabilities:register_backend(my_backend, #{
+    session_lifecycle => #{support_level => full,
+                           implementation => direct_backend,
+                           fidelity => exact},
+    %% ... 21 more
+}).
+```
+""".
+-spec register_backend(atom(), #{capability() => support_info()}) -> ok.
+register_backend(Backend, Capabilities) when is_atom(Backend), is_map(Capabilities) ->
+    ensure_tables(),
+    maps:foreach(fun(CapId, SupportInfo) ->
+        true = ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo})
+    end, Capabilities),
+    %% Track this backend in the meta table.
+    true = ets:insert(?CAP_META_TABLE, {{backend, Backend}, true}),
+    ok.
+
+-doc """
+Register or override a single capability entry for a backend.
+
+```erlang
+ok = beam_agent_capabilities:register_capability(gemini, checkpointing, #{
+    support_level => full,
+    implementation => direct_backend,
+    fidelity => exact
+}).
+```
+""".
+-spec register_capability(atom(), capability(), support_info()) -> ok.
+register_capability(Backend, CapId, SupportInfo)
+  when is_atom(Backend), is_atom(CapId), is_map(SupportInfo) ->
+    ensure_tables(),
+    true = ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo}),
+    true = ets:insert(?CAP_META_TABLE, {{backend, Backend}, true}),
+    ok.
+
+-doc """
+Remove all capability entries for a backend.
+
+Does not affect built-in backends — call `reset/0` to restore defaults.
+""".
+-spec unregister_backend(atom()) -> ok.
+unregister_backend(Backend) when is_atom(Backend) ->
+    ensure_tables(),
+    CapIds = capability_ids(),
+    lists:foreach(fun(CapId) ->
+        ets:delete(?CAP_TABLE, {Backend, CapId})
+    end, CapIds),
+    ets:delete(?CAP_META_TABLE, {backend, Backend}),
+    ok.
+
+%%--------------------------------------------------------------------
+%% Query API
+%%--------------------------------------------------------------------
+
 -doc """
 Return the full capability matrix as a list of `capability_info()` maps.
 
 Each entry contains the capability `id`, a human-readable `title`, and a
-`support` map keyed by backend atom. The support map for each backend holds
-`support_level`, `implementation`, `fidelity`, and optionally `available_paths`
-and `notes`.
-
-This is the master data source consulted by all other functions in this module.
-Use `capability_ids/0` if you only need the atom list.
-
-```erlang
-AllCaps = beam_agent_capabilities:all(),
-[#{id := session_lifecycle, title := <<"Session lifecycle">>, support := S} | _] = AllCaps.
-```
+`support` map keyed by backend atom. The support map includes all registered
+backends (built-in and custom).
 """.
 -spec all() -> [capability_info()].
 all() ->
-    [
-        capability(session_lifecycle, <<"Session lifecycle">>,
-            all_backends(full, direct_backend, exact)),
-        capability(session_info, <<"Session info">>,
-            all_backends(full, direct_backend, exact)),
-        capability(runtime_model_switch, <<"Runtime model switch">>,
-            all_backends(full, direct_backend, exact)),
-        capability(interrupt, <<"Interrupt active work">>,
-            all_backends(full, direct_backend, exact)),
-        capability(permission_mode, <<"Runtime permission mode change">>,
-            all_backends(full, direct_backend, exact)),
-        capability(session_history, <<"Session history">>, #{
-            claude => support(full, direct_backend, exact,
-                #{available_paths => [direct_backend, direct_backend_and_universal],
-                  notes => <<"Claude also retains a shared SDK session store view.">>}),
-            codex => support(full, universal, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, direct_backend, exact,
-                #{available_paths => [direct_backend, direct_backend_and_universal],
-                  notes => <<"OpenCode exposes server-native history and shared store history.">>}),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(session_mutation, <<"Session fork, revert, share, summarize">>, #{
-            claude => support(full, universal, validated_equivalent),
-            codex => support(full, universal, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, direct_backend, exact,
-                #{available_paths => [direct_backend, direct_backend_and_universal]}),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(thread_management, <<"Thread lifecycle and history">>, #{
-            claude => support(full, universal, validated_equivalent),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(metadata_accessors, <<"Catalog and metadata accessors">>,
-            all_backends(full, universal, validated_equivalent)),
-        capability(in_process_mcp, <<"In-process MCP servers and tools">>,
-            all_backends(full, universal, exact)),
-        capability(mcp_management, <<"MCP management">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, direct_backend, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, direct_backend, validated_equivalent)
-        }),
-        capability(hooks, <<"SDK lifecycle hooks">>,
-            all_backends(full, universal, exact)),
-        capability(checkpointing, <<"File checkpointing">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, universal, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(thinking_budget, <<"Thinking budget control">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, universal, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(task_stop, <<"Stop task by id">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, universal, validated_equivalent),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(command_execution, <<"Command execution and turn response">>, #{
-            claude => support(full, universal, validated_equivalent),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, validated_equivalent),
-            opencode => support(full, universal, validated_equivalent),
-            copilot => support(full, universal, validated_equivalent)
-        }),
-        capability(approval_callbacks, <<"Approval and permission callbacks">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, direct_backend, exact,
-                #{notes => <<"Gemini ACP reverse permission requests are handled natively via approval_mode state and approval_response/2.">>}),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, direct_backend, exact)
-        }),
-        capability(user_input_callbacks, <<"User input callbacks">>, #{
-            claude => support(full, direct_backend, exact),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal callback broker services canonical user-input requests for Gemini sessions.">>}),
-            opencode => support(full, universal, exact,
-                #{notes => <<"Universal callback broker services canonical user-input requests for OpenCode sessions.">>}),
-            copilot => support(full, direct_backend, exact)
-        }),
-        capability(realtime_review, <<"Realtime, review, collaboration">>, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>}),
-            codex => support(full, direct_backend_and_universal, exact,
-                #{available_paths => [direct_backend, universal],
-                  notes => <<"Native Codex review/realtime APIs remain available while realtime transport bridges review and collaboration through the universal layer.">>}),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>}),
-            opencode => support(full, direct_backend_and_universal, exact,
-                #{available_paths => [direct_backend, universal],
-                  notes => <<"Native OpenCode events remain available while the canonical review and realtime layer stays universal.">>}),
-            copilot => support(full, universal, exact,
-                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>})
-        }),
-        capability(config_management, <<"Config management">>, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal config layer persists canonical runtime and control state for Claude sessions.">>}),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal config layer persists canonical runtime and control state for Gemini sessions.">>}),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, direct_backend_and_universal, exact,
-                #{available_paths => [direct_backend, universal],
-                  notes => <<"Copilot keeps native session/admin config calls while the canonical config layer fills the shared surface.">>})
-        }),
-        capability(provider_management, <<"Provider and runtime management">>, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal runtime/provider layer exposes provider selection and auth metadata for Claude sessions.">>}),
-            codex => support(full, direct_backend_and_universal, exact,
-                #{available_paths => [direct_backend, universal],
-                  notes => <<"Codex keeps native model/runtime controls while the universal provider layer exposes canonical provider management.">>}),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal runtime/provider layer exposes provider selection and auth metadata for Gemini sessions.">>}),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, direct_backend, exact,
-                #{notes => <<"Copilot protocol has native build_agent_list/select/deselect/reload_params for provider management.">>})
-        }),
-        capability(attachments, <<"Attachments in query and send">>, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Claude sessions.">>}),
-            codex => support(full, direct_backend, exact),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Gemini sessions.">>}),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, direct_backend, exact)
-        }),
-        capability(event_streaming, <<"Backend event streaming">>, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal event bus streams canonical session and control events for Claude sessions.">>}),
-            codex => support(full, direct_backend_and_universal, exact,
-                #{available_paths => [direct_backend, universal],
-                  notes => <<"Codex keeps native control notifications while the canonical event bus provides a stable stream for every backend.">>}),
-            gemini => support(full, universal, exact,
-                #{notes => <<"Universal event bus streams canonical session and control events fed by Gemini ACP notifications.">>}),
-            opencode => support(full, direct_backend, exact),
-            copilot => support(full, universal, exact,
-                #{notes => <<"Universal event bus streams canonical session and control events for Copilot sessions.">>})
-        })
-    ].
+    ensure_tables(),
+    Backends = registered_backends(),
+    [begin
+        SupportMap = maps:from_list(
+            [{B, lookup_support(B, Id)} || B <- Backends,
+             lookup_support(B, Id) =/= undefined]),
+        #{id => Id, title => Title, support => SupportMap}
+    end || {Id, Title} <- capability_definitions()].
 
 -doc """
 Return the full capability matrix as a list of `capability_info()` maps.
 
-Alias for `all/0`. Provided so callers using the
-`beam_agent_capabilities:capabilities()` name get the same result as
-`beam_agent_capabilities:all()` without having to know which function
-name to use.
-
-```erlang
-AllCaps = beam_agent_capabilities:capabilities(),
-[#{id := session_lifecycle} | _] = AllCaps.
-```
+Alias for `all/0`.
 """.
 -spec capabilities() -> [capability_info()].
 capabilities() -> all().
 
 -doc """
 Return the projected capability list for a session pid or backend.
-
-When given a `pid()`, resolves the backend from the live session and
-delegates to `for_session/1`. When given a backend atom or binary,
-delegates to `for_backend/1`.
-
-This is the direct capability-registry lookup for callers that want the
-projected capability list without going through the broader `beam_agent`
-facade.
-
-Returns `{error, backend_not_present}` or
-`{error, {session_backend_lookup_failed, Reason}}` when the session
-process is not reachable, and `{error, {unknown_backend, Backend}}` for
-unrecognised backend values.
-
-```erlang
-{ok, Caps} = beam_agent_capabilities:capabilities(claude),
-[#{id := session_lifecycle, support_level := full} | _] = Caps.
-
-{ok, SessionPid} = beam_agent:start_session(#{backend => gemini}),
-{ok, SCaps} = beam_agent_capabilities:capabilities(SessionPid).
-```
 """.
 -spec capabilities(pid() | beam_agent_backend:backend() | binary() | atom()) ->
     {ok, [map()]} | {error, backend_lookup_error()}.
@@ -390,59 +302,33 @@ capabilities(BackendLike) ->
     for_backend(BackendLike).
 
 -doc """
-Return the list of all supported backend atoms.
+Return the list of all registered backend atoms.
 
-The five backends are: `claude`, `codex`, `gemini`, `opencode`, `copilot`.
-This list is the authoritative enumeration used internally to build the
-capability matrix. Use it when iterating over all backends programmatically.
-
-```erlang
-[claude, codex, gemini, opencode, copilot] = beam_agent_capabilities:backends().
-```
+Includes built-in backends and any custom-registered backends.
 """.
--spec backends() -> [beam_agent_backend:backend()].
+-spec backends() -> [atom()].
 backends() ->
-    beam_agent_backend:available_backends().
+    ensure_tables(),
+    registered_backends().
 
 -doc """
 Return the flat list of all 22 capability atom identifiers.
-
-Useful for iterating over capabilities without loading the full matrix.
-The order matches the order of entries in `all/0`.
-
-```erlang
-Ids = beam_agent_capabilities:capability_ids(),
-true = lists:member(checkpointing, Ids).
-```
 """.
 -spec capability_ids() -> [capability()].
 capability_ids() ->
-    [Id || #{id := Id} <- all()].
+    [Id || {Id, _Title} <- capability_definitions()].
 
 -doc """
 Return the projected capability list for a specific backend.
-
-`BackendLike` may be a backend atom (`claude`), a binary (`<<"codex">>`), or any
-value accepted by `beam_agent_backend:normalize/1`.
-
-Each entry in the returned list is a flat map with the fields `id`, `title`,
-`backend`, `support_level`, `implementation`, and `fidelity`, plus optional
-`available_paths` and `notes` where present. This is the per-backend projection
-of the full matrix returned by `all/0`.
-
-Returns `{error, {unknown_backend, Backend}}` for unrecognised backend values.
-
-```erlang
-{ok, Caps} = beam_agent_capabilities:for_backend(claude),
-[#{id := session_lifecycle, support_level := full} | _] = Caps.
-```
 """.
 -spec for_backend(beam_agent_backend:backend() | binary() | atom()) ->
     {ok, [map()]} | {error, term()}.
 for_backend(BackendLike) ->
-    case beam_agent_backend:normalize(BackendLike) of
+    ensure_tables(),
+    case normalize_backend(BackendLike) of
         {ok, Backend} ->
-            Results = [project_capability(Capability, Backend) || Capability <- all()],
+            Results = [project_capability_for(Backend, Id, Title)
+                       || {Id, Title} <- capability_definitions()],
             case lists:keyfind(error, 1, Results) of
                 {error, _} = Error -> Error;
                 false ->
@@ -454,19 +340,6 @@ for_backend(BackendLike) ->
 
 -doc """
 Return the projected capability list for the backend of a live session.
-
-Resolves the backend from the running session process and delegates to
-`for_backend/1`. This is the most convenient call during an active agent
-session when you do not know — or do not want to hard-code — the backend.
-
-Returns `{error, backend_not_present}` if the session process is not
-registered, or `{error, {session_backend_lookup_failed, Reason}}` for other
-lookup failures.
-
-```erlang
-{ok, SessionPid} = beam_agent:start_session(#{backend => gemini}),
-{ok, Caps} = beam_agent_capabilities:for_session(SessionPid).
-```
 """.
 -spec for_session(pid()) -> {ok, [map()]} | {error, backend_lookup_error()}.
 for_session(Session) when is_pid(Session) ->
@@ -479,59 +352,27 @@ for_session(Session) when is_pid(Session) ->
 
 -doc """
 Return the full `support_info()` map for a specific capability/backend pair.
-
-The returned map always contains `support_level`, `implementation`, and
-`fidelity`. It may also include `available_paths` (a list of implementation
-atoms) and `notes` (a binary) where the capability has backend-specific detail.
-
-Returns `{error, {unknown_capability, Cap}}` for an unrecognised capability
-atom, or `{error, {unknown_backend, Backend}}` for an unrecognised backend.
-
-```erlang
-{ok, #{support_level := full,
-       implementation := universal,
-       fidelity := validated_equivalent}} =
-    beam_agent_capabilities:status(permission_mode, gemini).
-```
 """.
 -spec status(capability(), beam_agent_backend:backend() | binary() | atom()) ->
     {ok, support_info()} | {error, term()}.
 status(Capability, BackendLike) ->
-    case {lookup_capability(Capability), beam_agent_backend:normalize(BackendLike)} of
-        {{ok, Info}, {ok, Backend}} ->
-            case maps:find(support, Info) of
-                {ok, SupportMap} ->
-                    case maps:find(Backend, SupportMap) of
-                        {ok, SupportInfo} ->
-                            {ok, SupportInfo};
-                        error ->
-                            {error, {unknown_backend, Backend}}
-                    end;
-                error ->
-                    {error, {unknown_capability, Capability}}
-            end;
-        {{error, _} = Error, _} ->
+    ensure_tables(),
+    case {is_known_capability(Capability), normalize_backend(BackendLike)} of
+        {false, _} ->
+            {error, {unknown_capability, Capability}};
+        {true, {error, _} = Error} ->
             Error;
-        {_, {error, _} = Error} ->
-            Error
+        {true, {ok, Backend}} ->
+            case lookup_support(Backend, Capability) of
+                undefined ->
+                    {error, {unknown_backend, Backend}};
+                SupportInfo ->
+                    {ok, SupportInfo}
+            end
     end.
 
 -doc """
 Check whether a capability is supported for a given backend.
-
-This is a convenience wrapper around `status/2`. Because all 22 capabilities
-are at `full` support level for all 5 backends, this function returns
-`{ok, true}` for every valid capability/backend combination. It exists to make
-guard-style checks readable and to surface `{error, ...}` for typos.
-
-Returns `{error, {unknown_capability, Cap}}` or `{error, {unknown_backend, B}}`
-for invalid inputs.
-
-```erlang
-{ok, true} = beam_agent_capabilities:supports(checkpointing, codex).
-{ok, true} = beam_agent_capabilities:supports(in_process_mcp, <<"gemini">>).
-{error, {unknown_capability, bogus}} = beam_agent_capabilities:supports(bogus, claude).
-```
 """.
 -spec supports(capability(), beam_agent_backend:backend() | binary() | atom()) ->
     {ok, true} | {error, status_error()}.
@@ -546,27 +387,12 @@ supports(Capability, BackendLike) ->
 -doc """
 Assert that a capability is supported for a given backend.
 
-A pre-flight check wrapper around `supports/2`. Returns `ok` when the
-capability is supported, or `{error, {unsupported_capability, Cap, Backend}}`
-when the support level is `missing`. Returns the underlying
-`{error, status_error()}` tuple for unknown capability or backend atoms.
-
-Use this before calling a feature to produce a clear error before the
-call site rather than a confusing failure inside it.
-
-```erlang
-ok = beam_agent_capabilities:assert_capability(checkpointing, codex).
-{error, {unknown_capability, bogus}} =
-    beam_agent_capabilities:assert_capability(bogus, claude).
-%% When support_level is missing for a known pair:
-%% {error, {unsupported_capability, Cap, Backend}} =
-%%     beam_agent_capabilities:assert_capability(some_cap, some_backend).
-```
+Returns `ok` when supported, or an error tuple when not.
 """.
 -spec assert_capability(capability(), beam_agent_backend:backend() | binary() | atom()) ->
     ok | {error, assert_capability_error()}.
 assert_capability(Capability, BackendLike) ->
-    case beam_agent_backend:normalize(BackendLike) of
+    case normalize_backend(BackendLike) of
         {ok, Backend} ->
             case status(Capability, Backend) of
                 {ok, #{support_level := missing}} ->
@@ -581,33 +407,60 @@ assert_capability(Capability, BackendLike) ->
     end.
 
 %%--------------------------------------------------------------------
-%% Internal helpers
+%% Internal: ETS Lookups
 %%--------------------------------------------------------------------
 
--spec capability(capability(), binary(), #{beam_agent_backend:backend() => support_info()}) ->
-    capability_info().
-capability(Id, Title, Support) ->
-    #{id => Id, title => Title, support => Support}.
+-spec lookup_support(atom(), capability()) -> support_info() | undefined.
+lookup_support(Backend, CapId) ->
+    case ets:lookup(?CAP_TABLE, {Backend, CapId}) of
+        [{{Backend, CapId}, SupportInfo}] -> SupportInfo;
+        [] -> undefined
+    end.
 
--spec all_backends(support_level(), implementation(), fidelity()) ->
-    #{beam_agent_backend:backend() => support_info()}.
-all_backends(SupportLevel, Implementation, Fidelity) ->
-    maps:from_list([{Backend, support(SupportLevel, Implementation, Fidelity)} || Backend <- backends()]).
+-spec registered_backends() -> [atom()].
+registered_backends() ->
+    ets:foldl(fun({{backend, B}, _}, Acc) -> [B | Acc];
+                 (_, Acc) -> Acc
+              end, [], ?CAP_META_TABLE).
 
--spec support(support_level(), implementation(), fidelity()) -> support_info().
-support(SupportLevel, Implementation, Fidelity) ->
-    #{support_level => SupportLevel, implementation => Implementation, fidelity => Fidelity}.
+-spec is_known_capability(term()) -> boolean().
+is_known_capability(Cap) ->
+    lists:keymember(Cap, 1, capability_definitions()).
 
--spec support(support_level(), implementation(), fidelity(), map()) -> support_info().
-support(SupportLevel, Implementation, Fidelity, Extra) ->
-    maps:merge(support(SupportLevel, Implementation, Fidelity), Extra).
+%%--------------------------------------------------------------------
+%% Internal: Backend Normalization
+%%--------------------------------------------------------------------
 
--spec project_capability(capability_info(), beam_agent_backend:backend()) ->
-    {ok, map()} | {error, term()}.
-project_capability(#{id := Id, title := Title, support := SupportMap}, Backend) ->
-    case maps:find(Backend, SupportMap) of
-        {ok, #{support_level := SL, implementation := Impl,
-               fidelity := Fid} = SupportInfo} ->
+-spec normalize_backend(term()) -> {ok, atom()} | {error, {unknown_backend, term()}}.
+normalize_backend(Backend) when is_atom(Backend) ->
+    ensure_tables(),
+    case ets:lookup(?CAP_META_TABLE, {backend, Backend}) of
+        [_] -> {ok, Backend};
+        []  ->
+            %% Try the standard beam_agent_backend normalization for
+            %% built-in backends.
+            beam_agent_backend:normalize(Backend)
+    end;
+normalize_backend(Backend) when is_binary(Backend) ->
+    beam_agent_backend:normalize(Backend);
+normalize_backend(Other) ->
+    {error, {unknown_backend, Other}}.
+
+%%--------------------------------------------------------------------
+%% Internal: Projection
+%%--------------------------------------------------------------------
+
+-spec project_capability_for(atom(), capability(), binary()) ->
+    {ok, #{id := capability(), title := binary(), backend := atom(),
+           support_level := atom(), implementation := atom(),
+           fidelity := atom(), atom() => term()}} |
+    {error, {unknown_backend, atom()}}.
+project_capability_for(Backend, Id, Title) ->
+    case lookup_support(Backend, Id) of
+        undefined ->
+            {error, {unknown_backend, Backend}};
+        #{support_level := SL, implementation := Impl,
+          fidelity := Fid} = SupportInfo ->
             {ok, maps:merge(
                 #{
                     id => Id,
@@ -617,19 +470,234 @@ project_capability(#{id := Id, title := Title, support := SupportMap}, Backend) 
                     implementation => Impl,
                     fidelity => Fid
                 },
-                extra_projection_fields(SupportInfo)
-            )};
-        error ->
-            {error, {unknown_backend, Backend}}
+                maps:with([available_paths, notes], SupportInfo)
+            )}
     end.
 
--spec extra_projection_fields(support_info()) -> map().
-extra_projection_fields(SupportInfo) ->
-    maps:with([available_paths, notes], SupportInfo).
+%%--------------------------------------------------------------------
+%% Internal: Capability Definitions (static metadata)
+%%--------------------------------------------------------------------
 
--spec lookup_capability(capability()) -> {ok, capability_info()} | {error, term()}.
-lookup_capability(Capability) ->
-    case [Info || #{id := Id} = Info <- all(), Id =:= Capability] of
-        [Info] -> {ok, Info};
-        [] -> {error, {unknown_capability, Capability}}
-    end.
+-spec capability_definitions() -> nonempty_list({capability(), <<_:64, _:_*8>>}).
+capability_definitions() ->
+    [{session_lifecycle, <<"Session lifecycle">>},
+     {session_info, <<"Session info">>},
+     {runtime_model_switch, <<"Runtime model switch">>},
+     {interrupt, <<"Interrupt active work">>},
+     {permission_mode, <<"Runtime permission mode change">>},
+     {session_history, <<"Session history">>},
+     {session_mutation, <<"Session fork, revert, share, summarize">>},
+     {thread_management, <<"Thread lifecycle and history">>},
+     {metadata_accessors, <<"Catalog and metadata accessors">>},
+     {in_process_mcp, <<"In-process MCP servers and tools">>},
+     {mcp_management, <<"MCP management">>},
+     {hooks, <<"SDK lifecycle hooks">>},
+     {checkpointing, <<"File checkpointing">>},
+     {thinking_budget, <<"Thinking budget control">>},
+     {task_stop, <<"Stop task by id">>},
+     {command_execution, <<"Command execution and turn response">>},
+     {approval_callbacks, <<"Approval and permission callbacks">>},
+     {user_input_callbacks, <<"User input callbacks">>},
+     {realtime_review, <<"Realtime, review, collaboration">>},
+     {config_management, <<"Config management">>},
+     {provider_management, <<"Provider and runtime management">>},
+     {attachments, <<"Attachments in query and send">>},
+     {event_streaming, <<"Backend event streaming">>}].
+
+%%--------------------------------------------------------------------
+%% Internal: Built-in Default Seeding
+%%--------------------------------------------------------------------
+
+-spec seed_defaults() -> ok.
+seed_defaults() ->
+    BuiltinBackends = beam_agent_backend:available_backends(),
+    DefaultMatrix = default_matrix(),
+    lists:foreach(fun(#{id := CapId, support := SupportMap}) ->
+        maps:foreach(fun(Backend, SupportInfo) ->
+            true = ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo})
+        end, SupportMap)
+    end, DefaultMatrix),
+    lists:foreach(fun(B) ->
+        true = ets:insert(?CAP_META_TABLE, {{backend, B}, true})
+    end, BuiltinBackends),
+    ok.
+
+-spec default_matrix() -> [capability_info()].
+default_matrix() ->
+    [
+        cap(session_lifecycle,
+            all_backends(full, direct_backend, exact)),
+        cap(session_info,
+            all_backends(full, direct_backend, exact)),
+        cap(runtime_model_switch,
+            all_backends(full, direct_backend, exact)),
+        cap(interrupt,
+            all_backends(full, direct_backend, exact)),
+        cap(permission_mode,
+            all_backends(full, direct_backend, exact)),
+        cap(session_history, #{
+            claude => support(full, direct_backend, exact,
+                #{available_paths => [direct_backend, direct_backend_and_universal],
+                  notes => <<"Claude also retains a shared SDK session store view.">>}),
+            codex => support(full, universal, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, direct_backend, exact,
+                #{available_paths => [direct_backend, direct_backend_and_universal],
+                  notes => <<"OpenCode exposes server-native history and shared store history.">>}),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(session_mutation, #{
+            claude => support(full, universal, validated_equivalent),
+            codex => support(full, universal, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, direct_backend, exact,
+                #{available_paths => [direct_backend, direct_backend_and_universal]}),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(thread_management, #{
+            claude => support(full, universal, validated_equivalent),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, universal, validated_equivalent),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(metadata_accessors,
+            all_backends(full, universal, validated_equivalent)),
+        cap(in_process_mcp,
+            all_backends(full, universal, exact)),
+        cap(mcp_management, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, direct_backend, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, direct_backend, validated_equivalent)
+        }),
+        cap(hooks,
+            all_backends(full, universal, exact)),
+        cap(checkpointing, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, universal, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, universal, validated_equivalent),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(thinking_budget, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, universal, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, universal, validated_equivalent),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(task_stop, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, universal, validated_equivalent),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, universal, validated_equivalent),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(command_execution, #{
+            claude => support(full, universal, validated_equivalent),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, universal, validated_equivalent),
+            opencode => support(full, universal, validated_equivalent),
+            copilot => support(full, universal, validated_equivalent)
+        }),
+        cap(approval_callbacks, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, direct_backend, exact,
+                #{notes => <<"Gemini ACP reverse permission requests are handled natively via approval_mode state and approval_response/2.">>}),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, direct_backend, exact)
+        }),
+        cap(user_input_callbacks, #{
+            claude => support(full, direct_backend, exact),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal callback broker services canonical user-input requests for Gemini sessions.">>}),
+            opencode => support(full, universal, exact,
+                #{notes => <<"Universal callback broker services canonical user-input requests for OpenCode sessions.">>}),
+            copilot => support(full, direct_backend, exact)
+        }),
+        cap(realtime_review, #{
+            claude => support(full, universal, exact,
+                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>}),
+            codex => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Native Codex review/realtime APIs remain available while realtime transport bridges review and collaboration through the universal layer.">>}),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>}),
+            opencode => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Native OpenCode events remain available while the canonical review and realtime layer stays universal.">>}),
+            copilot => support(full, universal, exact,
+                #{notes => <<"Universal collaboration layer provides canonical review and realtime participation.">>})
+        }),
+        cap(config_management, #{
+            claude => support(full, universal, exact,
+                #{notes => <<"Universal config layer persists canonical runtime and control state for Claude sessions.">>}),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal config layer persists canonical runtime and control state for Gemini sessions.">>}),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Copilot keeps native session/admin config calls while the canonical config layer fills the shared surface.">>})
+        }),
+        cap(provider_management, #{
+            claude => support(full, universal, exact,
+                #{notes => <<"Universal runtime/provider layer exposes provider selection and auth metadata for Claude sessions.">>}),
+            codex => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Codex keeps native model/runtime controls while the universal provider layer exposes canonical provider management.">>}),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal runtime/provider layer exposes provider selection and auth metadata for Gemini sessions.">>}),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, direct_backend, exact,
+                #{notes => <<"Copilot protocol has native build_agent_list/select/deselect/reload_params for provider management.">>})
+        }),
+        cap(attachments, #{
+            claude => support(full, universal, exact,
+                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Claude sessions.">>}),
+            codex => support(full, direct_backend, exact),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Gemini sessions.">>}),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, direct_backend, exact)
+        }),
+        cap(event_streaming, #{
+            claude => support(full, universal, exact,
+                #{notes => <<"Universal event bus streams canonical session and control events for Claude sessions.">>}),
+            codex => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Codex keeps native control notifications while the canonical event bus provides a stable stream for every backend.">>}),
+            gemini => support(full, universal, exact,
+                #{notes => <<"Universal event bus streams canonical session and control events fed by Gemini ACP notifications.">>}),
+            opencode => support(full, direct_backend, exact),
+            copilot => support(full, universal, exact,
+                #{notes => <<"Universal event bus streams canonical session and control events for Copilot sessions.">>})
+        })
+    ].
+
+%%--------------------------------------------------------------------
+%% Internal: Helpers
+%%--------------------------------------------------------------------
+
+-spec cap(capability(), #{atom() => support_info()}) -> capability_info().
+cap(Id, Support) ->
+    Title = proplists:get_value(Id, capability_definitions(), <<>>),
+    #{id => Id, title => Title, support => Support}.
+
+-spec all_backends(support_level(), implementation(), fidelity()) ->
+    #{beam_agent_backend:backend() => support_info()}.
+all_backends(SupportLevel, Implementation, Fidelity) ->
+    maps:from_list([{Backend, support(SupportLevel, Implementation, Fidelity)}
+                    || Backend <- beam_agent_backend:available_backends()]).
+
+-spec support(support_level(), implementation(), fidelity()) -> support_info().
+support(SupportLevel, Implementation, Fidelity) ->
+    #{support_level => SupportLevel, implementation => Implementation, fidelity => Fidelity}.
+
+-spec support(support_level(), implementation(), fidelity(), map()) -> support_info().
+support(SupportLevel, Implementation, Fidelity, Extra) ->
+    maps:merge(support(SupportLevel, Implementation, Fidelity), Extra).
