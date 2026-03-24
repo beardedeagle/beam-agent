@@ -220,15 +220,22 @@ restore_files([#{path := Path, content := Content,
                  permissions := Perms} | Rest])
   when Content =/= undefined ->
     PathStr = unicode:characters_to_list(Path),
-    case file:write_file(PathStr, Content) of
+    TmpPath = PathStr ++ ".beam_agent_tmp",
+    case file:write_file(TmpPath, Content) of
         ok ->
-            case Perms of
-                undefined -> ok;
-                Mode when is_integer(Mode) ->
-                    _ = file:change_mode(PathStr, Mode),
-                    ok
-            end,
-            restore_files(Rest);
+            case file:rename(TmpPath, PathStr) of
+                ok ->
+                    case Perms of
+                        undefined -> ok;
+                        Mode when is_integer(Mode) ->
+                            _ = file:change_mode(PathStr, Mode),
+                            ok
+                    end,
+                    restore_files(Rest);
+                {error, RenameErr} ->
+                    _ = file:delete(TmpPath),
+                    {error, {restore_failed, Path, RenameErr}}
+            end;
         {error, Reason} ->
             {error, {restore_failed, Path, Reason}}
     end;

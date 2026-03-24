@@ -408,7 +408,9 @@ shard_loop(Consumer, Monitors, IsPrimary) ->
                         logger:warning(
                             "beam_agent_table_owner: monitor cleanup "
                             "callback ~p:~p/~p failed: ~p:~p~n~p",
-                            [Mod, Fun, length(Args), Class, Err, Stack])
+                            [Mod, Fun, length(Args), Class,
+                             beam_agent_redaction:reason(Err),
+                             beam_agent_redaction:stacktrace(Stack)])
                     end,
                     shard_loop(Consumer, Monitors1, IsPrimary);
                 error ->

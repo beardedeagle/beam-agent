@@ -470,7 +470,8 @@ error(state_timeout, auto_stop, _Data) ->
     {stop, {shutdown, session_error}};
 error(internal, Reason, #engine{handler_mod = H}) ->
     Backend = H:backend_name(),
-    logger:error("~s session engine error: ~p", [Backend, Reason]),
+    logger:error("~s session engine error: ~p",
+                 [Backend, beam_agent_redaction:reason(Reason)]),
     keep_state_and_data;
 error({call, From}, health, _Data) ->
     {keep_state_and_data, [{reply, From, error}]};
@@ -813,7 +814,8 @@ handle_incoming_data(RawData, StateName,
                         "beam_agent_session_engine: handler ~p returned"
                         " unexpected result from handle_data/2"
                         " [session=~s result=~p] — transitioning to error",
-                        [H, Data#engine.session_id, Unexpected]),
+                        [H, Data#engine.session_id,
+                         beam_agent_redaction:reason(Unexpected)]),
                     enter_error({handler_crashed, {bad_return, Unexpected}},
                                 Data#engine{consumer = undefined})
             catch
@@ -822,7 +824,9 @@ handle_incoming_data(RawData, StateName,
                         "beam_agent_session_engine: handler ~p crashed in"
                         " handle_data/2 [session=~s class=~p reason=~p"
                         " stack=~p] — transitioning to error",
-                        [H, Data#engine.session_id, Class, Reason, Stack]),
+                        [H, Data#engine.session_id, Class,
+                         beam_agent_redaction:reason(Reason),
+                         beam_agent_redaction:stacktrace(Stack)]),
                     enter_error({handler_crashed, {Class, Reason}},
                                 Data#engine{consumer = undefined})
             end
@@ -1230,9 +1234,13 @@ maybe_put_reconnect(_, Map) ->
 %%====================================================================
 
 -spec redact_engine_data(#engine{} | term()) -> #engine{} | term().
-redact_engine_data(#engine{} = Data) ->
+redact_engine_data(#engine{handler_mod = H, handler_state = HS} = Data) ->
+    RedactedHS = case erlang:function_exported(H, redact_handler_state, 1) of
+        true  -> H:redact_handler_state(HS);
+        false -> redacted
+    end,
     Data#engine{
-        handler_state = redacted,
+        handler_state = RedactedHS,
         opts = beam_agent_redaction:map(Data#engine.opts)
     };
 redact_engine_data(Other) ->

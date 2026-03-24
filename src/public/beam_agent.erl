@@ -135,7 +135,11 @@ Key fields:
   - thinking: thinking/chain-of-thought configuration
   - max_budget_usd: cost cap for this query
   - agent: select a specific sub-agent
-  - attachments: structured file or data attachments
+  - attachments: structured file or data attachments.
+    Security: attachment file paths are read without sandboxing.  Do not
+    pass untrusted user input directly into the attachments list.  Path
+    validation and directory confinement, when required, are the caller's
+    responsibility.
 """.
 -type query_opts() :: beam_agent_core:query_opts().
 

@@ -1022,10 +1022,10 @@ safe_user_input_response(Handler, Params, Ctx) ->
             Err
     catch
         Class:Reason:Stack ->
-            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                         || {M, F, A, L} <- Stack],
             logger:error("codex user_input_handler crashed: ~p:~p~n~p",
-                         [Class, Reason, SafeStack]),
+                         [Class,
+                          beam_agent_redaction:reason(Reason),
+                          beam_agent_redaction:stacktrace(Stack)]),
             {error, handler_crashed}
     end.
 

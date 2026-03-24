@@ -1,6 +1,6 @@
 -module(beam_agent_credential).
 -moduledoc """
-Symmetric encryption for sensitive credential fields stored in ETS.
+Symmetric encryption for sensitive credential fields.
 
 Uses AES-256-GCM with a per-node key derived from the BEAM node cookie
 via HKDF-SHA256 (RFC 5869). HKDF-Extract produces a pseudorandom key
@@ -15,8 +15,15 @@ prevent accidental exposure in logs, crash dumps, and admin UIs.
 -export([
     protect/1,
     unprotect/1,
-    is_protected/1
+    is_protected/1,
+    protect_value/1,
+    unprotect_value/1
 ]).
+
+-export_type([protected/0]).
+
+%% Opaque encrypted-value wrapper returned by protect/1 and protect_value/1.
+-type protected() :: {beam_agent_protected, binary(), binary(), binary()}.
 
 -define(KDF_SALT, <<"beam_agent_credential_v1">>).
 -define(KDF_INFO, <<"aes-256-gcm-key">>).
@@ -82,6 +89,29 @@ is_protected(Map) when is_map(Map) ->
         (_Key, {beam_agent_protected, _, _, _}, _Acc) -> true;
         (_Key, _Value, Acc) -> Acc
     end, false, Map).
+
+-doc """
+Encrypt a single value directly.
+
+Unlike `protect/1`, which walks a map's keys, this encrypts any term and
+returns a `{beam_agent_protected, Nonce, Ciphertext, Tag}` tuple.  Use this
+for individual credential values stored outside of maps (e.g., record fields).
+""".
+-spec protect_value(term()) -> protected().
+protect_value(Value) ->
+    encrypt_value(Value).
+
+-doc """
+Decrypt a single protected value.  Non-protected values pass through unchanged.
+
+Inverse of `protect_value/1`.
+""".
+-spec unprotect_value(protected()) -> term();
+                     (term()) -> term().
+unprotect_value({beam_agent_protected, Nonce, Ciphertext, Tag}) ->
+    decrypt_value(Nonce, Ciphertext, Tag);
+unprotect_value(Value) ->
+    Value.
 
 %%--------------------------------------------------------------------
 %% Internal helpers

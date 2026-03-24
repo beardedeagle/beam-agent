@@ -28,6 +28,9 @@
 
 %% Exported for unit testing
 -export([is_remote_plaintext_http/1]).
+
+%% Engine format_status callback — redact credentials from crash dumps
+-export([redact_handler_state/1]).
 -ifdef(TEST).
 -export([check_transport_security/3]).
 -endif.
@@ -102,7 +105,8 @@
     host               :: binary(),
     port               :: inet:port_number(),
     base_path = <<>>   :: binary(),
-    auth               :: {basic, binary()} | none,
+    %% Encrypted at rest; {basic, _} appears only in redacted crash-dump copies.
+    auth               :: beam_agent_credential:protected() | {basic, binary()} | none,
     model              :: binary() | map() | undefined,
     mode               :: binary() | undefined,
     buffer_max         :: pos_integer(),
@@ -177,7 +181,7 @@ init_handler(Opts) ->
                 host               = Host,
                 port               = Port,
                 base_path          = BasePath,
-                auth               = Auth,
+                auth               = protect_auth(Auth),
                 model              = Model,
                 buffer_max         = BufferMax,
                 permission_handler = PermissionHandler,
@@ -248,6 +252,38 @@ terminate_handler(Reason, #hstate{} = HState) ->
                   #{event => session_end, reason => Reason},
                   HState),
     ok.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        auth = case HState#hstate.auth of
+            none                          -> none;
+            {beam_agent_protected, _, _, _} -> {basic, <<"redacted">>};
+            {basic, _}                      -> {basic, <<"redacted">>}
+        end,
+        opts = beam_agent_redaction:map(HState#hstate.opts)
+    };
+redact_handler_state(Other) ->
+    Other.
+
+%%--------------------------------------------------------------------
+%% Auth encryption helpers
+%%--------------------------------------------------------------------
+
+-spec protect_auth({basic, binary()} | none) ->
+    beam_agent_credential:protected() | none.
+protect_auth(none) -> none;
+protect_auth(Auth) -> beam_agent_credential:protect_value(Auth).
+
+-spec decrypt_auth(beam_agent_credential:protected() | none) ->
+    {basic, binary()} | none.
+decrypt_auth(none) -> none;
+decrypt_auth(Protected) -> beam_agent_credential:unprotect_value(Protected).
 
 %%====================================================================
 %% Optional callbacks
@@ -833,7 +869,7 @@ do_post_json(EndpointPath, Body, Purpose, From,
                      directory = Dir,
                      rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
-    Headers = opencode_http:common_headers(Auth, Dir),
+    Headers = opencode_http:common_headers(decrypt_auth(Auth), Dir),
     Encoded = json:encode(Body),
     Ref = ClientMod:post(ConnPid, binary_to_list(FullPath), Headers, Encoded),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
@@ -848,7 +884,7 @@ do_get_request(EndpointPath, Purpose, From,
                        directory = Dir,
                        rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
-    Headers = opencode_http:common_headers(Auth, Dir),
+    Headers = opencode_http:common_headers(decrypt_auth(Auth), Dir),
     Ref = ClientMod:get(ConnPid, binary_to_list(FullPath), Headers),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
@@ -862,7 +898,7 @@ do_patch_json(EndpointPath, Body, Purpose, From,
                       directory = Dir,
                       rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
-    Headers = opencode_http:common_headers(Auth, Dir),
+    Headers = opencode_http:common_headers(decrypt_auth(Auth), Dir),
     Encoded = json:encode(Body),
     Ref = ClientMod:patch(ConnPid, binary_to_list(FullPath), Headers, Encoded),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
@@ -877,7 +913,7 @@ do_delete_request(EndpointPath, Purpose, From,
                           directory = Dir,
                           rest_pending = Pending} = HState) ->
     FullPath = opencode_http:build_path(BasePath, EndpointPath),
-    Headers = opencode_http:common_headers(Auth, Dir),
+    Headers = opencode_http:common_headers(decrypt_auth(Auth), Dir),
     Ref = ClientMod:delete(ConnPid, binary_to_list(FullPath), Headers),
     HState#hstate{rest_pending = maps:put(Ref, {Purpose, From, []},
                                           Pending)}.
@@ -1464,7 +1500,7 @@ build_sse_headers(#hstate{auth = Auth, directory = Dir}) ->
     [{<<"accept">>, <<"text/event-stream">>},
      {<<"cache-control">>, <<"no-cache">>},
      {<<"x-opencode-directory">>, Dir} |
-     opencode_http:auth_headers(Auth)].
+     opencode_http:auth_headers(decrypt_auth(Auth))].
 
 -spec build_session_create_body(#hstate{}) -> map().
 build_session_create_body(#hstate{opts = Opts, directory = Dir}) ->

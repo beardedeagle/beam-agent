@@ -939,10 +939,10 @@ dispatch_sampling(Id, Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
-            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_sampling_create_message">>, Class, Reason, SafeStack]),
+                         [<<"handle_sampling_create_message">>, Class,
+                          beam_agent_redaction:reason(Reason),
+                          beam_agent_redaction:stacktrace(Stack)]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),
@@ -963,10 +963,10 @@ dispatch_elicitation(Id, Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
-            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_elicitation_create">>, Class, Reason, SafeStack]),
+                         [<<"handle_elicitation_create">>, Class,
+                          beam_agent_redaction:reason(Reason),
+                          beam_agent_redaction:stacktrace(Stack)]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),
@@ -986,10 +986,10 @@ dispatch_roots_list(Id, _Params,
             {server_request, Resp, State}
     catch
         Class:Reason:Stack ->
-            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                         || {M, F, A, L} <- Stack],
             logger:error("MCP client handler crash in ~s: ~p:~p~n~p",
-                         [<<"handle_roots_list">>, Class, Reason, SafeStack]),
+                         [<<"handle_roots_list">>, Class,
+                          beam_agent_redaction:reason(Reason),
+                          beam_agent_redaction:stacktrace(Stack)]),
             Resp = beam_agent_mcp_protocol:error_response(
                        Id, beam_agent_mcp_protocol:error_internal(),
                        <<"Handler crashed">>),

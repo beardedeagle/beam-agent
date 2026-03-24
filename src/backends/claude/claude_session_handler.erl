@@ -503,7 +503,9 @@ build_inbound_response(<<"can_use_tool">>, Request,
             catch
                 Class:CrashReason:Stack ->
                     logger:error("permission_handler crashed: ~p:~p~n~p",
-                                 [Class, CrashReason, Stack]),
+                                 [Class,
+                                  beam_agent_redaction:reason(CrashReason),
+                                  beam_agent_redaction:stacktrace(Stack)]),
                     #{<<"subtype">> => <<"deny">>,
                       <<"message">> => <<"Permission handler crashed">>}
             end;
@@ -558,7 +560,9 @@ build_inbound_response(<<"elicitation">>, Request,
     catch
         Class:CrashReason:Stack ->
             logger:error("user_input_handler crashed: ~p:~p~n~p",
-                         [Class, CrashReason, Stack]),
+                         [Class,
+                          beam_agent_redaction:reason(CrashReason),
+                          beam_agent_redaction:stacktrace(Stack)]),
             #{<<"subtype">> => <<"deny">>,
               <<"message">> => <<"User input handler crashed">>}
     end;
@@ -1356,16 +1360,29 @@ write_mcp_config(undefined) -> undefined;
 write_mcp_config(Registry) when map_size(Registry) =:= 0 -> undefined;
 write_mcp_config(Registry) ->
     ConfigMap = beam_agent_tool_registry:servers_for_cli(Registry),
-    TmpPath = "/tmp/beam_sdk_mcp_"
+    TmpDir = case os:getenv("TMPDIR") of
+        false -> "/tmp";
+        Dir   -> Dir
+    end,
+    TmpPath = filename:join(TmpDir, "beam_sdk_mcp_"
               ++ integer_to_list(erlang:unique_integer([positive]))
-              ++ ".json",
+              ++ ".json"),
     JsonBin = iolist_to_binary(json:encode(ConfigMap)),
     ok = file:write_file(TmpPath, JsonBin, [exclusive]),
+    ok = file:change_mode(TmpPath, 8#0600),
     TmpPath.
 
 -spec cleanup_mcp_config(string() | undefined) -> ok.
-cleanup_mcp_config(undefined)                 -> ok;
-cleanup_mcp_config(Path) when is_list(Path)   -> _ = file:delete(Path), ok.
+cleanup_mcp_config(undefined) -> ok;
+cleanup_mcp_config(Path) when is_list(Path) ->
+    case file:delete(Path) of
+        ok              -> ok;
+        {error, enoent} -> ok;
+        {error, Reason} ->
+            logger:debug("MCP config cleanup failed for ~s: ~p",
+                         [Path, Reason]),
+            ok
+    end.
 
 %%====================================================================
 %% Internal: message tracking

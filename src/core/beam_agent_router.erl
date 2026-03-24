@@ -99,7 +99,8 @@ stop(Session) when is_pid(Session) ->
         end
     catch
         Class:Reason ->
-            logger:warning("session stop failed: ~p:~p", [Class, Reason])
+            logger:warning("session stop failed: ~p:~p",
+                          [Class, beam_agent_redaction:reason(Reason)])
     after
         _ = beam_agent_backend:unregister_session(Session),
         _ = beam_agent_runtime_core:clear_session(Session),

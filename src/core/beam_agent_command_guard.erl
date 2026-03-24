@@ -406,7 +406,10 @@ do_evaluate(CmdStruct, EvalOpts) ->
                 Class:Err:Stack ->
                     logger:warning(
                         "beam_agent_command_guard: validator ~p crashed: "
-                        "~p:~p~n~p", [ValidatorMod, Class, Err, Stack]),
+                        "~p:~p~n~p",
+                        [ValidatorMod, Class,
+                         beam_agent_redaction:reason(Err),
+                         beam_agent_redaction:stacktrace(Stack)]),
                     {deny, <<"Validator error (fail-safe deny)">>}
             end
     end.
@@ -790,7 +793,10 @@ notify_validator(CmdStruct, EvalOpts, ExecResult) ->
             catch Class:Err:Stack ->
                 logger:warning(
                     "beam_agent_command_guard: on_execution ~p crashed: "
-                    "~p:~p~n~p", [Mod, Class, Err, Stack])
+                    "~p:~p~n~p",
+                    [Mod, Class,
+                     beam_agent_redaction:reason(Err),
+                     beam_agent_redaction:stacktrace(Stack)])
             end,
             ok;
         false ->

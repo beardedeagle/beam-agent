@@ -114,9 +114,14 @@ ensure_table(Table, Opts, StoreOpts) ->
             FilePath = filename:join(Dir, atom_to_list(Table) ++ ".dets"),
             DetsOpts = to_dets_opts(Opts, StoreOpts, FilePath),
             case dets:open_file(Table, DetsOpts) of
-                {ok, Table} -> ok;
-                {ok, _}     -> ok;
-                {error, Reason} -> error({beam_agent_dets_open_failed, Table, Reason})
+                {ok, Table} ->
+                    _ = file:change_mode(FilePath, 8#0600),
+                    ok;
+                {ok, _} ->
+                    _ = file:change_mode(FilePath, 8#0600),
+                    ok;
+                {error, Reason} ->
+                    error({beam_agent_dets_open_failed, Table, Reason})
             end;
         _Type ->
             ok
