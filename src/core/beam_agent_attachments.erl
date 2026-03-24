@@ -11,13 +11,18 @@
             attachment_name/2,
             attachment_mime/2,
             fallback_attachment_backend/1,
-            attachment_manifest_entry/1]}).
+            attachment_manifest_entry/1,
+            claude_attachment_blocks/1,
+            claude_file_blocks/1]}).
 
 -doc """
 Prepare query input for the selected backend.
 
-For Claude and Gemini today the fallback converts `attachments` into a textual
-appendix and removes the raw attachment payload from params before dispatch.
+Backends with native attachment support (Codex, OpenCode, Copilot) pass
+attachments through unchanged. Claude and Gemini receive materialized
+content blocks: Claude gets blocks matching the Claude Code CLI wire
+protocol (text + base64 image), Gemini gets canonical prompt blocks.
+Unknown backends fall back to a textual appendix.
 """.
 -spec prepare(pid() | binary(), binary(), map()) -> {binary(), map()}.
 prepare(Session, Prompt, Params)
@@ -27,6 +32,13 @@ prepare(Session, Prompt, Params)
             case fallback_attachment_backend(Session) of
                 native ->
                     {Prompt, Params};
+                claude ->
+                    {Prompt,
+                     maps:merge(maps:remove(attachments, Params), #{
+                         beam_agent_attachment_blocks => normalize_attachments(Attachments),
+                         beam_agent_attachment_manifest => attachment_manifest(Attachments),
+                         beam_agent_prompt_blocks => claude_prompt_blocks(Prompt, Attachments)
+                     })};
                 gemini ->
                     {Prompt,
                      maps:merge(maps:remove(attachments, Params), #{
@@ -50,7 +62,7 @@ prepare(Session, Prompt, Params)
 %% Internal helpers
 %%--------------------------------------------------------------------
 
--spec fallback_attachment_backend(pid() | binary()) -> native | gemini | fallback.
+-spec fallback_attachment_backend(pid() | binary()) -> native | claude | gemini | fallback.
 fallback_attachment_backend(Session) ->
     case resolve_backend(Session) of
         {ok, codex} ->
@@ -59,6 +71,8 @@ fallback_attachment_backend(Session) ->
             native;
         {ok, copilot} ->
             native;
+        {ok, claude} ->
+            claude;
         {ok, gemini} ->
             gemini;
         _ ->
@@ -119,6 +133,82 @@ gemini_prompt_blocks(Prompt, Attachments) ->
 
 canonical_prompt_blocks(Prompt, Attachments) ->
     gemini_prompt_blocks(Prompt, Attachments).
+
+%% Claude Code CLI wire protocol content blocks.
+%%
+%% Text blocks use the standard {"type":"text","text":"..."} format.
+%% Image blocks use the flat {"type":"image","data":"<base64>","mimeType":"..."}
+%% format that matches Claude Code's internal MCP ImageContent serialization.
+%% File and document attachments are inlined as text when decodable, and
+%% described as text otherwise.  Audio, mention, and skill attachments are
+%% rendered as text descriptions since Claude Code CLI has no native blocks
+%% for those types.
+claude_prompt_blocks(Prompt, Attachments) ->
+    Base =
+        case Prompt of
+            <<>> -> [];
+            _ -> [text_block(Prompt)]
+        end,
+    Base ++ lists:flatmap(fun claude_attachment_blocks/1, Attachments).
+
+claude_attachment_blocks(Attachment) when is_map(Attachment) ->
+    Type = value(Attachment, [type, <<"type">>], undefined),
+    case Type of
+        text ->
+            [text_block(value(Attachment, [text, <<"text">>, content, <<"content">>], <<>>))];
+        <<"text">> ->
+            [text_block(value(Attachment, [text, <<"text">>, content, <<"content">>], <<>>))];
+        image ->
+            image_blocks(Attachment);
+        <<"image">> ->
+            image_blocks(Attachment);
+        local_image ->
+            image_blocks(Attachment);
+        <<"local_image">> ->
+            image_blocks(Attachment);
+        file ->
+            claude_file_blocks(Attachment);
+        <<"file">> ->
+            claude_file_blocks(Attachment);
+        document ->
+            claude_file_blocks(Attachment);
+        <<"document">> ->
+            claude_file_blocks(Attachment);
+        audio ->
+            [text_block(<<"[audio: ", (describe_media(Attachment))/binary, "]">>)];
+        <<"audio">> ->
+            [text_block(<<"[audio: ", (describe_media(Attachment))/binary, "]">>)];
+        mention ->
+            [text_block(describe_named_attachment(<<"mention">>, Attachment))];
+        <<"mention">> ->
+            [text_block(describe_named_attachment(<<"mention">>, Attachment))];
+        skill ->
+            [text_block(describe_named_attachment(<<"skill">>, Attachment))];
+        <<"skill">> ->
+            [text_block(describe_named_attachment(<<"skill">>, Attachment))];
+        _Other ->
+            [text_block(attachment_line(Attachment))]
+    end;
+claude_attachment_blocks(Other) ->
+    [text_block(iolist_to_binary(io_lib:format("~tp", [Other])))].
+
+%% Inline a file or document attachment as a text block for Claude.
+%% Reads the file from disk; if it decodes as valid UTF-8, inlines the content
+%% wrapped with the filename for context.  Falls back to a text description
+%% when the file cannot be read or contains non-text data.
+claude_file_blocks(Attachment) ->
+    case read_attachment_file(Attachment) of
+        {ok, _Path, Data} ->
+            case maybe_text_binary(Data) of
+                {ok, Text} ->
+                    Name = attachment_name(Attachment, <<"file">>),
+                    [text_block(<<"--- ", Name/binary, " ---\n", Text/binary, "\n--- end ---">>)];
+                error ->
+                    [text_block(<<"[binary file: ", (describe_media(Attachment))/binary, "]">>)]
+            end;
+        error ->
+            [text_block(<<"[file: ", (describe_media(Attachment))/binary, "]">>)]
+    end.
 
 gemini_attachment_blocks(Attachment) when is_map(Attachment) ->
     Type = value(Attachment, [type, <<"type">>], undefined),
@@ -307,11 +397,13 @@ read_local_file(Path) ->
 
 -spec maybe_text_binary(binary()) -> {ok, binary()} | error.
 maybe_text_binary(Data) when is_binary(Data) ->
-    try unicode:characters_to_binary(Data) of
+    %% unicode:characters_to_binary/1 returns {error,_,_} or {incomplete,_,_}
+    %% for invalid UTF-8 rather than throwing, so use case instead of try/of
+    %% to handle all return shapes.
+    case unicode:characters_to_binary(Data) of
         Text when is_binary(Text) ->
-            {ok, Text}
-    catch
-        error:_ ->
+            {ok, Text};
+        _ ->
             error
     end.
 
