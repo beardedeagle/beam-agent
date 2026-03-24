@@ -338,7 +338,10 @@ the runtime/catalog layers through `BeamAgent.Runtime`,
 Internally, the newer canonical stores route through `beam_agent_store` with
 `beam_agent_store_ets` as the default adapter and `beam_agent_store_dets` as
 a durable disk-backed alternative. Both adapters preserve the existing
-process-free reads plus hardened table-owner write sharding behavior.
+process-free reads plus hardened table-owner write sharding behavior. The DETS
+adapter supports an `atomic_counters` option that uses OTP `atomics` for
+lock-free concurrent counter increments. Elixir callers use `BeamAgent.Store`
+for domain configuration and DETS helpers.
 
 For a domain-by-domain explanation of ownership, storage, and process
 boundaries, see [docs/guides/canonical_domain_guide.md](docs/guides/canonical_domain_guide.md).
