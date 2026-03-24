@@ -292,7 +292,7 @@ to_dets_opts(EtsOpts, StoreOpts, FilePath) ->
     [{file, FilePath}, {type, Type}, {auto_save, AutoSave},
      {ram_file, RamFile}].
 
--spec extract_type([term()]) -> set | bag | duplicate_bag.
+-spec extract_type([beam_agent_store:table_opt()]) -> set | bag | duplicate_bag.
 extract_type(Opts) ->
     case lists:member(bag, Opts) of
         true -> bag;
