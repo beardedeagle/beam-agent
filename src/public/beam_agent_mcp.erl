@@ -257,6 +257,10 @@ application startup.
     timed_out_request/0
 ]).
 
+-dialyzer({no_underspecs, [status/1, add_server/2, server_oauth_login/2,
+    server_reload/1, status_list/1, server_status/1, set_servers/2,
+    toggle_server/3, reconnect_server/2, universal_mcp_registry_op/2]}).
+
 -doc """
 Handler function type for in-process MCP tools.
 
@@ -369,7 +373,7 @@ maps:foreach(fun(Name, Info) ->
 end, Status).
 ```
 """.
--spec status(pid()) -> {ok, term()} | {error, term()}.
+-spec status(pid()) -> {ok, map()} | {error, term()}.
 status(Session) ->
     beam_agent_core:native_or(Session, mcp_status, [], fun() ->
         server_status(Session)
@@ -399,7 +403,7 @@ io:format("Added: ~s~n", [maps:get(server_name, Result)]).
 The universal fallback creates an in-process tool registry via
 beam_agent_tool_registry and registers the server there.
 """.
--spec add_server(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec add_server(pid(), map()) -> {ok, map()} | {error, term()}.
 add_server(Session, Body) ->
     beam_agent_core:native_or(Session, add_mcp_server, [Body], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
@@ -420,7 +424,7 @@ parameters (client_id, redirect_uri, scopes). This operation requires
 native backend support; the universal fallback returns a
 status => not_supported result.
 """.
--spec server_oauth_login(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec server_oauth_login(pid(), map()) -> {ok, map()} | {error, term()}.
 server_oauth_login(Session, Params) ->
     beam_agent_core:native_or(Session, mcp_server_oauth_login, [Params], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -437,7 +441,7 @@ Useful after a server has been updated externally. The universal
 fallback confirms the reload against the in-process registry without
 performing external I/O.
 """.
--spec server_reload(pid()) -> {ok, term()} | {error, term()}.
+-spec server_reload(pid()) -> {ok, map()} | {error, term()}.
 server_reload(Session) ->
     beam_agent_core:native_or(Session, mcp_server_reload, [], fun() ->
         case beam_agent_tool_registry:get_session_registry(Session) of
@@ -455,7 +459,7 @@ This is an alias for `server_status/1` when called with a session pid,
 provided for backends that distinguish between a single-server status
 query and a bulk list operation. Returns the same map-of-maps structure.
 """.
--spec status_list(pid()) -> {ok, term()} | {error, term()}.
+-spec status_list(pid()) -> {ok, map()} | {error, term()}.
 status_list(Session) ->
     beam_agent_core:native_or(Session, mcp_server_status_list, [], fun() ->
         server_status(Session)
@@ -668,7 +672,7 @@ each `StatusMap` describes the server's current state (e.g. enabled/disabled,
 tool count). Pass `undefined` to get `{ok, #{}}`.
 """.
 -spec server_status(pid() | mcp_registry() | undefined) ->
-    {ok, term()} | {ok, #{binary() => map()}}.
+    {ok, map()}.
 server_status(Session) when is_pid(Session) ->
     beam_agent_core:native_or(Session, mcp_server_status, [], fun() ->
         case beam_agent_tool_registry:get_session_registry(Session) of
@@ -691,8 +695,8 @@ When called with a list and an `mcp_registry()` (or `undefined`), merges the
 new servers over the old registry, preserving runtime state (enabled/disabled
 flags) for servers that existed before. Returns the updated registry.
 """.
--spec set_servers(pid() | [sdk_mcp_server()], term() | mcp_registry() | undefined) ->
-    {ok, term()} | {error, term()} | mcp_registry().
+-spec set_servers(pid() | [sdk_mcp_server()], [sdk_mcp_server()] | mcp_registry() | undefined) ->
+    {ok, map()} | {error, term()} | mcp_registry().
 set_servers(Session, Servers) when is_pid(Session) ->
     beam_agent_core:native_or(Session, set_mcp_servers, [Servers], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
@@ -717,7 +721,7 @@ binary. `Enabled` is `true` to enable or `false` to disable. Returns
 `{ok, UpdatedRegistry}` or `{error, not_found}`.
 """.
 -spec toggle_server(binary(), boolean(), pid() | mcp_registry() | undefined) ->
-    {ok, term()} | {error, term()} | {ok, mcp_registry()} | {error, not_found}.
+    {ok, map()} | {error, term()} | {ok, mcp_registry()} | {error, not_found}.
 toggle_server(ServerName, Enabled, Session) when is_pid(Session) ->
     beam_agent_core:native_or(Session, toggle_mcp_server, [ServerName, Enabled], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
@@ -749,7 +753,7 @@ error state on the named server entry in the registry directly. Returns
 `{ok, UpdatedRegistry}` or `{error, not_found}`.
 """.
 -spec reconnect_server(binary(), pid() | mcp_registry() | undefined) ->
-    {ok, term()} | {error, term()} | {ok, mcp_registry()} | {error, not_found}.
+    {ok, map()} | {error, term()} | {ok, mcp_registry()} | {error, not_found}.
 reconnect_server(ServerName, Session) when is_pid(Session) ->
     beam_agent_core:native_or(Session, reconnect_mcp_server, [ServerName], fun() ->
         universal_mcp_registry_op(Session, fun(Registry) ->
@@ -1375,8 +1379,8 @@ client_pending_count(State) ->
 
 -spec universal_mcp_registry_op(pid(),
     fun((beam_agent_tool_registry:mcp_registry()) ->
-        {{ok, term()} | {error, term()}, beam_agent_tool_registry:mcp_registry()})) ->
-    {ok, term()} | {error, term()}.
+        {{ok, map()} | {error, term()}, beam_agent_tool_registry:mcp_registry()})) ->
+    {ok, map()} | {error, term()}.
 universal_mcp_registry_op(Session, Fun) ->
     case beam_agent_tool_registry:get_session_registry(Session) of
         {ok, Registry} ->

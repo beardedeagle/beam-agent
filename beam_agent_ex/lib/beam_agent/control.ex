@@ -340,7 +340,7 @@ defmodule BeamAgent.Control do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec turn_steer(pid(), binary(), binary(), binary() | [map()]) ::
-          {:ok, term()} | {:error, term()}
+          {:ok, map()} | {:error, term()}
   defdelegate turn_steer(session, thread_id, turn_id, input), to: :beam_agent_control
 
   @doc """
@@ -362,7 +362,7 @@ defmodule BeamAgent.Control do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec turn_steer(pid(), binary(), binary(), binary() | [map()], map()) ::
-          {:ok, term()} | {:error, term()}
+          {:ok, map()} | {:error, term()}
   defdelegate turn_steer(session, thread_id, turn_id, input, opts), to: :beam_agent_control
 
   @doc """
@@ -380,7 +380,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec turn_interrupt(pid(), binary(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec turn_interrupt(pid(), binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate turn_interrupt(session, thread_id, turn_id), to: :beam_agent_control
 
   @doc """
@@ -397,7 +397,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec thread_realtime_start(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_start(session, opts), to: :beam_agent_control
 
   @doc """
@@ -413,7 +413,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_audio(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec thread_realtime_append_audio(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
@@ -429,7 +429,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_text(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec thread_realtime_append_text(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
@@ -446,7 +446,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_stop(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec thread_realtime_stop(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_stop(session, thread_id), to: :beam_agent_control
 
   @doc """
@@ -463,7 +463,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec review_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec review_start(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate review_start(session, opts), to: :beam_agent_control
 
   @doc """
@@ -553,7 +553,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec delete_server_session(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec delete_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate delete_server_session(session, session_id), to: :beam_agent_control
 
   @doc """
