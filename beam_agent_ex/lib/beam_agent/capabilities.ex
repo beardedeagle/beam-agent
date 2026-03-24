@@ -20,11 +20,11 @@ defmodule BeamAgent.Capabilities do
   - `:implementation` — `:direct_backend | :universal | :direct_backend_and_universal`
   - `:fidelity` — `:exact | :validated_equivalent`
 
-  All 22 capabilities are at `:full` support level across all 5 backends. The
+  All 23 capabilities are at `:full` support level across all 5 backends. The
   `:implementation` field records whether the route is a direct backend call, a
   BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
 
-  ## The 22 capabilities
+  ## The 23 capabilities
 
   ```
   session_lifecycle       session_info            runtime_model_switch
@@ -147,7 +147,7 @@ defmodule BeamAgent.Capabilities do
   defdelegate backends(), to: :beam_agent_capabilities
 
   @doc """
-  Return the flat list of all 22 capability atom identifiers.
+  Return the flat list of all 23 capability atom identifiers.
 
   Useful for iterating over capabilities without loading the full matrix. The
   order matches the order of entries in `all/0`.
@@ -236,7 +236,7 @@ defmodule BeamAgent.Capabilities do
   @doc """
   Check whether a capability is supported for a given backend.
 
-  A convenience wrapper around `status/2`. Because all 22 capabilities are at
+  A convenience wrapper around `status/2`. Because all 23 capabilities are at
   `:full` support level for all 5 backends, this returns `{:ok, true}` for every
   valid capability/backend combination. It exists to make guard-style checks
   readable and to surface `{:error, ...}` for typos.

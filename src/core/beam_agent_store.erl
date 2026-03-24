@@ -47,6 +47,11 @@ big-bang rewrite of every canonical domain.
 -callback delete(atom(), term(), store_options()) -> true.
 -callback delete_object(atom(), term(), store_options()) -> true.
 -callback delete_all_objects(atom(), store_options()) -> true.
+%% Note: atomicity of update_counter is adapter-dependent. The default
+%% ETS adapter provides atomic updates via ets:update_counter/3,4. The
+%% DETS adapter uses a read-modify-write cycle which is NOT atomic under
+%% concurrent access. Callers requiring atomic counters should verify
+%% their configured adapter guarantees atomicity.
 -callback update_counter(atom(), term(), term(), store_options()) -> integer().
 -callback update_counter(atom(), term(), term(), tuple(), store_options()) -> integer().
 -callback lookup(atom(), term(), store_options()) -> [tuple()].

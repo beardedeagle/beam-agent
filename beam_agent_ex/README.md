@@ -97,7 +97,7 @@ BeamAgent.set_agent(session, "architect")
 BeamAgent.set_model(session, "o3")
 BeamAgent.set_permission_mode(session, "bypassPermissions")
 
-# Runtime capability discovery (22-capability matrix)
+# Runtime capability discovery (23-capability matrix)
 {:ok, caps} = BeamAgent.session_capabilities(session)
 ```
 

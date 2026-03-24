@@ -349,8 +349,11 @@ do_init(hardened, ShardCount) when is_integer(ShardCount), ShardCount >= 1 ->
     persistent_term:put(?PT_MODE, hardened),
     persistent_term:put(?PT_SHARDS, ShardTuple),
     persistent_term:put(?PT_OWNER, element(1, ShardTuple)),
-    persistent_term:put(?PT_INIT, true),
+    %% Send `go` to all shards BEFORE marking initialized, so that
+    %% other processes cannot observe initialized=true while shards
+    %% are still blocked waiting for the go signal.
     lists:foreach(fun(Pid) -> Pid ! {Consumer, go} end, ShardPids),
+    persistent_term:put(?PT_INIT, true),
     ok.
 
 %%--------------------------------------------------------------------
@@ -382,10 +385,16 @@ shard_loop(Consumer, Monitors, IsPrimary) ->
             shard_loop(Consumer, Monitors, IsPrimary);
 
         %% Monitor a process for cleanup — only the primary shard
-        %% handles this to avoid duplicate monitors.
-        {monitor_for_cleanup, Pid, MFA} ->
+        %% handles this. The monitor_for_cleanup/2 API sends this
+        %% message only to the primary shard pid, but we guard here
+        %% defensively to prevent duplicate monitors if a non-primary
+        %% shard ever receives this message due to a bug.
+        {monitor_for_cleanup, Pid, MFA} when IsPrimary ->
             MonRef = erlang:monitor(process, Pid),
             shard_loop(Consumer, Monitors#{MonRef => MFA}, IsPrimary);
+        {monitor_for_cleanup, _Pid, _MFA} ->
+            %% Non-primary shard — drop silently.
+            shard_loop(Consumer, Monitors, IsPrimary);
 
         %% Monitored process died — execute the cleanup callback.
         %% The callback runs inside the shard, so ETS writes for tables
