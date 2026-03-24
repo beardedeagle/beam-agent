@@ -661,8 +661,9 @@ default_matrix() ->
                 #{notes => <<"Copilot protocol has native build_agent_list/select/deselect/reload_params for provider management.">>})
         }),
         cap(attachments, #{
-            claude => support(full, universal, exact,
-                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Claude sessions.">>}),
+            claude => support(full, direct_backend_and_universal, exact,
+                #{available_paths => [direct_backend, universal],
+                  notes => <<"Claude receives native content blocks (text + base64 image) matching the Claude Code wire protocol. Files and documents are inlined as text when decodable. Audio, mention, and skill attachments are rendered as text descriptions.">>}),
             codex => support(full, direct_backend, exact),
             gemini => support(full, universal, exact,
                 #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Gemini sessions.">>}),

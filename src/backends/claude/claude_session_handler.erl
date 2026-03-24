@@ -962,9 +962,17 @@ capitalize_ascii(List) ->
 
 -spec build_query_message(binary(), beam_agent_core:query_opts()) -> map().
 build_query_message(Prompt, Params) ->
+    %% Use materialized content blocks when attachments were prepared by
+    %% beam_agent_attachments:prepare/3.  The blocks list contains the
+    %% prompt text plus attachment data in the Claude Code wire format.
+    %% When no blocks are present, fall back to the flat prompt string.
+    Content = case maps:get(beam_agent_prompt_blocks, Params, undefined) of
+        Blocks when is_list(Blocks), Blocks =/= [] -> Blocks;
+        _ -> Prompt
+    end,
     Base = #{<<"type">> => <<"user">>,
              <<"message">> =>
-                 #{<<"role">> => <<"user">>, <<"content">> => Prompt}},
+                 #{<<"role">> => <<"user">>, <<"content">> => Content}},
     maps:fold(fun(system_prompt, V, Acc) when is_binary(V) ->
                       Acc#{<<"system_prompt">> => V};
                  (allowed_tools, V, Acc)    -> Acc#{<<"allowedTools">> => V};
