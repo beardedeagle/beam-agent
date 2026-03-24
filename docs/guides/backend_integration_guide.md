@@ -165,7 +165,7 @@ rules that keep those domains process-free.
 
 **`beam_agent_capabilities`** (`src/public/beam_agent_capabilities.erl`)
 is the capability registry. Every backend must declare its support level
-for all 22 capabilities.
+for all 23 capabilities.
 
 
 ### Prerequisites
@@ -1333,7 +1333,7 @@ is_terminal(myagent, #{type := error}) -> true;
 
 Edit `src/public/beam_agent_capabilities.erl`:
 
-Every capability entry must include your backend. There are 22 capabilities
+Every capability entry must include your backend. There are 23 capabilities
 that each need a support declaration. For each one, you specify:
 
 - `support_level`: `full`, `partial`, `baseline`, or `missing`
@@ -1358,7 +1358,7 @@ capability(session_history, <<"Session history">>, #{
 }),
 ```
 
-For all 22 capabilities, use `full` support level with `universal`
+For all 23 capabilities, use `full` support level with `universal`
 implementation and `validated_equivalent` fidelity as the starting point.
 Upgrade to `direct_backend` and `exact` fidelity as you add native
 protocol support.
@@ -1937,7 +1937,7 @@ backend's native behavior:
 | `exact` | Bit-for-bit equivalent to native |
 | `validated_equivalent` | Functionally equivalent but uses a different implementation |
 
-**The 22 capabilities:**
+**The 23 capabilities:**
 
 | # | Capability | Description |
 |---|-----------|-------------|
@@ -1962,7 +1962,8 @@ backend's native behavior:
 | 19 | `realtime_review` | Realtime collaboration and review |
 | 20 | `config_management` | Config read/write |
 | 21 | `provider_management` | Provider selection and auth |
-| 22 | `event_streaming` | Subscribe to backend events |
+| 22 | `attachments` | Attachments in query and send |
+| 23 | `event_streaming` | Subscribe to backend events |
 
 
 ### Backend Readiness Checklist
@@ -1998,7 +1999,7 @@ Use this checklist to verify your backend is complete before merging.
 #### Registration
 
 - [ ] `beam_agent_backend`: backend type, adapter module type, `available_backends/0`, `normalize/1`, `adapter_module/1`
-- [ ] `beam_agent_capabilities`: all 22 capabilities have entries for your backend
+- [ ] `beam_agent_capabilities`: all 23 capabilities have entries for your backend
 - [ ] `beam_agent_backend:is_terminal/2` handles your backend's terminal message patterns
 
 #### Testing

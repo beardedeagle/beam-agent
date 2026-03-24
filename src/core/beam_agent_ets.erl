@@ -261,21 +261,16 @@ session_key(Session) when is_binary(Session) -> Session.
 %% Determine if the current write needs to go through the proxy.
 %% Returns false if:
 %%   - Global mode is public (all tables are public, no proxy needed)
-%%   - The owner process is not running
-%%   - The calling process IS the table owner (direct write is safe)
-%% Returns true in hardened mode when the caller is not the owner.
+%%   - No shard owners are running
+%%   - The calling process IS a shard owner (direct write is safe)
+%% Returns true in hardened mode when the caller is not a shard owner.
 -spec needs_proxy(atom()) -> boolean().
 needs_proxy(_Table) ->
     case beam_agent_table_owner:access_mode() of
         public ->
             false;
         hardened ->
-            case beam_agent_table_owner:owner_pid() of
-                undefined ->
-                    false;
-                OwnerPid ->
-                    self() =/= OwnerPid
-            end
+            not beam_agent_table_owner:is_owner_process()
     end.
 
 %% Create a new named table, handling the race where another process
@@ -285,21 +280,21 @@ needs_proxy(_Table) ->
 %% the owner, delegate creation to the owner process.
 -spec create_table(atom(), [term()], public | protected) -> ok.
 create_table(Name, FullOpts, protected) ->
-    case beam_agent_table_owner:owner_pid() of
+    case beam_agent_table_owner:shard_for_table(Name) of
         undefined ->
-            %% No owner process — create directly. The calling process
+            %% No shard owners — create directly. The calling process
             %% becomes the table owner. For always-protected tables this
             %% is correct because they are single-writer (consumer only).
             try_create(Name, FullOpts);
-        OwnerPid when OwnerPid =:= self() ->
-            %% We ARE the owner — create directly with protected access.
+        ShardPid when ShardPid =:= self() ->
+            %% We ARE the assigned shard — create directly.
             try_create(Name, FullOpts);
-        OwnerPid ->
-            %% We're not the owner — ask the owner to create it.
+        ShardPid ->
+            %% Route to the assigned shard owner for this table.
             %% This is synchronous because the caller needs the table
             %% to exist before proceeding.
             Ref = make_ref(),
-            OwnerPid ! {create_table, Name, FullOpts, self(), Ref},
+            ShardPid ! {create_table, Name, FullOpts, self(), Ref},
             receive
                 {table_created, Ref, ok} -> ok
             after 5000 ->

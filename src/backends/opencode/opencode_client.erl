@@ -1,23 +1,10 @@
 -module(opencode_client).
 -moduledoc false.
 
-%% Thread record as stored in thread_core (matches dialyzer-inferred shape)
--type thread_record() ::
-    #{'created_at' := integer(),
-      'message_count' := non_neg_integer(),
-      'session_id' := binary(),
-      'status' := 'active' | 'archived' | 'completed' | 'paused',
-      'thread_id' := binary(),
-      'updated_at' := integer(),
-      'visible_message_count' := non_neg_integer(),
-      'archived' => boolean(),
-      'archived_at' => integer(),
-      'metadata' => map(),
-      'name' => binary(),
-      'parent_thread_id' => binary(),
-      'summary' => map()}.
+%% Thread record — canonical definition in beam_agent_adapter_types.
+-type thread_record() :: beam_agent_adapter_types:thread_meta().
 
-%% Session view returned by with_adapter_source/2
+%% Session view returned by with_adapter_source/2 (backend-specific fields).
 -type session_view() ::
     #{'backend' := 'opencode',
       'source' := 'universal',
@@ -35,23 +22,8 @@
       'threads' => [map()],
       'unsubscribed' => 'true'}.
 
-%% Thread resume result (thread_read shape)
--type thread_resume_result() ::
-    #{'archived' => boolean(),
-      'archived_at' => integer(),
-      'created_at' => integer(),
-      'message_count' => non_neg_integer(),
-      'messages' => [map()],
-      'metadata' => map(),
-      'name' => binary(),
-      'parent_thread_id' => binary(),
-      'session_id' => binary(),
-      'status' => 'active',
-      'summary' => map(),
-      'thread' => thread_record(),
-      'thread_id' => binary(),
-      'updated_at' => integer(),
-      'visible_message_count' => non_neg_integer()}.
+%% Thread resume result — canonical definition in beam_agent_adapter_types.
+-type thread_resume_result() :: beam_agent_adapter_types:thread_resume_result().
 
 -export([start_session/1,
          stop/1,
