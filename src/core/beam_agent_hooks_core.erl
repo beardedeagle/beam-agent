@@ -119,6 +119,11 @@ claude_agent_session:start_link(#{sdk_hooks => [Hook]})
     permission_suggestions => list(),
     updated_permissions => map(),
     interrupt => boolean(),
+    %% post_tool_use_failure
+    category => atom(),
+    %% permission path (OpenCode pre_tool_use)
+    permission_id => binary(),
+    metadata => map(),
     %% subagent lifecycle
     agent_transcript_path => binary(),
     %% session_start

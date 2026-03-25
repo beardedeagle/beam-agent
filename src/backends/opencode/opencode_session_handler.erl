@@ -131,7 +131,7 @@
             {fire_hook, 3},
             {maybe_reply, 2},
             {build_summarize_body, 2}]}).
--dialyzer({nowarn_function, [{handle_permission, 3}]}).
+-dialyzer({nowarn_function, [{resolve_permission_decision, 3}]}).
 %% Dialyzer: recursive JSON value types cannot be precisely expressed
 %% in Erlang type specs.
 -dialyzer({nowarn_function, [decode_json_result/1]}).
@@ -217,19 +217,21 @@ encode_query(Prompt, Params, #hstate{opts = Opts} = HState) ->
             {error, {hook_denied, Reason}};
         {ask, Reason} ->
             {error, {hook_ask, Reason}};
-        {ok, _FinalCtx} ->
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
             SessionId = HState#hstate.session_id,
             Path = <<"/session/", SessionId/binary, "/message">>,
             MergedOpts0 = case HState#hstate.model of
-                undefined -> Params;
-                Model     -> maps:put(model, Model, Params)
+                undefined -> FinalParams;
+                Model     -> maps:put(model, Model, FinalParams)
             end,
             MergedOpts1 = case HState#hstate.mode of
                 undefined -> MergedOpts0;
                 Mode      -> maps:put(mode, Mode, MergedOpts0)
             end,
             MergedOpts = merge_query_defaults(MergedOpts1, Opts),
-            Body = opencode_protocol:build_prompt_input(Prompt, MergedOpts),
+            Body = opencode_protocol:build_prompt_input(FinalPrompt, MergedOpts),
             HState1 = do_post_json(Path, Body, send_message, undefined, HState),
             {ok, noop, HState1}
     end.
@@ -673,6 +675,23 @@ observe_sse_events([SseEvent | Rest], HState) ->
           request_id := PermId,
           request := Meta} = Msg ->
             handle_permission(PermId, Meta, enqueue_event(Msg, HState));
+        #{type := tool_result} = ToolResultMsg ->
+            _ = fire_hook(post_tool_use,
+                          #{event => post_tool_use,
+                            tool_name => maps:get(tool_name,
+                                                  ToolResultMsg, <<>>),
+                            content => maps:get(content,
+                                                ToolResultMsg, <<>>)},
+                          HState),
+            enqueue_event(ToolResultMsg, HState);
+        #{type := error} = ErrMsg ->
+            _ = fire_hook(post_tool_use_failure,
+                          #{event => post_tool_use_failure,
+                            content => maps:get(content, ErrMsg, <<>>),
+                            category => maps:get(category,
+                                                 ErrMsg, undefined)},
+                          HState),
+            enqueue_event(ErrMsg, HState);
         Msg ->
             enqueue_event(Msg, HState)
     end,
@@ -709,10 +728,27 @@ dispatch_sse_events([SseEvent | Rest], Acc, HState) ->
             %% Stop processing after result
             {lists:reverse([ResultMsg | Acc]), HState1};
         #{type := error} = ErrMsg ->
+            _ = fire_hook(post_tool_use_failure,
+                          #{event => post_tool_use_failure,
+                            content => maps:get(content, ErrMsg, <<>>),
+                            category => maps:get(category,
+                                                 ErrMsg, undefined)},
+                          HState),
             _ = track_message(ErrMsg, HState),
             HState1 = enqueue_event(ErrMsg, HState),
             %% Stop processing after error
             {lists:reverse([ErrMsg | Acc]), HState1};
+        #{type := tool_result} = ToolResultMsg ->
+            _ = fire_hook(post_tool_use,
+                          #{event => post_tool_use,
+                            tool_name => maps:get(tool_name,
+                                                  ToolResultMsg, <<>>),
+                            content => maps:get(content,
+                                                ToolResultMsg, <<>>)},
+                          HState),
+            _ = track_message(ToolResultMsg, HState),
+            HState1 = enqueue_event(ToolResultMsg, HState),
+            dispatch_sse_events(Rest, [ToolResultMsg | Acc], HState1);
         Msg ->
             _ = track_message(Msg, HState),
             HState1 = enqueue_event(Msg, HState),
@@ -831,7 +867,43 @@ is_loopback_host(_)           -> false.
 
 -spec handle_permission(binary(), map(), #hstate{}) -> #hstate{}.
 handle_permission(PermId, Metadata, #hstate{} = HState) ->
-    Decision = case HState#hstate.permission_handler of
+    ToolName = extract_permission_tool_name(Metadata),
+    ToolInput = extract_permission_tool_input(Metadata),
+    HookCtx = #{event => pre_tool_use,
+                tool_name => ToolName,
+                tool_input => ToolInput,
+                permission_id => PermId,
+                metadata => Metadata},
+    case fire_hook(pre_tool_use, HookCtx, HState) of
+        {deny, _Reason} ->
+            send_permission_reply(PermId, <<"reject">>, HState);
+        {ask, _Reason} ->
+            send_permission_reply(PermId, <<"reject">>, HState);
+        {ok, FinalCtx} ->
+            FinalMetadata = maps:get(metadata, FinalCtx, Metadata),
+            Decision = resolve_permission_decision(PermId, FinalMetadata,
+                                                    HState),
+            send_permission_reply(PermId, Decision, HState)
+    end.
+
+-spec extract_permission_tool_name(map()) -> binary().
+extract_permission_tool_name(Metadata) when is_map(Metadata) ->
+    maps:get(<<"tool">>, Metadata,
+        maps:get(<<"command">>, Metadata,
+            maps:get(<<"name">>, Metadata, <<>>))).
+
+-spec extract_permission_tool_input(map()) -> map().
+extract_permission_tool_input(Metadata) when is_map(Metadata) ->
+    case maps:get(<<"input">>, Metadata,
+             maps:get(<<"args">>, Metadata,
+                 maps:get(<<"arguments">>, Metadata, undefined))) of
+        M when is_map(M) -> M;
+        _ -> #{}
+    end.
+
+-spec resolve_permission_decision(binary(), map(), #hstate{}) -> binary().
+resolve_permission_decision(PermId, Metadata, #hstate{} = HState) ->
+    case HState#hstate.permission_handler of
         undefined ->
             <<"reject">>;
         Handler ->
@@ -847,7 +919,10 @@ handle_permission(PermId, Metadata, #hstate{} = HState) ->
             catch
                 _:_ -> <<"reject">>
             end
-    end,
+    end.
+
+-spec send_permission_reply(binary(), binary(), #hstate{}) -> #hstate{}.
+send_permission_reply(PermId, Decision, #hstate{} = HState) ->
     Body = opencode_protocol:build_permission_reply(PermId, Decision),
     Path = case HState#hstate.session_id of
         SessionId when is_binary(SessionId), byte_size(SessionId) > 0 ->

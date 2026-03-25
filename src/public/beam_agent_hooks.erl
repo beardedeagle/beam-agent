@@ -147,10 +147,11 @@ for the full handler callback reference.
 -doc """
 Hook event atom identifying a lifecycle point.
 
-Blocking events: pre_tool_use, user_prompt_submit, permission_request.
+Blocking events: pre_tool_use, user_prompt_submit, permission_request,
+subagent_start, pre_compact, config_change.
 Notification-only events: post_tool_use, post_tool_use_failure, stop,
-session_start, session_end, subagent_start, subagent_stop, pre_compact,
-notification, config_change, task_completed, teammate_idle.
+session_start, session_end, subagent_stop, notification,
+task_completed, teammate_idle.
 """.
 -type hook_event() :: beam_agent_hooks_core:hook_event().
 

@@ -145,8 +145,10 @@ encode_query(Prompt, Params, #hstate{sdk_hook_registry = HookReg,
     HookCtx = #{prompt => Prompt, params => Params,
                 session_id => SessionId, event => user_prompt_submit},
     case beam_agent_hooks_core:fire(user_prompt_submit, HookCtx, HookReg) of
-        {ok, _FinalCtx} ->
-            QueryMsg = build_query_message(Prompt, Params),
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
+            QueryMsg = build_query_message(FinalPrompt, FinalParams),
             Encoded = beam_agent_jsonl:encode_line(QueryMsg),
             {ok, Encoded, HState};
         {deny, Reason} ->
@@ -450,6 +452,16 @@ maybe_fire_message_hooks(#{type := result} = Msg,
               event => stop},
             HookReg),
     HState;
+maybe_fire_message_hooks(#{type := error} = Msg,
+                          #hstate{sdk_hook_registry = HookReg,
+                                  session_id = SessionId} = HState) ->
+    _ = beam_agent_hooks_core:fire(post_tool_use_failure,
+            #{content => maps:get(content, Msg, <<>>),
+              category => maps:get(category, Msg, undefined),
+              session_id => SessionId,
+              event => post_tool_use_failure},
+            HookReg),
+    HState;
 maybe_fire_message_hooks(_Msg, HState) ->
     HState.
 
@@ -495,15 +507,19 @@ build_inbound_response(<<"can_use_tool">>, Request,
             #{<<"subtype">> => <<"deny">>, <<"message">> => Reason};
         {ask, AskReason} ->
             #{<<"subtype">> => <<"deny">>, <<"message">> => AskReason};
-        {ok, _FinalCtx} when is_function(Handler, 3) ->
-            Options = #{tool_use_id => ToolUseId,
-                        agent_id => AgentId,
-                        permission_suggestions => PermissionSuggestions,
+        {ok, FinalCtx} when is_function(Handler, 3) ->
+            FinalToolName = maps:get(tool_name, FinalCtx),
+            FinalToolInput = maps:get(tool_input, FinalCtx),
+            Options = #{tool_use_id => maps:get(tool_use_id, FinalCtx, ToolUseId),
+                        agent_id => maps:get(agent_id, FinalCtx, AgentId),
+                        permission_suggestions => maps:get(permission_suggestions,
+                                                           FinalCtx,
+                                                           PermissionSuggestions),
                         blocked_path => BlockedPath},
-            try Handler(ToolName, ToolInput, Options) of
+            try Handler(FinalToolName, FinalToolInput, Options) of
                 PermResult ->
                     normalize_permission_handler_response(PermResult,
-                                                          ToolInput)
+                                                          FinalToolInput)
             catch
                 Class:CrashReason:Stack ->
                     logger:error("permission_handler crashed: ~p:~p~n~p",
@@ -513,7 +529,7 @@ build_inbound_response(<<"can_use_tool">>, Request,
                     #{<<"subtype">> => <<"deny">>,
                       <<"message">> => <<"Permission handler crashed">>}
             end;
-        {ok, _FinalCtx} ->
+        {ok, _} ->
             case maps:get(permission_default, Opts, deny) of
                 allow ->
                     #{<<"subtype">> => <<"approve">>};

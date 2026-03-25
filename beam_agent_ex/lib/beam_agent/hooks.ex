@@ -46,13 +46,14 @@ defmodule BeamAgent.Hooks do
   - **Hook events**: atoms identifying lifecycle points. Two categories:
 
     *Blocking events* (`:pre_tool_use`, `:user_prompt_submit`,
-    `:permission_request`) may return `{:deny, reason}` to prevent the action.
+    `:permission_request`, `:subagent_start`, `:pre_compact`,
+    `:config_change`) may return `{:deny, reason}` or `{:ask, reason}` to
+    prevent the action or escalate to the caller.
 
     *Notification-only events* (`:post_tool_use`, `:post_tool_use_failure`,
-    `:stop`, `:session_start`, `:session_end`, `:subagent_start`,
-    `:subagent_stop`, `:pre_compact`, `:notification`, `:config_change`,
-    `:task_completed`, `:teammate_idle`) always proceed regardless of callback
-    return values.
+    `:stop`, `:session_start`, `:session_end`, `:subagent_stop`,
+    `:notification`, `:task_completed`, `:teammate_idle`) always proceed
+    regardless of callback return values.
 
   - **Matchers**: optional filters that restrict which tools trigger a hook.
     The `tool_name` field in a matcher can be an exact string or a regex pattern.
@@ -75,12 +76,12 @@ defmodule BeamAgent.Hooks do
   @typedoc """
   Hook event atom identifying a lifecycle point.
 
-  Blocking events: `:pre_tool_use`, `:user_prompt_submit`, `:permission_request`.
+  Blocking events: `:pre_tool_use`, `:user_prompt_submit`, `:permission_request`,
+  `:subagent_start`, `:pre_compact`, `:config_change`.
 
   Notification-only events: `:post_tool_use`, `:post_tool_use_failure`, `:stop`,
-  `:session_start`, `:session_end`, `:subagent_start`, `:subagent_stop`,
-  `:pre_compact`, `:notification`, `:config_change`, `:task_completed`,
-  `:teammate_idle`.
+  `:session_start`, `:session_end`, `:subagent_stop`, `:notification`,
+  `:task_completed`, `:teammate_idle`.
   """
   @type hook_event() ::
           :pre_tool_use
@@ -141,6 +142,9 @@ defmodule BeamAgent.Hooks do
           optional(:permission_suggestions) => list(),
           optional(:updated_permissions) => map(),
           optional(:interrupt) => boolean(),
+          optional(:category) => atom(),
+          optional(:permission_id) => binary(),
+          optional(:metadata) => map(),
           optional(:agent_transcript_path) => binary(),
           optional(:system_info) => map(),
           optional(:reason) => term()

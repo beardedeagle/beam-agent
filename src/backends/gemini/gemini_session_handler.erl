@@ -148,15 +148,17 @@ encode_query(Prompt, Params,
     HookCtx = #{prompt => Prompt, params => Params,
                 session_id => SessionId, event => user_prompt_submit},
     case beam_agent_hooks_core:fire(user_prompt_submit, HookCtx, HookReg) of
-        {ok, _FinalCtx} ->
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
             case SessionId of
                 undefined ->
                     {error, not_ready};
                 _ ->
                     {ModeData, HState1} =
-                        maybe_apply_query_mode(Params, HState),
+                        maybe_apply_query_mode(FinalParams, HState),
                     PromptId = beam_agent_jsonrpc:next_id(),
-                    Blocks = prompt_blocks(Prompt, Params),
+                    Blocks = prompt_blocks(FinalPrompt, FinalParams),
                     PromptData = beam_agent_jsonrpc:encode_request(
                                      PromptId,
                                      <<"session/prompt">>,
@@ -767,6 +769,17 @@ maybe_fire_message_hooks(#{type := result} = Msg,
               stop_reason => maps:get(stop_reason, Msg, undefined),
               session_id => StoreId,
               event => stop},
+            HookReg),
+    ok;
+maybe_fire_message_hooks(#{type := error} = Msg,
+                          #hstate{sdk_hook_registry = HookReg,
+                                  session_id = SessionId}) ->
+    StoreId = session_store_id(SessionId),
+    _ = beam_agent_hooks_core:fire(post_tool_use_failure,
+            #{content => maps:get(content, Msg, <<>>),
+              category => maps:get(category, Msg, undefined),
+              session_id => StoreId,
+              event => post_tool_use_failure},
             HookReg),
     ok;
 maybe_fire_message_hooks(_Msg, _HState) ->
