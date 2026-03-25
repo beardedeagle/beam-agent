@@ -25,6 +25,13 @@ Matchers (optional) filter which tools a hook fires on:
   - Exact match: #{tool_name => <<"Bash">>}
   - Regex pattern: #{tool_name => <<"Read.*">>}
 
+Global hooks (registered via `register_global/1`) apply to every session.
+They fire before per-session hooks and participate in the same context-
+threading chain. The global registry is backed by a `duplicate_bag` ETS
+table (`beam_agent_global_hooks`), created on first use via
+`ensure_global_table/0`. Changes to the global registry notify the
+reload bus so live sessions can pick up updates.
+
 Usage:
 ```erlang
 Hook = beam_agent_hooks_core:hook(pre_tool_use, fun(Ctx) ->
@@ -35,6 +42,10 @@ Hook = beam_agent_hooks_core:hook(pre_tool_use, fun(Ctx) ->
 end),
 %% Pass to session:
 claude_agent_session:start_link(#{sdk_hooks => [Hook]})
+
+%% Or register globally (fires for all sessions):
+ok = beam_agent_hooks_core:ensure_global_table(),
+ok = beam_agent_hooks_core:register_global(Hook).
 ```
 """.
 
@@ -49,7 +60,12 @@ claude_agent_session:start_link(#{sdk_hooks => [Hook]})
     %% Dispatch
     fire/3,
     %% Convenience: build registry from session opts
-    build_registry/1
+    build_registry/1,
+    %% Global hooks
+    ensure_global_table/0,
+    register_global/1,
+    unregister_global/1,
+    global_registry/0
 ]).
 
 -export_type([
@@ -63,6 +79,8 @@ claude_agent_session:start_link(#{sdk_hooks => [Hook]})
 
 %% new_registry/0 returns #{} typed as hook_registry() (intentional supertype).
 -dialyzer({nowarn_function, [new_registry/0]}).
+
+-define(GLOBAL_TABLE, beam_agent_global_hooks).
 
 %%--------------------------------------------------------------------
 %% Types
@@ -244,13 +262,21 @@ Each callback is wrapped in try/catch for crash protection.
 """.
 -spec fire(hook_event(), hook_context(), hook_registry() | undefined) ->
     {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
-fire(_Event, Context, undefined) ->
-    {ok, Context};
+fire(Event, Context, undefined) ->
+    %% No session registry — still fire global hooks if any exist.
+    fire(Event, Context, #{});
 fire(Event, Context, Registry) when is_map(Registry) ->
-    Hooks = lists:reverse(maps:get(Event, Registry, [])),
-    case is_blocking_event(Event) of
-        true  -> fire_blocking(Hooks, Context);
-        false -> fire_notification(Hooks, Context)
+    SessionHooks = lists:reverse(maps:get(Event, Registry, [])),
+    GlobalHooks = global_hooks_for_event(Event),
+    AllHooks = GlobalHooks ++ SessionHooks,
+    case AllHooks of
+        [] ->
+            {ok, Context};
+        _ ->
+            case is_blocking_event(Event) of
+                true  -> fire_blocking(AllHooks, Context);
+                false -> fire_notification(AllHooks, Context)
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -346,3 +372,96 @@ matches_context(#{matcher := #{tool_name := Pattern}}, Context) ->
 matches_context(_, _) ->
     %% No matcher or empty matcher — always fires
     true.
+
+%%--------------------------------------------------------------------
+%% Global Hooks
+%%--------------------------------------------------------------------
+
+-doc """
+Create the global hooks ETS table. Idempotent.
+
+The table is a `duplicate_bag` keyed by `hook_event()`, storing
+`{Event, HookDef}` tuples. Duplicate-bag allows multiple hooks per
+event while preserving insertion order within each key.
+
+Called from `beam_agent:init/0` during application startup.
+Safe to call multiple times — subsequent calls are no-ops.
+""".
+-spec ensure_global_table() -> ok.
+ensure_global_table() ->
+    beam_agent_ets:ensure_table(?GLOBAL_TABLE,
+        [duplicate_bag, named_table, {read_concurrency, true}]),
+    ok.
+
+-doc """
+Register a hook globally (fires for every session).
+
+Inserts the hook definition into the global ETS table and notifies
+the reload bus so live sessions can pick up the change. The hook
+definition must have been created via `hook/2` or `hook/3`.
+
+Returns `ok`. Safe to call even if the global table does not exist
+yet (creates it on first use).
+""".
+-spec register_global(hook_def()) -> ok.
+register_global(#{event := Event} = HookDef) ->
+    ensure_global_table(),
+    beam_agent_ets:insert(?GLOBAL_TABLE, {Event, HookDef}),
+    notify_reload_bus(),
+    ok.
+
+-doc """
+Unregister a hook from the global registry.
+
+Removes the exact `{Event, HookDef}` object from the ETS table using
+`delete_object/2` (identity match). Only the specific hook is removed;
+other hooks for the same event are unaffected.
+
+Notifies the reload bus after removal. Returns `ok` even if the hook
+was not found (idempotent).
+""".
+-spec unregister_global(hook_def()) -> ok.
+unregister_global(#{event := Event} = HookDef) ->
+    case ets:whereis(?GLOBAL_TABLE) of
+        undefined ->
+            ok;
+        _Tid ->
+            beam_agent_ets:delete_object(?GLOBAL_TABLE, {Event, HookDef}),
+            notify_reload_bus(),
+            ok
+    end.
+
+-doc """
+Read the entire global hook registry as a `hook_registry()` map.
+
+Returns a map from event atoms to lists of hook definitions, mirroring
+the shape of per-session registries. Returns an empty map if the global
+table does not exist or is empty.
+""".
+-spec global_registry() -> hook_registry().
+global_registry() ->
+    case ets:whereis(?GLOBAL_TABLE) of
+        undefined ->
+            #{};
+        _Tid ->
+            ets:foldl(fun({Event, HookDef}, Acc) ->
+                Existing = maps:get(Event, Acc, []),
+                Acc#{Event => Existing ++ [HookDef]}
+            end, #{}, ?GLOBAL_TABLE)
+    end.
+
+%% Retrieve global hooks for a specific event in insertion order.
+%% Returns [] if the global table does not exist or has no hooks
+%% for the event.
+-spec global_hooks_for_event(hook_event()) -> [hook_def()].
+global_hooks_for_event(Event) ->
+    case ets:whereis(?GLOBAL_TABLE) of
+        undefined -> [];
+        _Tid -> [H || {_, H} <- ets:lookup(?GLOBAL_TABLE, Event)]
+    end.
+
+%% Notify the reload bus that global hooks have changed.
+%% No-op if the reload bus tables have not been created yet.
+-spec notify_reload_bus() -> ok.
+notify_reload_bus() ->
+    beam_agent_reload_bus:notify(hooks).

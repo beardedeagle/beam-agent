@@ -62,12 +62,20 @@ defmodule BeamAgent.Hooks do
   - **Hook registry**: a map from event to a list of hook definitions, maintained
     in registration order. Pass the registry to `fire/3` at dispatch time.
 
+  ## Global hooks
+
+  Global hooks (registered via `register_global/1`) apply to every session. They
+  are backed by a shared ETS table and fire before per-session hooks in the
+  dispatch chain. Changes to the global registry automatically notify the reload
+  bus so live sessions pick up updates.
+
   ## Architecture deep dive
 
-  This module delegates every call to `:beam_agent_hooks`. Hooks are entirely
-  in-process — no ETS tables or inter-process communication. The hook registry is
-  typically stored in the session handler state and passed to `fire/3` when
-  lifecycle events occur.
+  This module delegates every call to `:beam_agent_hooks`. Per-session hooks are
+  entirely in-process — no ETS tables or inter-process communication. The hook
+  registry is typically stored in the session handler state and passed to `fire/3`
+  when lifecycle events occur. Global hooks use a shared ETS table created during
+  `BeamAgent.init/0`.
 
   See also: `BeamAgent.Checkpoint`, `BeamAgent`.
   """
@@ -335,4 +343,62 @@ defmodule BeamAgent.Hooks do
   """
   @spec build_registry([hook_def()] | :undefined) :: hook_registry() | :undefined
   defdelegate build_registry(opts), to: :beam_agent_hooks
+
+  # -------------------------------------------------------------------
+  # Global Hooks
+  # -------------------------------------------------------------------
+
+  @doc """
+  Create the global hooks ETS table. Idempotent.
+
+  The global hook table is a `duplicate_bag` that stores hooks applying to all
+  sessions. Called automatically by `BeamAgent.init/0`. Safe to call multiple
+  times — subsequent calls are no-ops.
+  """
+  @spec ensure_global_table() :: :ok
+  defdelegate ensure_global_table(), to: :beam_agent_hooks
+
+  @doc """
+  Register a hook globally (fires for every session).
+
+  Inserts the hook into the global ETS table and notifies the reload bus so live
+  sessions pick up the change. The table is created automatically if it does not
+  exist yet.
+
+  ## Example
+
+  ```elixir
+  hook = BeamAgent.Hooks.hook(:pre_tool_use, fn ctx ->
+    case Map.get(ctx, :tool_name) do
+      "Bash" -> {:deny, "No Bash globally"}
+      _ -> {:ok, ctx}
+    end
+  end)
+
+  :ok = BeamAgent.Hooks.register_global(hook)
+  ```
+  """
+  @spec register_global(hook_def()) :: :ok
+  defdelegate register_global(hook_def), to: :beam_agent_hooks
+
+  @doc """
+  Unregister a hook from the global registry.
+
+  Removes the exact hook object. Other hooks for the same event are unaffected.
+  Notifies the reload bus after removal.
+
+  Returns `:ok` even if the hook was not found (idempotent).
+  """
+  @spec unregister_global(hook_def()) :: :ok
+  defdelegate unregister_global(hook_def), to: :beam_agent_hooks
+
+  @doc """
+  Read the entire global hook registry as a `hook_registry()` map.
+
+  Returns a map from event atoms to lists of hook definitions, mirroring the
+  shape of per-session registries. Returns an empty map if no global hooks are
+  registered.
+  """
+  @spec global_registry() :: hook_registry()
+  defdelegate global_registry(), to: :beam_agent_hooks
 end

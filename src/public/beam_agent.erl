@@ -250,7 +250,10 @@ ok = beam_agent:init().
 ```
 """.
 -spec init() -> ok.
-init() -> beam_agent_table_owner:init().
+init() ->
+    ok = beam_agent_table_owner:init(),
+    ok = beam_agent_hooks_core:ensure_global_table(),
+    ok = beam_agent_reload_bus:ensure_tables().
 
 -doc """
 Initialize ETS tables with the given options.
@@ -272,7 +275,10 @@ ok = beam_agent:init(#{table_access => hardened}).
 ```
 """.
 -spec init(beam_agent_table_owner:init_opts()) -> ok.
-init(Opts) -> beam_agent_table_owner:init(Opts).
+init(Opts) ->
+    ok = beam_agent_table_owner:init(Opts),
+    ok = beam_agent_hooks_core:ensure_global_table(),
+    ok = beam_agent_reload_bus:ensure_tables().
 
 -doc """
 Start a new agent session connected to a backend.

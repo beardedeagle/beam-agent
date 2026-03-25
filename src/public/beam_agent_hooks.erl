@@ -69,9 +69,15 @@ This module is a thin public wrapper that delegates every call to
 beam_agent_hooks_core. The core module contains all constructor,
 registry, and dispatch logic.
 
-Hooks are entirely in-process -- no ETS tables or inter-process
-communication. The hook registry is typically stored in the session
-handler state and passed to fire/3 when lifecycle events occur.
+Per-session hooks are entirely in-process -- no ETS tables or
+inter-process communication. The hook registry is typically stored in
+the session handler state and passed to fire/3 when lifecycle events
+occur.
+
+Global hooks (registered via register_global/1) apply to every session.
+They are backed by a shared ETS table and fire before per-session hooks
+in the dispatch chain. Changes to the global registry automatically
+notify the reload bus so live sessions pick up updates.
 
 ## Core concepts
 
@@ -128,7 +134,12 @@ for the full handler callback reference.
     register_hook/2,
     register_hooks/2,
     fire/3,
-    build_registry/1
+    build_registry/1,
+    %% Global hooks
+    ensure_global_table/0,
+    register_global/1,
+    unregister_global/1,
+    global_registry/0
 ]).
 
 -export_type([
@@ -383,3 +394,63 @@ Registry = beam_agent_hooks:build_registry(Hooks)
     hook_registry() | undefined.
 build_registry(Opts) ->
     beam_agent_hooks_core:build_registry(Opts).
+
+%%--------------------------------------------------------------------
+%% Global Hooks
+%%--------------------------------------------------------------------
+
+-doc """
+Create the global hooks ETS table. Idempotent.
+
+The global hook table is a duplicate_bag that stores hooks applying
+to all sessions. Called automatically by beam_agent:init/0. Safe to
+call multiple times.
+""".
+-spec ensure_global_table() -> ok.
+ensure_global_table() ->
+    beam_agent_hooks_core:ensure_global_table().
+
+-doc """
+Register a hook globally (fires for every session).
+
+Inserts the hook into the global ETS table and notifies the reload
+bus so live sessions pick up the change. The table is created
+automatically if it does not exist yet.
+
+HookDef is a hook_def() map (from hook/2 or hook/3).
+
+```erlang
+Hook = beam_agent_hooks:hook(pre_tool_use, fun(Ctx) ->
+    case maps:get(tool_name, Ctx, <<>>) of
+        <<"Bash">> -> {deny, <<"No Bash globally">>};
+        _ -> {ok, Ctx}
+    end
+end),
+ok = beam_agent_hooks:register_global(Hook)
+```
+""".
+-spec register_global(hook_def()) -> ok.
+register_global(HookDef) ->
+    beam_agent_hooks_core:register_global(HookDef).
+
+-doc """
+Unregister a hook from the global registry.
+
+Removes the exact hook object. Other hooks for the same event are
+unaffected. Notifies the reload bus after removal.
+
+Returns ok even if the hook was not found (idempotent).
+""".
+-spec unregister_global(hook_def()) -> ok.
+unregister_global(HookDef) ->
+    beam_agent_hooks_core:unregister_global(HookDef).
+
+-doc """
+Read the entire global hook registry as a hook_registry() map.
+
+Returns a map from event atoms to lists of hook definitions.
+Returns an empty map if no global hooks are registered.
+""".
+-spec global_registry() -> hook_registry().
+global_registry() ->
+    beam_agent_hooks_core:global_registry().
