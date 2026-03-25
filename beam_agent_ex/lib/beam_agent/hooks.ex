@@ -113,7 +113,7 @@ defmodule BeamAgent.Hooks do
   `:subagent_start`, `:pre_compact`, `:config_change`.
   """
   @type hook_callback() :: (hook_context() ->
-          {:ok, hook_context()} | {:deny, binary()} | {:ask, binary()})
+                              {:ok, hook_context()} | {:deny, binary()} | {:ask, binary()})
 
   @typedoc """
   Context map passed to hook callbacks.
