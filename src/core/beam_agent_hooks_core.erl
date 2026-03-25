@@ -380,9 +380,11 @@ matches_context(_, _) ->
 -doc """
 Create the global hooks ETS table. Idempotent.
 
-The table is a `duplicate_bag` keyed by `hook_event()`, storing
-`{Event, HookDef}` tuples. Duplicate-bag allows multiple hooks per
-event while preserving insertion order within each key.
+The table is an `ordered_set` keyed by `{hook_event(), Seq}` where
+`Seq` is a monotonically increasing integer assigned at registration
+time. This guarantees deterministic firing order across all OTP
+versions — hooks fire in registration order regardless of ETS
+implementation details.
 
 Called from `beam_agent:init/0` during application startup.
 Safe to call multiple times — subsequent calls are no-ops.
@@ -390,7 +392,7 @@ Safe to call multiple times — subsequent calls are no-ops.
 -spec ensure_global_table() -> ok.
 ensure_global_table() ->
     beam_agent_ets:ensure_table(?GLOBAL_TABLE,
-        [duplicate_bag, named_table, {read_concurrency, true}]),
+        [ordered_set, named_table, {read_concurrency, true}]),
     ok.
 
 -doc """
@@ -406,16 +408,17 @@ yet (creates it on first use).
 -spec register_global(hook_def()) -> ok.
 register_global(#{event := Event} = HookDef) ->
     ensure_global_table(),
-    beam_agent_ets:insert(?GLOBAL_TABLE, {Event, HookDef}),
+    Seq = erlang:unique_integer([monotonic, positive]),
+    beam_agent_ets:insert(?GLOBAL_TABLE, {{Event, Seq}, HookDef}),
     notify_reload_bus(),
     ok.
 
 -doc """
 Unregister a hook from the global registry.
 
-Removes the exact `{Event, HookDef}` object from the ETS table using
-`delete_object/2` (identity match). Only the specific hook is removed;
-other hooks for the same event are unaffected.
+Matches entries by `{Event, '_'}` key pattern and exact `HookDef`
+value via `match_delete/2`. Only the specific hook is removed; other
+hooks for the same event are unaffected.
 
 Notifies the reload bus after removal. Returns `ok` even if the hook
 was not found (idempotent).
@@ -426,7 +429,7 @@ unregister_global(#{event := Event} = HookDef) ->
         undefined ->
             ok;
         _Tid ->
-            beam_agent_ets:delete_object(?GLOBAL_TABLE, {Event, HookDef}),
+            beam_agent_ets:match_delete(?GLOBAL_TABLE, {{Event, '_'}, HookDef}),
             notify_reload_bus(),
             ok
     end.
@@ -434,9 +437,9 @@ unregister_global(#{event := Event} = HookDef) ->
 -doc """
 Read the entire global hook registry as a `hook_registry()` map.
 
-Returns a map from event atoms to lists of hook definitions, mirroring
-the shape of per-session registries. Returns an empty map if the global
-table does not exist or is empty.
+Returns a map from event atoms to lists of hook definitions in
+registration order, mirroring the shape of per-session registries.
+Returns an empty map if the global table does not exist or is empty.
 """.
 -spec global_registry() -> hook_registry().
 global_registry() ->
@@ -444,20 +447,24 @@ global_registry() ->
         undefined ->
             #{};
         _Tid ->
-            ets:foldl(fun({Event, HookDef}, Acc) ->
+            Grouped = ets:foldl(fun({{Event, _Seq}, HookDef}, Acc) ->
                 Existing = maps:get(Event, Acc, []),
-                Acc#{Event => Existing ++ [HookDef]}
-            end, #{}, ?GLOBAL_TABLE)
+                Acc#{Event => [HookDef | Existing]}
+            end, #{}, ?GLOBAL_TABLE),
+            maps:map(fun(_Event, Hooks) -> lists:reverse(Hooks) end, Grouped)
     end.
 
-%% Retrieve global hooks for a specific event in insertion order.
+%% Retrieve global hooks for a specific event in registration order.
+%% Uses ets:select on the ordered_set to return hooks sorted by their
+%% monotonic sequence number.
 %% Returns [] if the global table does not exist or has no hooks
 %% for the event.
 -spec global_hooks_for_event(hook_event()) -> [hook_def()].
 global_hooks_for_event(Event) ->
     case ets:whereis(?GLOBAL_TABLE) of
         undefined -> [];
-        _Tid -> [H || {_, H} <- ets:lookup(?GLOBAL_TABLE, Event)]
+        _Tid ->
+            ets:select(?GLOBAL_TABLE, [{{{Event, '_'}, '$1'}, [], ['$1']}])
     end.
 
 %% Notify the reload bus that global hooks have changed.

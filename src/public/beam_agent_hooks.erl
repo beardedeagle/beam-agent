@@ -402,9 +402,11 @@ build_registry(Opts) ->
 -doc """
 Create the global hooks ETS table. Idempotent.
 
-The global hook table is a duplicate_bag that stores hooks applying
-to all sessions. Called automatically by beam_agent:init/0. Safe to
-call multiple times.
+The global hook table is an ordered_set keyed by `{Event, Seq}` where
+`Seq` is a monotonically increasing integer assigned at registration
+time. This guarantees deterministic firing order across all OTP
+versions. Called automatically by beam_agent:init/0. Safe to call
+multiple times.
 """.
 -spec ensure_global_table() -> ok.
 ensure_global_table() ->
