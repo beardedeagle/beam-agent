@@ -149,7 +149,7 @@ server = BeamAgent.MCP.server("my-tools", [tool])
 hook = BeamAgent.Hooks.hook(:pre_tool_use, fn ctx ->
   case Map.get(ctx, :tool_name, "") do
     "Bash" -> {:deny, "Shell access denied"}
-    _ -> :ok
+    _ -> {:ok, ctx}
   end
 end)
 ```

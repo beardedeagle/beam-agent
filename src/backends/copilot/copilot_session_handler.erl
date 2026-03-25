@@ -624,7 +624,7 @@ call_hook_handler(ReqId, HookType, Input, HState) ->
                 <<"userPromptSubmitted">>  -> user_prompt_submit;
                 <<"sessionStart">>         -> session_start;
                 <<"sessionEnd">>           -> session_end;
-                <<"errorOccurred">>        -> error_occurred;
+                <<"errorOccurred">>        -> post_tool_use_failure;
                 _                          -> unknown_hook
             end,
             case Event of
@@ -632,13 +632,14 @@ call_hook_handler(ReqId, HookType, Input, HState) ->
                     #{};
                 _ ->
                     case fire_hook(Event, Input, HState) of
-                        ok -> #{};
+                        {ok, _FinalCtx} ->
+                            #{};
                         {deny, Reason} ->
                             #{<<"permissionDecision">> => <<"deny">>,
                               <<"permissionDecisionReason">> => Reason};
-                        HookResult when is_map(HookResult) ->
-                            HookResult;
-                        _ -> #{}
+                        {ask, Reason} ->
+                            #{<<"permissionDecision">> => <<"deny">>,
+                              <<"permissionDecisionReason">> => Reason}
                     end
             end
     end,
@@ -858,10 +859,12 @@ maybe_tag_session_id(Msg, SessionId) ->
 %% Internal: hook firing
 %%====================================================================
 
--spec fire_hook(atom(), map(), #hstate{}) ->
-    ok | {deny, binary()} | term().
-fire_hook(_Event, _Context, #hstate{sdk_hook_registry = undefined}) ->
-    ok;
+-spec fire_hook(beam_agent_hooks_core:hook_event(), map(), #hstate{}) ->
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
+fire_hook(_Event, Context, #hstate{sdk_hook_registry = undefined}) ->
+    {ok, Context};
 fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).
 

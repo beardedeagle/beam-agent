@@ -170,7 +170,9 @@ encode_query(Prompt, Params,
     case beam_agent_hooks_core:fire(user_prompt_submit, HookCtx, HookReg) of
         {deny, Reason} ->
             {error, {hook_denied, Reason}};
-        ok ->
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}};
+        {ok, _FinalCtx} ->
             do_encode_query(Prompt, Params, HState)
     end.
 
@@ -670,7 +672,12 @@ handle_server_request(Id, Method, Params, HState) ->
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
             {HState, Action, []};
-        ok ->
+        {ask, _Reason} ->
+            ResponseMap = #{<<"review_decision">> => <<"denied">>},
+            Action = [{send, beam_agent_jsonrpc:encode_response(
+                                 Id, ResponseMap)}],
+            {HState, Action, []};
+        {ok, _FinalCtx} ->
             Decision = call_approval_handler(Method, SafeParams, HState),
             ResponseMap = build_approval_response(Method, Decision),
             Action = [{send, beam_agent_jsonrpc:encode_response(
@@ -797,7 +804,12 @@ handle_approval_request(Id, Params, HState) ->
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
             {HState, Action, []};
-        ok ->
+        {ask, _Reason} ->
+            ResponseMap = codex_protocol:command_approval_response(denied),
+            Action = [{send, beam_agent_jsonrpc:encode_response(
+                                 Id, ResponseMap)}],
+            {HState, Action, []};
+        {ok, _FinalCtx} ->
             Decision = call_approval_handler(
                            <<"item/permissions/requestApproval">>,
                            Params, HState),
@@ -937,7 +949,9 @@ fire_notification_hooks(_, _, _, HState) ->
 -spec fire_hook(beam_agent_hooks_core:hook_event(),
                 beam_agent_hooks_core:hook_context(),
                 #hstate{}) ->
-    ok | {deny, binary()}.
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
 fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).
 

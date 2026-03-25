@@ -148,7 +148,7 @@ encode_query(Prompt, Params,
     HookCtx = #{prompt => Prompt, params => Params,
                 session_id => SessionId, event => user_prompt_submit},
     case beam_agent_hooks_core:fire(user_prompt_submit, HookCtx, HookReg) of
-        ok ->
+        {ok, _FinalCtx} ->
             case SessionId of
                 undefined ->
                     {error, not_ready};
@@ -169,7 +169,9 @@ encode_query(Prompt, Params,
                     {ok, [ModeData, PromptData], HState2}
             end;
         {deny, Reason} ->
-            {error, {hook_denied, Reason}}
+            {error, {hook_denied, Reason}};
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}}
     end.
 
 -doc "Build the session info map.".

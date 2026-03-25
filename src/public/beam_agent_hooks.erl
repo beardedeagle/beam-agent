@@ -21,14 +21,14 @@ definitions, build registries, or fire hooks from custom adapters.
 DenyBash = beam_agent_hooks:hook(pre_tool_use, fun(Ctx) ->
     case maps:get(tool_name, Ctx, <<>>) of
         <<"Bash">> -> {deny, <<"No shell access allowed">>};
-        _ -> ok
+        _ -> {ok, Ctx}
     end
 end),
 
 %% Create a hook that logs all tool usage:
 LogTool = beam_agent_hooks:hook(post_tool_use, fun(Ctx) ->
     logger:info("Tool used: ~s", [maps:get(tool_name, Ctx, <<"unknown">>)]),
-    ok
+    {ok, Ctx}
 end),
 
 %% Build a registry and pass to session:
@@ -40,17 +40,19 @@ beam_agent:start_session(#{sdk_hooks => [DenyBash, LogTool]})
 
 - Hook events: atoms identifying lifecycle points. Two categories:
 
-  Blocking events (pre_tool_use, user_prompt_submit, permission_request)
-  may return {deny, Reason} to prevent the action.
+  Blocking events (pre_tool_use, user_prompt_submit, permission_request,
+  subagent_start, pre_compact, config_change) support three-way returns:
+  {ok, Ctx} to allow, {deny, Reason} to block, {ask, Reason} to
+  escalate to the caller for a decision.
 
   Notification-only events (post_tool_use, post_tool_use_failure, stop,
-  session_start, session_end, subagent_start, subagent_stop, pre_compact,
-  notification, config_change, task_completed, teammate_idle) always
-  proceed regardless of callback return values.
+  session_start, session_end, subagent_stop, notification,
+  task_completed, teammate_idle) always proceed regardless of callback
+  return values. Context is still threaded through for composition.
 
 - Hook callback: a fun/1 receiving a hook_context() map and returning
-  ok or {deny, Reason}. Callbacks are wrapped in try/catch for crash
-  protection.
+  {ok, Ctx}, {deny, Reason}, or {ask, Reason}. Callbacks are wrapped
+  in try/catch for crash protection.
 
 - Matchers: optional filters that restrict which tools trigger a hook.
   The tool_name field in a matcher can be an exact string or a regex
@@ -94,10 +96,12 @@ communication. The hook registry is a map from hook_event() to an
 ordered list of hook_def() maps, stored in the session handler state
 and threaded through fire/3 at dispatch time.
 
-Fire order is registration order. Crash protection is provided by
-try/catch in fire/3 -- a crashing callback logs a warning and does
-not prevent subsequent hooks from running. Blocking events short-circuit
-on the first {deny, Reason} return.
+Fire order is registration order. Context is threaded through the
+chain: each hook receives the context as modified by the previous
+hook. Crash protection is provided by try/catch in fire/3 -- a
+crashing callback logs a warning and passes the context through
+unmodified. Blocking events short-circuit on the first {deny, Reason}
+or {ask, Reason} return.
 
 This module is a thin re-export layer over beam_agent_hooks_core, which
 contains all constructor, registry building, and dispatch logic.
@@ -153,9 +157,16 @@ notification, config_change, task_completed, teammate_idle.
 -doc """
 Hook callback function.
 
-Receives a hook_context() map and returns ok to allow the action or
-{deny, Reason} to block it. Only blocking events (pre_tool_use,
-user_prompt_submit, permission_request) honor {deny, _} returns.
+Receives a hook_context() map and returns a three-way result:
+- `{ok, Ctx}` — allow, continue chain with (possibly modified) context
+- `{deny, Reason}` — block the action (blocking events only)
+- `{ask, Reason}` — escalate to caller for decision (blocking events only)
+
+For notification-only events, `{deny, _}` and `{ask, _}` returns are
+ignored; context passes through unmodified from those hooks.
+
+Blocking events: pre_tool_use, user_prompt_submit, permission_request,
+subagent_start, pre_compact, config_change.
 """.
 -type hook_callback() :: beam_agent_hooks_core:hook_callback().
 
@@ -211,7 +222,7 @@ build_registry/1.
 Hook = beam_agent_hooks:hook(session_start, fun(Ctx) ->
     logger:info("Session started: ~s",
         [maps:get(session_id, Ctx, <<"unknown">>)]),
-    ok
+    {ok, Ctx}
 end)
 ```
 """.
@@ -238,7 +249,7 @@ Matcher is a hook_matcher() map with a tool_name key.
 %% Only fire for Write and Edit tools:
 Hook = beam_agent_hooks:hook(pre_tool_use, fun(Ctx) ->
     logger:info("File mutation: ~s", [maps:get(tool_name, Ctx, <<>>)]),
-    ok
+    {ok, Ctx}
 end, #{tool_name => <<"^(Write|Edit)$">>})
 ```
 """.
@@ -272,7 +283,7 @@ Returns the updated registry.
 
 ```erlang
 Registry0 = beam_agent_hooks:new_registry(),
-Hook = beam_agent_hooks:hook(stop, fun(_) -> ok end),
+Hook = beam_agent_hooks:hook(stop, fun(Ctx) -> {ok, Ctx} end),
 Registry1 = beam_agent_hooks:register_hook(Hook, Registry0)
 ```
 """.
@@ -301,20 +312,23 @@ register_hooks(Hooks, Registry) ->
 -doc """
 Fire all hooks registered for an event.
 
-Iterates through registered hooks for the given event in registration
-order. For each hook, checks the matcher (if any) against the
-context before invoking the callback.
+Context is threaded through the hook chain: each hook receives the
+context as modified by the previous hook. The final context flows
+back to the caller via `{ok, FinalCtx}`.
 
 For blocking events (pre_tool_use, user_prompt_submit,
-permission_request): returns {deny, Reason} on the first deny,
-stopping iteration. Returns ok if all hooks return ok.
+permission_request, subagent_start, pre_compact, config_change):
+returns `{ok, FinalCtx}` if all hooks allow, `{deny, Reason}` on
+first deny, or `{ask, Reason}` on first ask. Both deny and ask
+stop the chain immediately.
 
-For notification-only events: always returns ok regardless of
-callback return values. All matching hooks are invoked.
+For notification-only events: always returns `{ok, FinalCtx}`.
+`{deny, _}` and `{ask, _}` from callbacks are ignored.
 
 Handles an undefined registry (no hooks configured) gracefully by
-returning ok. Each callback is wrapped in try/catch for crash
-protection -- a crashing callback is logged and treated as ok.
+returning `{ok, Context}`. Each callback is wrapped in try/catch
+for crash protection -- a crashing callback is logged and the
+context passes through unmodified.
 
 Event is the hook_event() atom.
 Context is a hook_context() map describing the current lifecycle event.
@@ -326,13 +340,17 @@ case beam_agent_hooks:fire(pre_tool_use, #{
     tool_name => <<"Bash">>,
     tool_input => #{<<"command">> => <<"rm -rf /">>}
 }, Registry) of
-    ok -> proceed_with_tool();
-    {deny, Reason} -> reject_tool(Reason)
+    {ok, FinalCtx} ->
+        proceed_with_tool(FinalCtx);
+    {deny, Reason} ->
+        reject_tool(Reason);
+    {ask, Reason} ->
+        escalate_to_caller(Reason)
 end
 ```
 """.
 -spec fire(hook_event(), hook_context(), hook_registry() | undefined) ->
-    ok | {deny, binary()}.
+    {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
 fire(Event, Ctx, Registry) ->
     beam_agent_hooks_core:fire(Event, Ctx, Registry).
 
