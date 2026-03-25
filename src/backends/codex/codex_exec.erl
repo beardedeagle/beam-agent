@@ -131,8 +131,10 @@ idle({call, From}, {send_query, Prompt, Params}, Data) ->
         {ask, Reason} ->
             {keep_state_and_data,
              [{reply, From, {error, {hook_ask, Reason}}}]};
-        {ok, _FinalCtx} ->
-            do_exec_query(From, Prompt, Params, Data)
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
+            do_exec_query(From, FinalPrompt, FinalParams, Data)
     end;
 idle({call, From}, health, _Data) ->
     {keep_state_and_data, [{reply, From, ready}]};
@@ -206,12 +208,17 @@ active_query(info,
              #data{port = Port} = Data) ->
     maybe_span_exception(Data, {exit_status, Status}),
     Data1 = Data#data{port = undefined, query_start_time = undefined},
+    ErrContent =
+        iolist_to_binary(io_lib:format("codex exec exited with st"
+                                       "atus ~p",
+                                       [Status])),
+    _ = fire_hook(post_tool_use_failure,
+                  #{event => post_tool_use_failure,
+                    content => ErrContent},
+                  Data1),
     ErrorMsg =
         #{type => error,
-          content =>
-              iolist_to_binary(io_lib:format("codex exec exited with st"
-                                             "atus ~p",
-                                             [Status])),
+          content => ErrContent,
           timestamp => erlang:system_time(millisecond)},
     deliver_or_enqueue(ErrorMsg, Data1,
                        fun(D) ->

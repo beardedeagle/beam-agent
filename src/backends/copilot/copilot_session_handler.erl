@@ -164,13 +164,21 @@ encode_query(_Prompt, _Params,
     {error, no_session};
 encode_query(Prompt, Params,
              #hstate{copilot_session_id = SessionId} = HState) ->
-    case fire_hook(user_prompt_submit, #{prompt => Prompt}, HState) of
+    HookCtx = #{event => user_prompt_submit,
+                prompt => Prompt,
+                params => Params,
+                session_id => SessionId},
+    case fire_hook(user_prompt_submit, HookCtx, HState) of
         {deny, Reason} ->
             {error, {hook_denied, Reason}};
-        _ ->
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}};
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
             ReqId = make_request_id(HState),
             SendParams = copilot_protocol:build_session_send_params(
-                             SessionId, Prompt, Params),
+                             SessionId, FinalPrompt, FinalParams),
             Msg = copilot_protocol:encode_request(
                       ReqId, <<"session.send">>, SendParams),
             Encoded = copilot_frame:encode_message(Msg),
@@ -413,7 +421,9 @@ on_state_enter(ready, OldState, HState)
   when OldState =:= initializing; OldState =:= connecting ->
     %% Fire session_start hook on first transition to ready
     SessionId = HState#hstate.copilot_session_id,
-    _ = fire_hook(session_start, #{session_id => SessionId}, HState),
+    _ = fire_hook(session_start,
+                  #{event => session_start, session_id => SessionId},
+                  HState),
     {ok, [], HState};
 on_state_enter(_State, _OldState, HState) ->
     {ok, [], HState}.
@@ -631,7 +641,7 @@ call_hook_handler(ReqId, HookType, Input, HState) ->
                 unknown_hook ->
                     #{};
                 _ ->
-                    case fire_hook(Event, Input, HState) of
+                    case fire_hook(Event, Input#{event => Event}, HState) of
                         {ok, _FinalCtx} ->
                             #{};
                         {deny, Reason} ->
@@ -804,16 +814,44 @@ send_v3_rpc(Method, Params, HState) ->
 %% Internal: message hooks
 %%====================================================================
 
+%% Copilot uses dual-dispatch for hooks:
+%%   1. Wire protocol hooks (blocking) — `call_hook_callback/3` handles
+%%      `<<"preToolUse">>` requests from the copilot CLI, where the SDK
+%%      responds with allow/deny.  That is the real blocking gate.
+%%   2. SDK-level observation hooks (below) — fire as notifications when
+%%      messages arrive, so SDK hooks can observe tool lifecycle without
+%%      blocking the wire protocol flow.  Result is intentionally
+%%      discarded because the blocking decision was already made in (1).
 -spec maybe_fire_message_hooks(beam_agent_core:message(), #hstate{}) ->
     #hstate{}.
 maybe_fire_message_hooks(#{type := tool_use} = Msg, HState) ->
-    _ = fire_hook(pre_tool_use, Msg, HState),
+    _ = fire_hook(pre_tool_use,
+                  #{event => pre_tool_use,
+                    tool_name => maps:get(tool_name, Msg, <<>>),
+                    tool_input => maps:get(tool_input, Msg, #{}),
+                    tool_use_id => maps:get(tool_use_id, Msg, <<>>)},
+                  HState),
     HState;
 maybe_fire_message_hooks(#{type := tool_result} = Msg, HState) ->
-    _ = fire_hook(post_tool_use, Msg, HState),
+    _ = fire_hook(post_tool_use,
+                  #{event => post_tool_use,
+                    tool_name => maps:get(tool_name, Msg, <<>>),
+                    content => maps:get(content, Msg, <<>>),
+                    tool_use_id => maps:get(tool_use_id, Msg, <<>>)},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := error} = Msg, HState) ->
+    _ = fire_hook(post_tool_use_failure,
+                  #{event => post_tool_use_failure,
+                    content => maps:get(content, Msg, <<>>)},
+                  HState),
     HState;
 maybe_fire_message_hooks(#{type := result} = Msg, HState) ->
-    _ = fire_hook(stop, Msg, HState),
+    _ = fire_hook(stop,
+                  #{event => stop,
+                    content => maps:get(content, Msg, <<>>),
+                    stop_reason => maps:get(stop_reason, Msg, <<>>)},
+                  HState),
     HState;
 maybe_fire_message_hooks(_Msg, HState) ->
     HState.
@@ -859,7 +897,8 @@ maybe_tag_session_id(Msg, SessionId) ->
 %% Internal: hook firing
 %%====================================================================
 
--spec fire_hook(beam_agent_hooks_core:hook_event(), map(), #hstate{}) ->
+-spec fire_hook(beam_agent_hooks_core:hook_event(),
+                beam_agent_hooks_core:hook_context(), #hstate{}) ->
     {ok, beam_agent_hooks_core:hook_context()}
   | {deny, binary()}
   | {ask, binary()}.

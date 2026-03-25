@@ -172,8 +172,10 @@ encode_query(Prompt, Params,
             {error, {hook_denied, Reason}};
         {ask, Reason} ->
             {error, {hook_ask, Reason}};
-        {ok, _FinalCtx} ->
-            do_encode_query(Prompt, Params, HState)
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            FinalParams = maps:get(params, FinalCtx),
+            do_encode_query(FinalPrompt, FinalParams, HState)
     end.
 
 -doc "Build the handler's contribution to session_info.".
@@ -677,8 +679,10 @@ handle_server_request(Id, Method, Params, HState) ->
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
             {HState, Action, []};
-        {ok, _FinalCtx} ->
-            Decision = call_approval_handler(Method, SafeParams, HState),
+        {ok, FinalCtx} ->
+            FinalMethod = maps:get(tool_name, FinalCtx),
+            FinalInput = maps:get(tool_input, FinalCtx),
+            Decision = call_approval_handler(FinalMethod, FinalInput, HState),
             ResponseMap = build_approval_response(Method, Decision),
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
@@ -809,10 +813,11 @@ handle_approval_request(Id, Params, HState) ->
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
             {HState, Action, []};
-        {ok, _FinalCtx} ->
+        {ok, FinalCtx} ->
+            FinalInput = maps:get(tool_input, FinalCtx),
             Decision = call_approval_handler(
                            <<"item/permissions/requestApproval">>,
-                           Params, HState),
+                           FinalInput, HState),
             ResponseMap = codex_protocol:command_approval_response(Decision),
             Action = [{send, beam_agent_jsonrpc:encode_response(
                                  Id, ResponseMap)}],
@@ -926,11 +931,22 @@ fire_notification_hooks(<<"item/completed">>, Params, _Msg, HState) ->
     Item = maps:get(<<"item">>, Params, #{}),
     ToolName = maps:get(<<"command">>, Item,
                         maps:get(<<"filePath">>, Item, <<>>)),
+    Output = maps:get(<<"output">>, Item, <<>>),
     _ = fire_hook(post_tool_use,
                   #{event => post_tool_use,
                     tool_name => ToolName,
-                    content => maps:get(<<"output">>, Item, <<>>)},
+                    content => Output},
                   HState),
+    _ = case maps:get(<<"error">>, Item, undefined) of
+        ErrBin when is_binary(ErrBin), byte_size(ErrBin) > 0 ->
+            _ = fire_hook(post_tool_use_failure,
+                          #{event => post_tool_use_failure,
+                            tool_name => ToolName,
+                            content => ErrBin},
+                          HState);
+        _ ->
+            ok
+    end,
     HState;
 fire_notification_hooks(<<"turn/completed">>, Params, _Msg, HState) ->
     _ = fire_hook(stop,
