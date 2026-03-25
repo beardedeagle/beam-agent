@@ -225,6 +225,7 @@ init({HandlerMod, Opts}) ->
                                                            Opts1, undefined),
                                 opts          = Opts1
                             },
+                            _ = beam_agent_reload_bus:subscribe(),
                             TimeoutAction = timeout_action(InitState, Opts1),
                             {ok, InitState, Data, TimeoutAction};
                         {error, Reason} ->
@@ -260,6 +261,7 @@ terminate(Reason, _State, #engine{consumer      = Consumer,
     _ = beam_agent_account_core:clear_session(SessionId),
     _ = beam_agent_search_core:clear_session(SessionId),
     _ = beam_agent_skills_core:clear_session(SessionId),
+    _ = beam_agent_reload_bus:unsubscribe(),
     ok.
 
 -doc "Redact sensitive fields from crash logs and sys:get_status output.".
@@ -279,6 +281,8 @@ connecting(enter, OldState, Data) ->
     fire_state_enter(connecting, OldState, Data);
 connecting(state_timeout, connect_timeout, Data) ->
     dispatch_connecting(connect_timeout, Data);
+connecting(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, connecting, Data);
 connecting(info, Msg, Data) ->
     case classify(Msg, Data) of
         ignore ->
@@ -300,6 +304,8 @@ initializing(enter, OldState, Data) ->
     fire_state_enter(initializing, OldState, Data);
 initializing(state_timeout, init_timeout, Data) ->
     dispatch_initializing(init_timeout, Data);
+initializing(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, initializing, Data);
 initializing(info, Msg, Data) ->
     case classify(Msg, Data) of
         ignore ->
@@ -339,6 +345,8 @@ ready({call, From}, {receive_message, _Ref}, Data) ->
             {keep_state_and_data,
              [{reply, From, {error, complete}}]}
     end;
+ready(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, ready, Data);
 ready(info, Msg, Data) ->
     case classify(Msg, Data) of
         ignore ->
@@ -394,6 +402,8 @@ active_query({call, From}, {cancel, Ref},
      Actions};
 active_query({call, From}, {cancel, _WrongRef}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, bad_ref}}]};
+active_query(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, active_query, Data);
 active_query(info, Msg, Data) ->
     case classify(Msg, Data) of
         ignore ->
@@ -440,6 +450,8 @@ reconnecting({call, From}, session_info, Data) ->
     {keep_state_and_data, [{reply, From, {ok, Info}}]};
 reconnecting({call, From}, _Request, _Data) ->
     {keep_state_and_data, [{reply, From, {error, reconnecting}}]};
+reconnecting(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, reconnecting, Data);
 reconnecting(info, _Msg, _Data) ->
     keep_state_and_data.
 
@@ -480,6 +492,8 @@ error({call, From}, session_info, Data) ->
     {keep_state_and_data, [{reply, From, {ok, Info}}]};
 error({call, From}, _Request, _Data) ->
     {keep_state_and_data, [{reply, From, {error, session_error}}]};
+error(info, {beam_agent_reload, Type, _Version}, Data) ->
+    dispatch_reload(Type, error, Data);
 error(info, _Msg, _Data) ->
     keep_state_and_data.
 
@@ -692,6 +706,31 @@ dispatch_handler_info(Msg, StateName,
                 {error_state, Reason, HState1} ->
                     enter_error(Reason,
                                 Data#engine{handler_state = HState1})
+            end
+    end.
+
+%%====================================================================
+%% Internal: reload bus dispatch
+%%====================================================================
+
+%% Dispatch a reload bus notification to the handler.
+%% If the handler exports handle_reload/3, it is called with the reload
+%% type, current state name, and handler state. Otherwise, the message
+%% is silently discarded.
+-spec dispatch_reload(atom(), state_name(), #engine{}) ->
+    gen_statem:event_handler_result(state_name()).
+dispatch_reload(Type, StateName,
+                #engine{handler_mod = H,
+                        handler_state = HState} = Data) ->
+    case erlang:function_exported(H, handle_reload, 3) of
+        false ->
+            keep_state_and_data;
+        true ->
+            case H:handle_reload(Type, StateName, HState) of
+                {ok, HState1} ->
+                    {keep_state, Data#engine{handler_state = HState1}};
+                ignore ->
+                    keep_state_and_data
             end
     end.
 

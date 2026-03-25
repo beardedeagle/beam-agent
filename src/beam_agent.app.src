@@ -67,6 +67,7 @@
         beam_agent_ets,
         beam_agent_events,
         beam_agent_hooks_core,
+        beam_agent_reload_bus,
         beam_agent_attachments,
         beam_agent_json,
         beam_agent_jsonl,

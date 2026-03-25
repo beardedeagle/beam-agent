@@ -342,6 +342,28 @@ If not implemented, the engine discards all unclassified messages.
     HandlerState :: term()
 ) -> info_result().
 
+-doc """
+Handle a reload bus notification.
+
+Called when a global component (hooks, skills, tools, commands, policy)
+is registered or unregistered at runtime. The handler can use this to
+refresh its cached state (e.g., rebuild a merged hook registry).
+
+Type is the component category that changed (e.g., `hooks`).
+StateName is the current session engine state.
+HandlerState is the handler's opaque state.
+
+Return `{ok, NewHandlerState}` to update handler state, or `ignore`
+to discard the notification.
+
+If not implemented, reload notifications are silently discarded.
+""".
+-callback handle_reload(
+    Type         :: atom(),
+    StateName    :: state_name(),
+    HandlerState :: term()
+) -> {ok, term()} | ignore.
+
 -optional_callbacks([
     transport_started/2,
     handle_connecting/2,
@@ -353,5 +375,6 @@ If not implemented, the engine discards all unclassified messages.
     on_state_enter/3,
     is_query_complete/2,
     handle_custom_call/3,
-    handle_info/3
+    handle_info/3,
+    handle_reload/3
 ]).
