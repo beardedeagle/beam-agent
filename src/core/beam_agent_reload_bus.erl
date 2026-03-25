@@ -152,7 +152,8 @@ notify(Type) when is_atom(Type) ->
     case ets:whereis(?VERSION_TABLE) of
         undefined -> ok;
         _Tid ->
-            Version = beam_agent_ets:update_counter(?VERSION_TABLE, version, {2, 1}),
+            Version = beam_agent_ets:update_counter(
+                ?VERSION_TABLE, version, {2, 1}, {version, 0}),
             Msg = {beam_agent_reload, Type, Version},
             notify_subscribers(Msg)
     end.

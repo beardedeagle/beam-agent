@@ -351,9 +351,11 @@ defmodule BeamAgent.Hooks do
   @doc """
   Create the global hooks ETS table. Idempotent.
 
-  The global hook table is a `duplicate_bag` that stores hooks applying to all
-  sessions. Called automatically by `BeamAgent.init/0`. Safe to call multiple
-  times — subsequent calls are no-ops.
+  The global hook table is an `ordered_set` keyed by `{event, seq}` where `seq`
+  is a monotonically increasing integer assigned at registration time. This
+  guarantees deterministic firing order across all OTP versions. Called
+  automatically by `BeamAgent.init/0`. Safe to call multiple times — subsequent
+  calls are no-ops.
   """
   @spec ensure_global_table() :: :ok
   defdelegate ensure_global_table(), to: :beam_agent_hooks
