@@ -546,14 +546,17 @@ Client = beam_agent_mcp:new_client(
 
 ### SDK Lifecycle Hooks
 
-Register callbacks at key session lifecycle points:
+Register callbacks at key session lifecycle points. Hooks receive a context
+map and return a three-way result: `{ok, Ctx}` (allow, continue chain with
+possibly modified context), `{deny, Reason}` (block the action), or
+`{ask, Reason}` (escalate to caller for decision).
 
 ```erlang
 %% Block dangerous tool calls
 Hook = beam_agent_hooks:hook(pre_tool_use, fun(Ctx) ->
     case maps:get(tool_name, Ctx, <<>>) of
         <<"Bash">> -> {deny, <<"Shell access denied">>};
-        _ -> ok
+        _ -> {ok, Ctx}
     end
 end),
 {ok, Session} = beam_agent:start_session(#{
@@ -562,8 +565,14 @@ end),
 }).
 ```
 
-Hook events: `pre_tool_use`, `post_tool_use`, `user_prompt_submit`, `stop`,
-`session_start`, `session_end`.
+Blocking events (may return `{deny, _}` or `{ask, _}` to prevent the action):
+`pre_tool_use`, `user_prompt_submit`, `permission_request`, `subagent_start`,
+`pre_compact`, `config_change`.
+
+Notification-only events (always proceed regardless of return value):
+`post_tool_use`, `post_tool_use_failure`, `stop`, `session_start`,
+`session_end`, `subagent_stop`, `notification`, `task_completed`,
+`teammate_idle`.
 
 ### Telemetry
 

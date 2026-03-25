@@ -24,14 +24,14 @@ defmodule BeamAgent.Hooks do
   deny_bash = BeamAgent.Hooks.hook(:pre_tool_use, fn ctx ->
     case Map.get(ctx, :tool_name) do
       "Bash" -> {:deny, "No shell access allowed"}
-      _ -> :ok
+      _ -> {:ok, ctx}
     end
   end)
 
   # Log every tool use:
   log_tool = BeamAgent.Hooks.hook(:post_tool_use, fn ctx ->
     IO.puts("Tool used: \#{Map.get(ctx, :tool_name, "unknown")}")
-    :ok
+    {:ok, ctx}
   end)
 
   # Build a registry and pass it to session start:
@@ -190,7 +190,7 @@ defmodule BeamAgent.Hooks do
   ```elixir
   hook = BeamAgent.Hooks.hook(:session_start, fn ctx ->
     IO.puts("Session started: \#{Map.get(ctx, :session_id, "unknown")}")
-    :ok
+    {:ok, ctx}
   end)
   ```
   """
