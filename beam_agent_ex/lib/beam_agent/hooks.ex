@@ -102,11 +102,18 @@ defmodule BeamAgent.Hooks do
   @typedoc """
   Hook callback function.
 
-  A 1-arity function receiving a `hook_context()` map. Returns `:ok` to allow the
-  action or `{:deny, reason}` to block it. Only blocking events honour
-  `{:deny, _}` returns.
+  A 1-arity function receiving a `hook_context()` map. Returns a three-way result:
+  - `{:ok, context}` — allow, continue chain with (possibly modified) context
+  - `{:deny, reason}` — block the action (blocking events only)
+  - `{:ask, reason}` — escalate to caller for decision (blocking events only)
+
+  For notification-only events, `{:deny, _}` and `{:ask, _}` are ignored.
+
+  Blocking events: `:pre_tool_use`, `:user_prompt_submit`, `:permission_request`,
+  `:subagent_start`, `:pre_compact`, `:config_change`.
   """
-  @type hook_callback() :: (hook_context() -> :ok | {:deny, binary()})
+  @type hook_callback() :: (hook_context() ->
+          {:ok, hook_context()} | {:deny, binary()} | {:ask, binary()})
 
   @typedoc """
   Context map passed to hook callbacks.
@@ -269,16 +276,17 @@ defmodule BeamAgent.Hooks do
   @doc """
   Fire all hooks registered for an event.
 
-  Iterates through registered hooks for the given event in registration order.
-  For each hook, checks the matcher (if any) against the context before invoking
-  the callback.
+  Context is threaded through the hook chain: each hook receives the context as
+  modified by the previous hook. The final context flows back to the caller via
+  `{:ok, final_ctx}`.
 
   - **Blocking events** (`:pre_tool_use`, `:user_prompt_submit`,
-    `:permission_request`): returns `{:deny, reason}` on the first deny,
-    stopping iteration. Returns `:ok` if all hooks return `:ok`.
+    `:permission_request`, `:subagent_start`, `:pre_compact`,
+    `:config_change`): returns `{:ok, final_ctx}` if all hooks allow,
+    `{:deny, reason}` on first deny, or `{:ask, reason}` on first ask.
 
-  - **Notification-only events**: always returns `:ok` regardless of callback
-    return values. All matching hooks are invoked.
+  - **Notification-only events**: always returns `{:ok, final_ctx}`.
+    `{:deny, _}` and `{:ask, _}` from callbacks are ignored.
 
   Handles `nil`/`undefined` registries (no hooks configured) gracefully. Each
   callback is wrapped in a try/catch for crash protection.
@@ -291,13 +299,14 @@ defmodule BeamAgent.Hooks do
     tool_name: "Bash",
     tool_input: %{"command" => "rm -rf /"}
   }, registry) do
-    :ok -> proceed_with_tool()
+    {:ok, final_ctx} -> proceed_with_tool(final_ctx)
     {:deny, reason} -> reject_tool(reason)
+    {:ask, reason} -> escalate_to_caller(reason)
   end
   ```
   """
   @spec fire(hook_event(), hook_context(), hook_registry() | :undefined) ::
-          :ok | {:deny, binary()}
+          {:ok, hook_context()} | {:deny, binary()} | {:ask, binary()}
   defdelegate fire(event, context, registry), to: :beam_agent_hooks
 
   @doc """

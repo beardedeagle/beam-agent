@@ -128,7 +128,10 @@ idle({call, From}, {send_query, Prompt, Params}, Data) ->
         {deny, Reason} ->
             {keep_state_and_data,
              [{reply, From, {error, {hook_denied, Reason}}}]};
-        ok ->
+        {ask, Reason} ->
+            {keep_state_and_data,
+             [{reply, From, {error, {hook_ask, Reason}}}]};
+        {ok, _FinalCtx} ->
             do_exec_query(From, Prompt, Params, Data)
     end;
 idle({call, From}, health, _Data) ->
@@ -406,7 +409,9 @@ deliver_or_enqueue(Msg, #data{consumer = From} = Data, Continue) ->
 -spec fire_hook(beam_agent_hooks_core:hook_event(),
                 beam_agent_hooks_core:hook_context(),
                 #data{}) ->
-                   ok | {deny, binary()}.
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
 fire_hook(Event, Context, #data{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).
 -spec maybe_span_stop(#data{}) -> ok.

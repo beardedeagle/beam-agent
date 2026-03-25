@@ -7,10 +7,19 @@ at key session lifecycle points. Cross-referenced against TS SDK
 v0.2.66 SessionConfig.hooks and Python SDK hook support.
 
 Two categories of hooks:
-  - Blocking: pre_tool_use, user_prompt_submit — may return
-    {deny, Reason} to prevent the action.
-  - Notification-only: post_tool_use, stop, session_start,
-    session_end — {deny, _} returns are ignored.
+  - Blocking: pre_tool_use, user_prompt_submit, permission_request,
+    subagent_start, pre_compact, config_change — callbacks return
+    {ok, Ctx} to allow (with possibly modified context),
+    {deny, Reason} to block, or {ask, Reason} to escalate to the
+    caller for a decision.
+  - Notification-only: post_tool_use, post_tool_use_failure, stop,
+    session_start, session_end, subagent_stop, notification,
+    task_completed, teammate_idle — {deny, _} and {ask, _} returns
+    are ignored; context is still threaded through the chain.
+
+Context threading: each hook in a chain receives the context as
+modified by the previous hook. The final context flows back to
+the handler via the {ok, FinalCtx} return from fire/3.
 
 Matchers (optional) filter which tools a hook fires on:
   - Exact match: #{tool_name => <<"Bash">>}
@@ -21,7 +30,7 @@ Usage:
 Hook = beam_agent_hooks_core:hook(pre_tool_use, fun(Ctx) ->
     case maps:get(tool_name, Ctx, <<>>) of
         <<"Bash">> -> {deny, <<"No shell access">>};
-        _ -> ok
+        _ -> {ok, Ctx}
     end
 end),
 %% Pass to session:
@@ -76,9 +85,16 @@ claude_agent_session:start_link(#{sdk_hooks => [Hook]})
                     | task_completed
                     | teammate_idle.
 
-%% Hook callback receives an event context map, returns ok or {deny, Reason}.
-%% Only pre_tool_use and user_prompt_submit may return {deny, _}.
--type hook_callback() :: fun((hook_context()) -> ok | {deny, binary()}).
+%% Hook callback receives an event context map and returns a three-way result:
+%%   {ok, Ctx}       — allow, continue chain with (possibly modified) context
+%%   {deny, Reason}  — block the action (blocking events only; ignored for notifications)
+%%   {ask, Reason}   — escalate to caller for decision (blocking events only)
+%% A hook that doesn't modify anything returns {ok, Context} as received.
+-type hook_callback() :: fun((hook_context()) ->
+    {ok, hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}
+).
 
 %% Context map passed to hook callbacks (keys depend on event type).
 -type hook_context() :: #{
@@ -202,46 +218,55 @@ build_registry(Hooks) when is_list(Hooks) ->
 -doc """
 Fire all hooks registered for an event.
 
-For blocking events (`pre_tool_use`, `user_prompt_submit`):
-- Returns `{deny, Reason}` on first deny, stopping iteration.
-- Returns `ok` if all hooks return `ok`.
+Context is threaded through the hook chain: each hook receives
+the context as modified by the previous hook. The final context
+flows back to the caller via `{ok, FinalCtx}`.
 
-For notification-only events (`post_tool_use`, `stop`,
-`session_start`, `session_end`):
-- Always returns `ok` regardless of callback returns.
+For blocking events (`pre_tool_use`, `user_prompt_submit`,
+`permission_request`, `subagent_start`, `pre_compact`,
+`config_change`):
+- Returns `{ok, FinalCtx}` if all hooks allow.
+- Returns `{deny, Reason}` on first deny, stopping the chain.
+- Returns `{ask, Reason}` on first ask, stopping the chain.
+
+For notification-only events:
+- Always returns `{ok, FinalCtx}` regardless of callback returns.
+- `{deny, _}` and `{ask, _}` from callbacks are ignored; context
+  passes through unmodified from those hooks.
 
 Handles `undefined` registry (no hooks configured) gracefully.
 Each callback is wrapped in try/catch for crash protection.
 """.
 -spec fire(hook_event(), hook_context(), hook_registry() | undefined) ->
-    ok | {deny, binary()}.
-fire(_Event, _Context, undefined) ->
-    ok;
+    {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
+fire(_Event, Context, undefined) ->
+    {ok, Context};
 fire(Event, Context, Registry) when is_map(Registry) ->
     Hooks = lists:reverse(maps:get(Event, Registry, [])),
     case is_blocking_event(Event) of
-        true ->
-            fire_blocking(Hooks, Context);
-        false ->
-            fire_notification(Hooks, Context),
-            ok
+        true  -> fire_blocking(Hooks, Context);
+        false -> fire_notification(Hooks, Context)
     end.
 
 %%--------------------------------------------------------------------
 %% Internal
 %%--------------------------------------------------------------------
 
-%% Events where callbacks may block (deny) the action.
+%% Events where callbacks may block (deny/ask) the action.
 -spec is_blocking_event(hook_event()) -> boolean().
 is_blocking_event(pre_tool_use) -> true;
 is_blocking_event(user_prompt_submit) -> true;
 is_blocking_event(permission_request) -> true;
+is_blocking_event(subagent_start) -> true;
+is_blocking_event(pre_compact) -> true;
+is_blocking_event(config_change) -> true;
 is_blocking_event(_) -> false.
 
-%% Fire hooks for blocking events -- stop on first deny.
--spec fire_blocking([hook_def()], hook_context()) -> ok | {deny, binary()}.
-fire_blocking([], _Context) ->
-    ok;
+%% Fire hooks for blocking events -- thread context, stop on first deny/ask.
+-spec fire_blocking([hook_def()], hook_context()) ->
+    {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
+fire_blocking([], Context) ->
+    {ok, Context};
 fire_blocking([Hook | Rest], Context) ->
     case matches_context(Hook, Context) of
         false ->
@@ -250,39 +275,55 @@ fire_blocking([Hook | Rest], Context) ->
             case safe_call(Hook, Context) of
                 {deny, Reason} ->
                     {deny, Reason};
-                ok ->
-                    fire_blocking(Rest, Context)
+                {ask, Reason} ->
+                    {ask, Reason};
+                {ok, Context1} ->
+                    fire_blocking(Rest, Context1)
             end
     end.
 
-%% Fire hooks for notification-only events -- ignore returns.
--spec fire_notification([hook_def()], hook_context()) -> ok.
-fire_notification([], _Context) ->
-    ok;
+%% Fire hooks for notification-only events -- thread context, ignore deny/ask.
+-spec fire_notification([hook_def()], hook_context()) -> {ok, hook_context()}.
+fire_notification([], Context) ->
+    {ok, Context};
 fire_notification([Hook | Rest], Context) ->
     case matches_context(Hook, Context) of
         false ->
             fire_notification(Rest, Context);
         true ->
-            _ = safe_call(Hook, Context),
-            fire_notification(Rest, Context)
+            case safe_call(Hook, Context) of
+                {ok, Context1} ->
+                    fire_notification(Rest, Context1);
+                {deny, _} ->
+                    fire_notification(Rest, Context);
+                {ask, _} ->
+                    fire_notification(Rest, Context)
+            end
     end.
 
 %% Invoke a hook callback with crash protection.
-%% Returns ok on crash/throw (logged via logger).
--spec safe_call(hook_def(), hook_context()) -> ok | {deny, binary()}.
+%% Returns {ok, Context} on crash/throw/unexpected return (logged via logger).
+-spec safe_call(hook_def(), hook_context()) ->
+    {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
 safe_call(#{callback := Callback}, Context) ->
     try Callback(Context) of
-        ok -> ok;
-        {deny, Reason} when is_binary(Reason) -> {deny, Reason};
-        _Other -> ok
+        {ok, Ctx1} when is_map(Ctx1) ->
+            {ok, Ctx1};
+        {deny, Reason} when is_binary(Reason) ->
+            {deny, Reason};
+        {ask, Reason} when is_binary(Reason) ->
+            {ask, Reason};
+        Other ->
+            logger:warning("SDK hook callback returned unexpected: ~tp",
+                           [Other]),
+            {ok, Context}
     catch
         Class:Reason:Stack ->
             logger:warning("SDK hook callback crashed: ~p:~p~n~p",
                            [Class,
                             beam_agent_redaction:reason(Reason),
                             beam_agent_redaction:stacktrace(Stack)]),
-            ok
+            {ok, Context}
     end.
 
 %% Check if a hook's matcher allows it to fire for this context.

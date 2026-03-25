@@ -215,7 +215,9 @@ encode_query(Prompt, Params, #hstate{opts = Opts} = HState) ->
     case fire_hook(user_prompt_submit, HookCtx, HState) of
         {deny, Reason} ->
             {error, {hook_denied, Reason}};
-        ok ->
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}};
+        {ok, _FinalCtx} ->
             SessionId = HState#hstate.session_id,
             Path = <<"/session/", SessionId/binary, "/message">>,
             MergedOpts0 = case HState#hstate.model of
@@ -1456,7 +1458,9 @@ maybe_reply(From, Result) ->
 -spec fire_hook(beam_agent_hooks_core:hook_event(),
                 beam_agent_hooks_core:hook_context(),
                 #hstate{}) ->
-    ok | {deny, binary()}.
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
 fire_hook(Event, Context,
           #hstate{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).

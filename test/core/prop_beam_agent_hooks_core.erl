@@ -8,10 +8,12 @@
 %%%   1. hook/2 produces map with event and callback keys
 %%%   2. register_hook adds hook under its event key
 %%%   3. build_registry(undefined) and build_registry([]) return undefined
-%%%   4. fire on undefined registry always returns ok
+%%%   4. fire on undefined registry always returns {ok, Context}
 %%%   5. fire calls matching callbacks
 %%%   6. fire with blocking event propagates {deny, Reason}
 %%%   7. Matcher-based hooks only fire for matching tool names
+%%%   8. fire with blocking event propagates {ask, Reason}
+%%%   9. Context threading: hook modifies context, next hook sees it
 %%% @end
 %%%-------------------------------------------------------------------
 -module(prop_beam_agent_hooks_core).
@@ -51,6 +53,14 @@ matcher_filters_by_tool_name_test() ->
     ?assert(proper:quickcheck(prop_matcher_filters_by_tool_name(),
         [{numtests, 200}, {to_file, user}])).
 
+fire_blocking_can_ask_test() ->
+    ?assert(proper:quickcheck(prop_fire_blocking_can_ask(),
+        [{numtests, 200}, {to_file, user}])).
+
+context_threading_preserves_modifications_test() ->
+    ?assert(proper:quickcheck(prop_context_threading_preserves_modifications(),
+        [{numtests, 200}, {to_file, user}])).
+
 %%====================================================================
 %% Properties
 %%====================================================================
@@ -59,7 +69,7 @@ matcher_filters_by_tool_name_test() ->
 prop_hook_produces_valid_def() ->
     ?FORALL(Event, gen_hook_event(),
         begin
-            Callback = fun(_Ctx) -> ok end,
+            Callback = fun(Ctx) -> {ok, Ctx} end,
             Def = beam_agent_hooks_core:hook(Event, Callback),
             is_map(Def) andalso
             maps:get(event, Def) =:= Event andalso
@@ -70,7 +80,7 @@ prop_hook_produces_valid_def() ->
 prop_register_hook_adds_to_event() ->
     ?FORALL(Event, gen_hook_event(),
         begin
-            Callback = fun(_Ctx) -> ok end,
+            Callback = fun(Ctx) -> {ok, Ctx} end,
             Hook = beam_agent_hooks_core:hook(Event, Callback),
             Registry = beam_agent_hooks_core:register_hook(
                 Hook, beam_agent_hooks_core:new_registry()),
@@ -84,10 +94,13 @@ prop_build_registry_empty_inputs() ->
         beam_agent_hooks_core:build_registry(undefined) =:= undefined andalso
         beam_agent_hooks_core:build_registry([]) =:= undefined).
 
-%% Property 4: fire on undefined registry always returns ok
+%% Property 4: fire on undefined registry always returns {ok, Context}
 prop_fire_undefined_registry_ok() ->
     ?FORALL(Event, gen_hook_event(),
-        ok =:= beam_agent_hooks_core:fire(Event, #{event => Event}, undefined)).
+        begin
+            Ctx = #{event => Event},
+            {ok, Ctx} =:= beam_agent_hooks_core:fire(Event, Ctx, undefined)
+        end).
 
 %% Property 5: fire invokes callbacks for matching events
 prop_fire_calls_matching_hooks() ->
@@ -95,10 +108,10 @@ prop_fire_calls_matching_hooks() ->
         begin
             Self = self(),
             Ref = make_ref(),
-            Callback = fun(_Ctx) -> Self ! {hook_fired, Ref}, ok end,
+            Callback = fun(Ctx) -> Self ! {hook_fired, Ref}, {ok, Ctx} end,
             Hook = beam_agent_hooks_core:hook(Event, Callback),
             Registry = beam_agent_hooks_core:build_registry([Hook]),
-            ok = beam_agent_hooks_core:fire(Event, #{event => Event}, Registry),
+            {ok, _} = beam_agent_hooks_core:fire(Event, #{event => Event}, Registry),
             receive
                 {hook_fired, Ref} -> true
             after 100 ->
@@ -123,11 +136,11 @@ prop_matcher_filters_by_tool_name() ->
         begin
             Self = self(),
             Ref = make_ref(),
-            Callback = fun(_Ctx) -> Self ! {hook_fired, Ref}, ok end,
+            Callback = fun(Ctx) -> Self ! {hook_fired, Ref}, {ok, Ctx} end,
             Hook = beam_agent_hooks_core:hook(post_tool_use, Callback,
                 #{tool_name => <<"^Bash$">>}),
             Registry = beam_agent_hooks_core:build_registry([Hook]),
-            ok = beam_agent_hooks_core:fire(
+            {ok, _} = beam_agent_hooks_core:fire(
                 post_tool_use,
                 #{event => post_tool_use, tool_name => ToolName},
                 Registry),
@@ -140,6 +153,44 @@ prop_matcher_filters_by_tool_name() ->
                 <<"Bash">> -> Fired =:= true;
                 _ -> Fired =:= false
             end
+        end).
+
+%% Property 8: Blocking events propagate {ask, Reason} from callbacks
+prop_fire_blocking_can_ask() ->
+    ?FORALL(Reason, non_empty(binary()),
+        begin
+            Callback = fun(_Ctx) -> {ask, Reason} end,
+            Hook = beam_agent_hooks_core:hook(pre_tool_use, Callback),
+            Registry = beam_agent_hooks_core:build_registry([Hook]),
+            {ask, Reason} =:= beam_agent_hooks_core:fire(
+                pre_tool_use, #{event => pre_tool_use}, Registry)
+        end).
+
+%% Property 9: Context threading preserves modifications across hooks
+prop_context_threading_preserves_modifications() ->
+    ?FORALL(Value, non_empty(binary()),
+        begin
+            %% Hook A adds a key; Hook B reads it
+            HookA = beam_agent_hooks_core:hook(post_tool_use,
+                fun(Ctx) -> {ok, Ctx#{injected => Value}} end),
+            Self = self(),
+            Ref = make_ref(),
+            HookB = beam_agent_hooks_core:hook(post_tool_use,
+                fun(Ctx) ->
+                    Self ! {Ref, maps:get(injected, Ctx, undefined)},
+                    {ok, Ctx}
+                end),
+            Registry = beam_agent_hooks_core:build_registry([HookA, HookB]),
+            {ok, FinalCtx} = beam_agent_hooks_core:fire(
+                post_tool_use, #{event => post_tool_use}, Registry),
+            %% Hook B saw the value injected by Hook A
+            SeenByB = receive
+                {Ref, V} -> V
+            after 100 ->
+                undefined
+            end,
+            SeenByB =:= Value andalso
+            maps:get(injected, FinalCtx) =:= Value
         end).
 
 %%====================================================================
@@ -160,8 +211,7 @@ gen_notification_event() ->
     oneof([
         post_tool_use, post_tool_use_failure,
         stop, session_start, session_end,
-        subagent_start, subagent_stop, pre_compact,
-        notification, config_change,
+        subagent_stop, notification,
         task_completed, teammate_idle
     ]).
 

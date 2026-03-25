@@ -145,12 +145,14 @@ encode_query(Prompt, Params, #hstate{sdk_hook_registry = HookReg,
     HookCtx = #{prompt => Prompt, params => Params,
                 session_id => SessionId, event => user_prompt_submit},
     case beam_agent_hooks_core:fire(user_prompt_submit, HookCtx, HookReg) of
-        ok ->
+        {ok, _FinalCtx} ->
             QueryMsg = build_query_message(Prompt, Params),
             Encoded = beam_agent_jsonl:encode_line(QueryMsg),
             {ok, Encoded, HState};
         {deny, Reason} ->
-            {error, {hook_denied, Reason}}
+            {error, {hook_denied, Reason}};
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}}
     end.
 
 -spec build_session_info(#hstate{}) -> map().
@@ -491,7 +493,9 @@ build_inbound_response(<<"can_use_tool">>, Request,
     case fire_permission_hooks(HookCtx, HookReg) of
         {deny, Reason} ->
             #{<<"subtype">> => <<"deny">>, <<"message">> => Reason};
-        ok when is_function(Handler, 3) ->
+        {ask, AskReason} ->
+            #{<<"subtype">> => <<"deny">>, <<"message">> => AskReason};
+        {ok, _FinalCtx} when is_function(Handler, 3) ->
             Options = #{tool_use_id => ToolUseId,
                         agent_id => AgentId,
                         permission_suggestions => PermissionSuggestions,
@@ -509,7 +513,7 @@ build_inbound_response(<<"can_use_tool">>, Request,
                     #{<<"subtype">> => <<"deny">>,
                       <<"message">> => <<"Permission handler crashed">>}
             end;
-        ok ->
+        {ok, _FinalCtx} ->
             case maps:get(permission_default, Opts, deny) of
                 allow ->
                     #{<<"subtype">> => <<"approve">>};
@@ -578,16 +582,20 @@ build_inbound_response(_, _Request, _HState) ->
 
 -spec fire_permission_hooks(map(),
                             beam_agent_hooks_core:hook_registry() | undefined) ->
-    ok | {deny, binary()}.
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
 fire_permission_hooks(HookCtx, HookReg) ->
     case beam_agent_hooks_core:fire(permission_request,
                                     HookCtx#{event => permission_request},
                                     HookReg) of
         {deny, Reason} ->
             {deny, Reason};
-        ok ->
+        {ask, Reason} ->
+            {ask, Reason};
+        {ok, Ctx1} ->
             beam_agent_hooks_core:fire(pre_tool_use,
-                                       HookCtx#{event => pre_tool_use},
+                                       Ctx1#{event => pre_tool_use},
                                        HookReg)
     end.
 
