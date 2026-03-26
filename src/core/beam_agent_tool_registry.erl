@@ -54,7 +54,14 @@ claude_agent_session:start_link(#{sdk_mcp_servers => [Server]})
     get_session_registry/1,
     update_session_registry/2,
     unregister_session_registry/1,
-    ensure_registry_table/0
+    ensure_registry_table/0,
+    %% Global MCP server registration (shared across all sessions)
+    ensure_global_table/0,
+    register_global_server/2,
+    unregister_global_server/1,
+    get_global_server/1,
+    list_global_servers/0,
+    clear_global_servers/0
 ]).
 
 -export_type([
@@ -361,6 +368,8 @@ unregister_server(Name, Registry)
 
 %% ETS table for session-scoped MCP registries.
 -define(SESSION_REGISTRY_TABLE, beam_agent_tool_registries).
+%% ETS table for global (cross-session) MCP server registrations.
+-define(GLOBAL_MCP_TABLE, beam_agent_global_mcp_servers).
 
 -doc "Ensure the session registry ETS table exists. Idempotent.".
 -spec ensure_registry_table() -> ok.
@@ -378,15 +387,16 @@ registry accessible for runtime management.
 register_session_registry(_Pid, undefined) -> ok;
 register_session_registry(Pid, Registry)
   when is_pid(Pid), is_map(Registry) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     beam_agent_ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Registry}),
+    beam_agent_reload_bus:notify(tools),
     ok.
 
 -doc "Get the MCP registry for a session by pid.".
 -spec get_session_registry(pid()) ->
     {ok, mcp_registry()} | {error, not_found}.
 get_session_registry(Pid) when is_pid(Pid) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     case ets:lookup(?SESSION_REGISTRY_TABLE, Pid) of
         [{_, Registry}] -> {ok, Registry};
         [] -> {error, not_found}
@@ -401,11 +411,12 @@ Uses a fun to transform the existing registry atomically.
     fun((mcp_registry()) -> mcp_registry())) -> ok | {error, not_found}.
 update_session_registry(Pid, UpdateFun)
   when is_pid(Pid), is_function(UpdateFun, 1) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     case ets:lookup(?SESSION_REGISTRY_TABLE, Pid) of
         [{_, Registry}] ->
             Updated = UpdateFun(Registry),
             beam_agent_ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Updated}),
+            beam_agent_reload_bus:notify(tools),
             ok;
         [] ->
             {error, not_found}
@@ -414,8 +425,9 @@ update_session_registry(Pid, UpdateFun)
 -doc "Remove a session's MCP registry (called on session termination).".
 -spec unregister_session_registry(pid()) -> ok.
 unregister_session_registry(Pid) when is_pid(Pid) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     beam_agent_ets:delete(?SESSION_REGISTRY_TABLE, Pid),
+    beam_agent_reload_bus:notify(tools),
     ok.
 
 %%--------------------------------------------------------------------
@@ -587,3 +599,70 @@ format_content(#{type := text, text := Text}) ->
 format_content(#{type := image, data := Data, mime_type := MimeType}) ->
     #{<<"type">> => <<"image">>, <<"data">> => Data,
       <<"mimeType">> => MimeType}.
+
+%%====================================================================
+%% Global MCP Server Registration
+%%====================================================================
+
+-doc "Create the global MCP servers ETS table. Idempotent.".
+-spec ensure_global_table() -> ok.
+ensure_global_table() ->
+    beam_agent_ets:ensure_table(?GLOBAL_MCP_TABLE,
+        [set, named_table, {read_concurrency, true}]).
+
+-doc """
+Register an MCP server definition globally (shared across all sessions).
+
+The `Name` is the server identifier. `ServerDef` is an `sdk_mcp_server()`
+map as returned by `server/2` or `server/3`. If a server with the same
+name already exists, it is overwritten.
+
+Emits a `tools` reload notification.
+""".
+-spec register_global_server(binary(), sdk_mcp_server()) -> ok.
+register_global_server(Name, ServerDef)
+  when is_binary(Name), is_map(ServerDef) ->
+    ok = ensure_global_table(),
+    beam_agent_ets:insert(?GLOBAL_MCP_TABLE, {Name, ServerDef}),
+    beam_agent_reload_bus:notify(tools),
+    ok.
+
+-doc """
+Unregister a global MCP server by name.
+
+Idempotent — unregistering a non-existent server is a no-op.
+Emits a `tools` reload notification.
+""".
+-spec unregister_global_server(binary()) -> ok.
+unregister_global_server(Name) when is_binary(Name) ->
+    ok = ensure_global_table(),
+    beam_agent_ets:delete(?GLOBAL_MCP_TABLE, Name),
+    beam_agent_reload_bus:notify(tools),
+    ok.
+
+-doc "Fetch a single global MCP server by name.".
+-spec get_global_server(binary()) -> {ok, sdk_mcp_server()} | {error, not_found}.
+get_global_server(Name) when is_binary(Name) ->
+    ok = ensure_global_table(),
+    case ets:lookup(?GLOBAL_MCP_TABLE, Name) of
+        [{_, ServerDef}] -> {ok, ServerDef};
+        [] -> {error, not_found}
+    end.
+
+-doc "List all globally registered MCP servers.".
+-spec list_global_servers() -> [sdk_mcp_server()].
+list_global_servers() ->
+    ok = ensure_global_table(),
+    [Def || {_, Def} <- ets:tab2list(?GLOBAL_MCP_TABLE)].
+
+-doc """
+Remove all globally registered MCP servers.
+
+Emits a `tools` reload notification.
+""".
+-spec clear_global_servers() -> ok.
+clear_global_servers() ->
+    ok = ensure_global_table(),
+    beam_agent_ets:delete_all_objects(?GLOBAL_MCP_TABLE),
+    beam_agent_reload_bus:notify(tools),
+    ok.

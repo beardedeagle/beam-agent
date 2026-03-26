@@ -1198,4 +1198,47 @@ defmodule BeamAgent.MCP do
   """
   @spec status_list(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate status_list(session), to: :beam_agent_mcp
+
+  # --- Global MCP Server Registration ---
+
+  @doc """
+  Create the global MCP servers ETS table. Idempotent.
+  """
+  @spec ensure_global_table() :: :ok
+  defdelegate ensure_global_table(), to: :beam_agent_mcp
+
+  @doc """
+  Register an MCP server definition globally (shared across all sessions).
+
+  ## Parameters
+
+  - `name` -- unique binary name for the server.
+  - `server_def` -- an `sdk_mcp_server()` map as returned by `server/2` or `server/3`.
+  """
+  @spec register_global_server(binary(), sdk_mcp_server()) :: :ok
+  defdelegate register_global_server(name, server_def), to: :beam_agent_mcp
+
+  @doc """
+  Unregister a global MCP server by name. Idempotent.
+  """
+  @spec unregister_global_server(binary()) :: :ok
+  defdelegate unregister_global_server(name), to: :beam_agent_mcp
+
+  @doc """
+  Fetch a single global MCP server by name.
+  """
+  @spec get_global_server(binary()) :: {:ok, sdk_mcp_server()} | {:error, :not_found}
+  defdelegate get_global_server(name), to: :beam_agent_mcp
+
+  @doc """
+  List all globally registered MCP servers.
+  """
+  @spec list_global_servers() :: [sdk_mcp_server()]
+  defdelegate list_global_servers(), to: :beam_agent_mcp
+
+  @doc """
+  Remove all globally registered MCP servers.
+  """
+  @spec clear_global_servers() :: :ok
+  defdelegate clear_global_servers(), to: :beam_agent_mcp
 end

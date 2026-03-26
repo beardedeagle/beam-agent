@@ -187,6 +187,14 @@ application startup.
     unregister_session_registry/1,
     ensure_registry_table/0,
 
+    %% Global MCP server registration (shared across all sessions)
+    ensure_global_table/0,
+    register_global_server/2,
+    unregister_global_server/1,
+    get_global_server/1,
+    list_global_servers/0,
+    clear_global_servers/0,
+
     %% Protocol (beam_agent_mcp_protocol)
     protocol_version/0,
 
@@ -1372,6 +1380,40 @@ A non-zero count means there are requests awaiting responses from the server.
 -spec client_pending_count(client_state()) -> non_neg_integer().
 client_pending_count(State) ->
     beam_agent_mcp_client_dispatch:pending_count(State).
+
+%%====================================================================
+%% Global MCP Server Registration
+%%====================================================================
+
+-doc "Create the global MCP servers ETS table. Idempotent.".
+-spec ensure_global_table() -> ok.
+ensure_global_table() ->
+    beam_agent_tool_registry:ensure_global_table().
+
+-doc "Register an MCP server definition globally (shared across all sessions).".
+-spec register_global_server(binary(), sdk_mcp_server()) -> ok.
+register_global_server(Name, ServerDef) ->
+    beam_agent_tool_registry:register_global_server(Name, ServerDef).
+
+-doc "Unregister a global MCP server by name. Idempotent.".
+-spec unregister_global_server(binary()) -> ok.
+unregister_global_server(Name) ->
+    beam_agent_tool_registry:unregister_global_server(Name).
+
+-doc "Fetch a single global MCP server by name.".
+-spec get_global_server(binary()) -> {ok, sdk_mcp_server()} | {error, not_found}.
+get_global_server(Name) ->
+    beam_agent_tool_registry:get_global_server(Name).
+
+-doc "List all globally registered MCP servers.".
+-spec list_global_servers() -> [sdk_mcp_server()].
+list_global_servers() ->
+    beam_agent_tool_registry:list_global_servers().
+
+-doc "Remove all globally registered MCP servers.".
+-spec clear_global_servers() -> ok.
+clear_global_servers() ->
+    beam_agent_tool_registry:clear_global_servers().
 
 %%--------------------------------------------------------------------
 %% Internal helpers

@@ -192,7 +192,9 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
 `beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
 `beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
-`beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`). Their status and route shape for each
+`beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`,
+`beam_agent_agents`, `beam_agent_plugins`, `beam_agent_slash_commands`,
+`beam_agent_sdk_config`). Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
 All families have universal fallback coverage:
