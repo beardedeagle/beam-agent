@@ -71,6 +71,10 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.Search,
           BeamAgent.SessionStore,
           BeamAgent.Skills,
+          BeamAgent.Agents,
+          BeamAgent.Plugins,
+          BeamAgent.SlashCommands,
+          BeamAgent.SDKConfig,
           BeamAgent.Telemetry,
           BeamAgent.Threads,
           BeamAgent.Todo

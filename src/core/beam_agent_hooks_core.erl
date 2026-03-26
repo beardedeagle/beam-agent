@@ -407,7 +407,7 @@ yet (creates it on first use).
 """.
 -spec register_global(hook_def()) -> ok.
 register_global(#{event := Event} = HookDef) ->
-    ensure_global_table(),
+    ok = ensure_global_table(),
     Seq = erlang:unique_integer([monotonic, positive]),
     beam_agent_ets:insert(?GLOBAL_TABLE, {{Event, Seq}, HookDef}),
     notify_reload_bus(),
@@ -425,14 +425,10 @@ was not found (idempotent).
 """.
 -spec unregister_global(hook_def()) -> ok.
 unregister_global(#{event := Event} = HookDef) ->
-    case ets:whereis(?GLOBAL_TABLE) of
-        undefined ->
-            ok;
-        _Tid ->
-            beam_agent_ets:match_delete(?GLOBAL_TABLE, {{Event, '_'}, HookDef}),
-            notify_reload_bus(),
-            ok
-    end.
+    ok = ensure_global_table(),
+    beam_agent_ets:match_delete(?GLOBAL_TABLE, {{Event, '_'}, HookDef}),
+    notify_reload_bus(),
+    ok.
 
 -doc """
 Read the entire global hook registry as a `hook_registry()` map.
@@ -443,16 +439,12 @@ Returns an empty map if the global table does not exist or is empty.
 """.
 -spec global_registry() -> hook_registry().
 global_registry() ->
-    case ets:whereis(?GLOBAL_TABLE) of
-        undefined ->
-            #{};
-        _Tid ->
-            Grouped = ets:foldl(fun({{Event, _Seq}, HookDef}, Acc) ->
-                Existing = maps:get(Event, Acc, []),
-                Acc#{Event => [HookDef | Existing]}
-            end, #{}, ?GLOBAL_TABLE),
-            maps:map(fun(_Event, Hooks) -> lists:reverse(Hooks) end, Grouped)
-    end.
+    ok = ensure_global_table(),
+    Grouped = ets:foldl(fun({{Event, _Seq}, HookDef}, Acc) ->
+        Existing = maps:get(Event, Acc, []),
+        Acc#{Event => [HookDef | Existing]}
+    end, #{}, ?GLOBAL_TABLE),
+    maps:map(fun(_Event, Hooks) -> lists:reverse(Hooks) end, Grouped).
 
 %% Retrieve global hooks for a specific event in registration order.
 %% Uses ets:select on the ordered_set to return hooks sorted by their
@@ -461,11 +453,8 @@ global_registry() ->
 %% for the event.
 -spec global_hooks_for_event(hook_event()) -> [hook_def()].
 global_hooks_for_event(Event) ->
-    case ets:whereis(?GLOBAL_TABLE) of
-        undefined -> [];
-        _Tid ->
-            ets:select(?GLOBAL_TABLE, [{{{Event, '_'}, '$1'}, [], ['$1']}])
-    end.
+    ok = ensure_global_table(),
+    ets:select(?GLOBAL_TABLE, [{{{Event, '_'}, '$1'}, [], ['$1']}]).
 
 %% Notify the reload bus that global hooks have changed.
 %% No-op if the reload bus tables have not been created yet.

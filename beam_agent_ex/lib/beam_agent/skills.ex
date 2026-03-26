@@ -183,4 +183,53 @@ defmodule BeamAgent.Skills do
   """
   @spec config_write(pid(), binary(), boolean()) :: {:ok, map()} | {:error, term()}
   defdelegate config_write(session, path, enabled), to: :beam_agent_skills
+
+  # --- Global Skill Registration ---
+
+  @doc """
+  Create the global skills ETS table. Idempotent.
+  """
+  @spec ensure_global_table() :: :ok
+  defdelegate ensure_global_table(), to: :beam_agent_skills
+
+  @doc """
+  Register a skill globally (shared across all sessions).
+
+  ## Parameters
+
+  - `skill_id` -- unique binary identifier for the skill.
+  - `opts` -- map of skill options (`:name`, `:description`, `:source`, `:enabled`, `:config`).
+  """
+  @spec register_global(binary(), map()) :: :ok
+  defdelegate register_global(skill_id, opts), to: :beam_agent_skills
+
+  @doc """
+  Unregister a global skill by id. Idempotent.
+  """
+  @spec unregister_global(binary()) :: :ok
+  defdelegate unregister_global(skill_id), to: :beam_agent_skills
+
+  @doc """
+  Fetch a single global skill by id.
+  """
+  @spec get_global(binary()) :: {:ok, map()} | {:error, :not_found}
+  defdelegate get_global(skill_id), to: :beam_agent_skills
+
+  @doc """
+  List all globally registered skills.
+  """
+  @spec list_global() :: [map()]
+  defdelegate list_global(), to: :beam_agent_skills
+
+  @doc """
+  List globally registered skills with optional filters.
+  """
+  @spec list_global(map()) :: [map()]
+  defdelegate list_global(opts), to: :beam_agent_skills
+
+  @doc """
+  Remove all globally registered skills.
+  """
+  @spec clear_global() :: :ok
+  defdelegate clear_global(), to: :beam_agent_skills
 end

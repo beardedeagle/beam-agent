@@ -58,10 +58,20 @@ for atomic updates (proxied in hardened mode).
 -doc """
 Type of component that was reloaded.
 
-Currently only `hooks` is used (Phase 3). Phase 4 will add
-`skills`, `tools`, `commands`, and `policy`.
+Active reload types:
+- `hooks` — global hook registration/unregistration
+- `skills` — global skill registration/unregistration/config changes
+- `tools` — global MCP server registration/unregistration
+- `plugins` — global plugin registration/unregistration
+- `agents` — global agent type registration/unregistration
+- `commands` — global slash command registration/unregistration
+- `config` — global SDK configuration changes
+- `routines` — scheduled task/routine job mutations
+
+Reserved for future use: `policy`.
 """.
--type reload_type() :: hooks | skills | tools | commands | policy.
+-type reload_type() :: hooks | skills | tools | plugins | agents
+                     | commands | config | routines | policy.
 
 -define(SUBS_TABLE, beam_agent_reload_subscribers).
 -define(VERSION_TABLE, beam_agent_reload_version).

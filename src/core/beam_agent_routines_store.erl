@@ -81,6 +81,7 @@ clear() ->
     beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?JOBS_TABLE),
     beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?DUE_TABLE),
     beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?CLAIMS_TABLE),
+    beam_agent_reload_bus:notify(routines),
     ok.
 
 -doc "Insert or overwrite a routine job, updating due indexes as needed.".
@@ -95,6 +96,7 @@ put_job(#{job_id := JobId} = Job) when is_binary(JobId) ->
     end,
     true = beam_agent_store:insert(?STORE_DOMAIN, ?JOBS_TABLE, {JobId, Job}),
     index_due(Job),
+    beam_agent_reload_bus:notify(routines),
     ok.
 
 -doc "Fetch a routine job by id.".
@@ -117,6 +119,7 @@ delete_job(JobId) when is_binary(JobId) ->
             remove_due_index(Job),
             _ = beam_agent_store:delete(?STORE_DOMAIN, ?JOBS_TABLE, JobId),
             _ = beam_agent_store:delete(?STORE_DOMAIN, ?CLAIMS_TABLE, JobId),
+            beam_agent_reload_bus:notify(routines),
             ok;
         {error, not_found} ->
             {error, not_found}

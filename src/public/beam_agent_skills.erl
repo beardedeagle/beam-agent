@@ -33,7 +33,15 @@ and no side effects.
     remote_list/1,
     remote_list/2,
     remote_export/2,
-    config_write/3
+    config_write/3,
+    %% Global skill registration (shared across all sessions)
+    ensure_global_table/0,
+    register_global/2,
+    unregister_global/1,
+    get_global/1,
+    list_global/0,
+    list_global/1,
+    clear_global/0
 ]).
 
 %%--------------------------------------------------------------------
@@ -82,6 +90,47 @@ config_write(Session, Path, Enabled) ->
         beam_agent_skills_core:skills_config_write(Session, Path, Enabled),
         {ok, beam_agent_core:with_universal_source(Session, #{path => Path, enabled => Enabled})}
     end).
+
+%%--------------------------------------------------------------------
+%% Global Skill Registration
+%%--------------------------------------------------------------------
+
+-doc "Create the global skills ETS table. Idempotent.".
+-spec ensure_global_table() -> ok.
+ensure_global_table() ->
+    beam_agent_skills_core:ensure_global_table().
+
+-doc "Register a skill globally (shared across all sessions).".
+-spec register_global(binary(), map()) -> ok.
+register_global(SkillId, Opts) ->
+    beam_agent_skills_core:register_global_skill(SkillId, Opts).
+
+-doc "Unregister a global skill by id.".
+-spec unregister_global(binary()) -> ok.
+unregister_global(SkillId) ->
+    beam_agent_skills_core:unregister_global_skill(SkillId).
+
+-doc "Fetch a single global skill by id.".
+-spec get_global(binary()) ->
+    {ok, beam_agent_skills_core:skill_entry()} | {error, not_found}.
+get_global(SkillId) ->
+    beam_agent_skills_core:get_global_skill(SkillId).
+
+-doc "List all globally registered skills.".
+-spec list_global() -> [beam_agent_skills_core:skill_entry()].
+list_global() ->
+    beam_agent_skills_core:list_global_skills().
+
+-doc "List globally registered skills with optional filters.".
+-spec list_global(beam_agent_skills_core:list_opts()) ->
+    [beam_agent_skills_core:skill_entry()].
+list_global(Opts) ->
+    beam_agent_skills_core:list_global_skills(Opts).
+
+-doc "Remove all globally registered skills.".
+-spec clear_global() -> ok.
+clear_global() ->
+    beam_agent_skills_core:clear_global_skills().
 
 %%--------------------------------------------------------------------
 %% Internal
