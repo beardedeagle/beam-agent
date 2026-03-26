@@ -725,9 +725,10 @@ handle_permission_request(Id, Params,
                 {ask, _} ->
                     [{send, beam_agent_jsonrpc:encode_response(
                                 Id, gemini_reverse_requests:cancelled())}];
-                {ok, _FinalCtx} ->
+                {ok, FinalCtx} ->
+                    FinalToolCall = maps:get(tool_input, FinalCtx, ToolCall),
                     Response = gemini_reverse_requests:permission_response(
-                                   SessionId, ToolCall, Options),
+                                   SessionId, FinalToolCall, Options),
                     [{send, beam_agent_jsonrpc:encode_response(
                                 Id, Response)}]
             end;
