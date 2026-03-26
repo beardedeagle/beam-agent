@@ -2,6 +2,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+ensure_credential_key_test() ->
+    _ = beam_agent_test_setup:ensure_test_key().
+
 config_requirements_include_provider_catalog_test() ->
     SessionId = <<"config-req-session">>,
     {ok, Requirements} = beam_agent_config_core:config_requirements_read(SessionId),

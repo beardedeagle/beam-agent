@@ -282,12 +282,14 @@ redact_handler_state(Other) ->
 -spec protect_auth({basic, binary()} | none) ->
     beam_agent_credential:protected() | none.
 protect_auth(none) -> none;
-protect_auth(Auth) -> beam_agent_credential:protect_value(Auth).
+protect_auth(Auth) ->
+    beam_agent_credential:protect_value(Auth).
 
 -spec decrypt_auth(beam_agent_credential:protected() | none) ->
     {basic, binary()} | none.
 decrypt_auth(none) -> none;
-decrypt_auth(Protected) -> beam_agent_credential:unprotect_value(Protected).
+decrypt_auth(Protected) ->
+    beam_agent_credential:unprotect_value(Protected).
 
 %%====================================================================
 %% Optional callbacks
