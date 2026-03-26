@@ -27,7 +27,7 @@ Cookie = beam_agent_credential:generate_cookie().
 Then configure it via one of:
 
   - **vm.args** (releases): `-setcookie <generated_value>'
-  - **runtime.exs** (Elixir): `Node.set_cookie(:<generated_value>)'
+  - **runtime.exs** (Elixir): `Node.set_cookie(:"<generated_value>")'
   - **CLI flag**: `--cookie <generated_value>'
   - **Programmatic**: `erlang:set_cookie(node(), '<generated_value>')'
 
@@ -198,26 +198,55 @@ derive_and_cache_key() ->
 
 %% @private No cookie was set — generate one, apply it to the running
 %% node, derive the encryption key, and tell the user how to persist it.
+%%
+%% Serialized via ETS named-table mutex: `ets:new/2` with `named_table`
+%% throws `badarg` if the table already exists, so the first process to
+%% arrive wins and all others spin on `persistent_term:get/2` until the
+%% winner caches the key.
 -spec auto_generate_and_cache() -> binary().
 auto_generate_and_cache() ->
-    Cookie = generate_cookie(),
-    erlang:set_cookie(node(), Cookie),
-    {ok, Key} = cookie_to_key(Cookie),
-    persistent_term:put(?MODULE, Key),
-    logger:warning(
-        "beam_agent: No node cookie was set. A secure ephemeral cookie "
-        "has been generated and applied to this node.~n"
-        "~n"
-        "  This cookie will NOT survive a restart.~n"
-        "  To retrieve it for persistence:~n"
-        "    Erlang:  erlang:get_cookie()~n"
-        "    Elixir:  Node.get_cookie()~n"
-        "~n"
-        "  Then persist via one of:~n"
-        "    vm.args:      -setcookie <value>~n"
-        "    runtime.exs:  Node.set_cookie(:<value>)~n"
-        "    CLI flag:     --cookie <value>~n"),
-    Key.
+    try ets:new(beam_agent_credential_init, [named_table]) of
+        beam_agent_credential_init ->
+            try
+                Cookie = generate_cookie(),
+                erlang:set_cookie(node(), Cookie),
+                {ok, Key} = cookie_to_key(Cookie),
+                persistent_term:put(?MODULE, Key),
+                logger:warning(
+                    "beam_agent: No node cookie was set. A secure ephemeral "
+                    "cookie has been generated and applied to this node.~n"
+                    "~n"
+                    "  This cookie will NOT survive a restart.~n"
+                    "  To retrieve it for persistence:~n"
+                    "    Erlang:  erlang:get_cookie()~n"
+                    "    Elixir:  Node.get_cookie()~n"
+                    "~n"
+                    "  Then persist via one of:~n"
+                    "    vm.args:      -setcookie <value>~n"
+                    "    runtime.exs:  Node.set_cookie(:\"<value>\")~n"
+                    "    CLI flag:     --cookie <value>~n"),
+                Key
+            after
+                ets:delete(beam_agent_credential_init)
+            end
+    catch
+        error:badarg ->
+            %% Another process is generating — wait for the cached key.
+            await_cached_key()
+    end.
+
+%% @private Spin until the winner caches the key in persistent_term.
+%% The critical section above completes in microseconds (one
+%% `crypto:strong_rand_bytes` + `persistent_term:put`), so this
+%% spin is trivially short.
+-spec await_cached_key() -> binary().
+await_cached_key() ->
+    case persistent_term:get(?MODULE, undefined) of
+        Key when is_binary(Key), byte_size(Key) =:= 32 -> Key;
+        _ ->
+            erlang:yield(),
+            await_cached_key()
+    end.
 
 %%--------------------------------------------------------------------
 %% Key derivation (pure functions)

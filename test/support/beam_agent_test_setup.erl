@@ -17,7 +17,7 @@
 
 %% @doc Seed the credential key in persistent_term.
 %%
-%% Idempotent — safe to call multiple times. Uses `cookie_to_key/1'
+%% Idempotent — safe to call multiple times. Uses `cookie_to_key/1`
 %% with a fixed test atom to produce a deterministic 32-byte AES key
 %% without requiring Erlang distribution.
 -spec ensure_test_key() -> binary().

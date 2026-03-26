@@ -17,7 +17,7 @@ defmodule BeamAgent.Credential do
   For production, persist the cookie in your release configuration:
 
     - **`rel/vm.args.eex`**: `-setcookie <%= release_cookie() %>`
-    - **`config/runtime.exs`**: `Node.set_cookie(:<value>)`
+    - **`config/runtime.exs`**: `Node.set_cookie(:"<value>")`
     - **CLI flag**: `--cookie <value>`
 
   ## Why a cookie is needed
