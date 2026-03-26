@@ -656,14 +656,14 @@ subagent_started_test() ->
               <<"data">> => #{<<"agentId">> => <<"a-1">>}},
     Msg = copilot_protocol:normalize_event(Event),
     ?assertEqual(system, maps:get(type, Msg)),
-    ?assertEqual(subagent_started, maps:get(subtype, Msg)).
+    ?assertEqual(<<"subagent_started">>, maps:get(subtype, Msg)).
 
 subagent_completed_test() ->
     Event = #{<<"type">> => <<"subagent.completed">>,
               <<"data">> => #{<<"agentId">> => <<"a-1">>}},
     Msg = copilot_protocol:normalize_event(Event),
     ?assertEqual(system, maps:get(type, Msg)),
-    ?assertEqual(subagent_completed, maps:get(subtype, Msg)).
+    ?assertEqual(<<"subagent_completed">>, maps:get(subtype, Msg)).
 
 subagent_failed_test() ->
     Event = #{<<"type">> => <<"subagent.failed">>,

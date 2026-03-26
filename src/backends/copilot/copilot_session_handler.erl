@@ -853,6 +853,30 @@ maybe_fire_message_hooks(#{type := result} = Msg, HState) ->
                     stop_reason => maps:get(stop_reason, Msg, <<>>)},
                   HState),
     HState;
+maybe_fire_message_hooks(#{type := system,
+                           subtype := <<"subagent_started">>} = Msg,
+                          HState) ->
+    _ = fire_hook(subagent_start,
+                  #{event => subagent_start,
+                    content => maps:get(content, Msg, <<>>),
+                    agent_id => maps:get(agent_id, Msg, <<>>)},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := system,
+                           subtype := <<"subagent_completed">>} = Msg,
+                          HState) ->
+    _ = fire_hook(subagent_stop,
+                  #{event => subagent_stop,
+                    content => maps:get(content, Msg, <<>>),
+                    agent_id => maps:get(agent_id, Msg, <<>>)},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := system} = Msg, HState) ->
+    _ = fire_hook(notification,
+                  #{event => notification,
+                    content => maps:get(content, Msg, <<>>)},
+                  HState),
+    HState;
 maybe_fire_message_hooks(_Msg, HState) ->
     HState.
 
@@ -902,8 +926,6 @@ maybe_tag_session_id(Msg, SessionId) ->
     {ok, beam_agent_hooks_core:hook_context()}
   | {deny, binary()}
   | {ask, binary()}.
-fire_hook(_Event, Context, #hstate{sdk_hook_registry = undefined}) ->
-    {ok, Context};
 fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).
 

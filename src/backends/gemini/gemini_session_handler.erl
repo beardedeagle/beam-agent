@@ -704,12 +704,33 @@ handle_session_update(Params, HState) ->
 
 -spec handle_permission_request(integer(), map(), #hstate{}) ->
     [beam_agent_session_handler:handler_action()].
-handle_permission_request(Id, Params, _HState) ->
+handle_permission_request(Id, Params,
+                          #hstate{sdk_hook_registry = HookReg,
+                                  session_id = SessId}) ->
     case gemini_wire:parse_permission_request(Params) of
         {ok, SessionId, ToolCall, Options} ->
-            Response = gemini_reverse_requests:permission_response(
-                           SessionId, ToolCall, Options),
-            [{send, beam_agent_jsonrpc:encode_response(Id, Response)}];
+            StoreId = session_store_id(SessId),
+            ToolName = maps:get(<<"name">>, ToolCall,
+                                maps:get(<<"kind">>, ToolCall, <<>>)),
+            HookCtx = #{event => pre_tool_use,
+                        tool_name => ToolName,
+                        tool_input => ToolCall,
+                        tool_use_id => maps:get(<<"toolCallId">>,
+                                                ToolCall, <<>>),
+                        session_id => StoreId},
+            case beam_agent_hooks_core:fire(pre_tool_use, HookCtx, HookReg) of
+                {deny, _} ->
+                    [{send, beam_agent_jsonrpc:encode_response(
+                                Id, gemini_reverse_requests:cancelled())}];
+                {ask, _} ->
+                    [{send, beam_agent_jsonrpc:encode_response(
+                                Id, gemini_reverse_requests:cancelled())}];
+                {ok, _FinalCtx} ->
+                    Response = gemini_reverse_requests:permission_response(
+                                   SessionId, ToolCall, Options),
+                    [{send, beam_agent_jsonrpc:encode_response(
+                                Id, Response)}]
+            end;
         {error, Reason} ->
             [{send, beam_agent_jsonrpc:encode_error(
                         Id, -32602, <<"invalid_permission_request">>,
@@ -780,6 +801,16 @@ maybe_fire_message_hooks(#{type := error} = Msg,
               category => maps:get(category, Msg, undefined),
               session_id => StoreId,
               event => post_tool_use_failure},
+            HookReg),
+    ok;
+maybe_fire_message_hooks(#{type := system} = Msg,
+                          #hstate{sdk_hook_registry = HookReg,
+                                  session_id = SessionId}) ->
+    StoreId = session_store_id(SessionId),
+    _ = beam_agent_hooks_core:fire(notification,
+            #{event => notification,
+              content => maps:get(content, Msg, <<>>),
+              session_id => StoreId},
             HookReg),
     ok;
 maybe_fire_message_hooks(_Msg, _HState) ->

@@ -305,10 +305,10 @@ normalize_event(#{<<"type">> := <<"assistant.streaming_delta">>,
                           maps:get(<<"content">>, Data, <<>>))};
 %% Subagent events
 normalize_event(#{<<"type">> := <<"subagent.started">>, <<"data">> := Data}) ->
-    #{type => system, subtype => subagent_started, content => Data};
+    #{type => system, subtype => <<"subagent_started">>, content => Data};
 normalize_event(#{<<"type">> := <<"subagent.completed">>,
                   <<"data">> := Data}) ->
-    #{type => system, subtype => subagent_completed, content => Data};
+    #{type => system, subtype => <<"subagent_completed">>, content => Data};
 normalize_event(#{<<"type">> := <<"subagent.failed">>, <<"data">> := Data}) ->
     SubContent = maps:get(<<"error">>, Data, <<>>),
     #{type => error,

@@ -147,7 +147,11 @@ ok = beam_agent_hooks_core:register_global(Hook).
     %% session_start
     system_info => map(),
     %% session_end
-    reason => term()
+    reason => term(),
+    %% config_change
+    reload_type => atom(),
+    %% task_completed
+    status => atom()
 }.
 
 %% Matcher for filtering which tools a hook fires on.

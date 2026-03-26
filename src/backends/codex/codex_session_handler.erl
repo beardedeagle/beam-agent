@@ -955,7 +955,11 @@ fire_notification_hooks(<<"turn/completed">>, Params, _Msg, HState) ->
                         maps:get(<<"status">>, Params, <<>>)},
                   HState),
     HState;
-fire_notification_hooks(_, _, _, HState) ->
+fire_notification_hooks(_Method, _Params, Msg, HState) ->
+    _ = fire_hook(notification,
+                  #{event => notification,
+                    content => maps:get(content, Msg, <<>>)},
+                  HState),
     HState.
 
 %%====================================================================
