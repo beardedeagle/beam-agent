@@ -487,6 +487,8 @@ Parameters:
 - `Handler` — `tool_handler()` fun invoked when the AI calls the tool
 
 ```erlang
+%% Always validate AI-supplied file paths against an allowed root.
+RootDir = "/path/to/allowed/directory",
 Tool = beam_agent_mcp:tool(
     <<"read_file">>,
     <<"Read the contents of a file">>,
@@ -496,9 +498,16 @@ Tool = beam_agent_mcp:tool(
       },
       <<"required">> => [<<"path">>]},
     fun(#{<<"path">> := Path}) ->
-        case file:read_file(Path) of
-            {ok, Bin} -> {ok, [#{type => text, text => Bin}]};
-            {error, R} -> {error, atom_to_binary(R)}
+        case filename:safe_relative_path(binary_to_list(Path)) of
+            unsafe ->
+                {error, <<"path rejected: must be relative, "
+                          "no traversal allowed">>};
+            SafePath ->
+                Full = filename:join(RootDir, SafePath),
+                case file:read_file(Full) of
+                    {ok, Bin} -> {ok, [#{type => text, text => Bin}]};
+                    {error, R} -> {error, atom_to_binary(R)}
+                end
         end
     end
 ).

@@ -30,6 +30,9 @@
 %% whose character codes are more specific than [[byte()]]; suppressing
 %% since encoding the exact codepoints in a spec is impractical.
 -dialyzer({nowarn_function, [resume_args/1, fork_session_args/1]}).
+%% validate_settings_path/1 returns literal error binaries whose minimum
+%% size is more specific than the declared binary() — same class of issue.
+-dialyzer({no_underspecs, [validate_settings_path/1]}).
 
 %%--------------------------------------------------------------------
 %% Handler state
@@ -1302,15 +1305,44 @@ load_settings_binary(Value) ->
     case looks_like_json(Trimmed) of
         true  -> decode_settings_json(Trimmed);
         false ->
-            case file:read_file(Trimmed) of
-                {ok, Contents} -> decode_settings_json(Contents);
-                _              -> #{}
+            case validate_settings_path(Trimmed) of
+                ok ->
+                    case file:read_file(Trimmed) of
+                        {ok, Contents} -> decode_settings_json(Contents);
+                        _              -> #{}
+                    end;
+                {error, Reason} ->
+                    logger:warning("claude_session_handler: rejecting"
+                                   " settings path: ~s",
+                                   [Reason]),
+                    #{}
             end
     end.
 
 -spec looks_like_json(binary()) -> boolean().
 looks_like_json(<<"{", _/binary>>) -> true;
 looks_like_json(_)                 -> false.
+
+%% Validate that a settings file path is safe to read.
+%% Requires .json extension, no traversal components, and a regular file.
+-spec validate_settings_path(binary()) -> ok | {error, binary()}.
+validate_settings_path(Path) ->
+    PathStr = binary_to_list(Path),
+    Components = filename:split(filename:absname(PathStr)),
+    HasTraversal = lists:member("..", Components),
+    Ext = filename:extension(PathStr),
+    case {Ext, HasTraversal} of
+        {".json", false} ->
+            case filelib:is_regular(PathStr) of
+                true  -> ok;
+                false -> {error, <<"settings file does not exist"
+                                   " or is not a regular file">>}
+            end;
+        {_, true} ->
+            {error, <<"settings path contains traversal components">>};
+        _ ->
+            {error, <<"settings path must have .json extension">>}
+    end.
 
 -spec decode_settings_json(binary()) ->
     #{binary() => false | null | true | binary() | [any()] | number() | #{binary() => _}}.
