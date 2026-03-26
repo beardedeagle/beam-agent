@@ -576,6 +576,12 @@ Notification-only events (always proceed regardless of return value):
 `session_end`, `subagent_stop`, `notification`, `task_completed`,
 `teammate_idle`.
 
+Crash protection: each callback is wrapped in try/catch. Blocking hook
+crashes return `{deny, <<"hook crashed (fail-safe deny)">>}` (fail-closed) —
+a security hook that crashes must not allow the action through unchecked.
+Notification hook crashes are logged and the context passes through
+unmodified (fail-open).
+
 ### Telemetry
 
 BeamAgent emits telemetry at key points across both backend session handling and
