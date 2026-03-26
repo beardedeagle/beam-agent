@@ -7,7 +7,7 @@
 %%%   - Dispatch — notification-only events (ignore deny/ask)
 %%%   - Dispatch — blocking events (first deny/ask wins, context threading)
 %%%   - Matchers (exact, regex, no matcher)
-%%%   - Crash protection (callback crash/throw)
+%%%   - Crash protection (fail-closed for blocking, fail-open for notification)
 %%%   - New blocking events (subagent_start, pre_compact, config_change)
 %%% @end
 %%%-------------------------------------------------------------------
@@ -388,20 +388,74 @@ callback_throw_is_caught_test() ->
         stop, #{event => stop}, Reg)),
     logger:set_primary_config(level, OldLevel).
 
-blocking_callback_crash_returns_ok_ctx_test() ->
-    %% A crashing callback in a blocking event should NOT deny —
-    %% it returns {ok, Context} and continues to next hook.
+blocking_callback_crash_returns_deny_test() ->
+    %% A crashing callback in a blocking event returns {deny, _}
+    %% (fail-closed) and stops the chain — Hook2 never fires.
+    Self = self(),
+    Ref = make_ref(),
     H1 = beam_agent_hooks_core:hook(pre_tool_use, fun(_) -> error(crash) end),
-    H2 = beam_agent_hooks_core:hook(pre_tool_use, fun(Ctx) -> {ok, Ctx} end),
+    H2 = beam_agent_hooks_core:hook(pre_tool_use,
+        fun(Ctx) -> Self ! {Ref, fired}, {ok, Ctx} end),
     Reg = beam_agent_hooks_core:register_hooks(
         [H1, H2], beam_agent_hooks_core:new_registry()),
-    %% Suppress expected warning from safe_call crash handler
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    ?assertMatch({ok, _}, beam_agent_hooks_core:fire(
-        pre_tool_use,
-        #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
+    ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
+        beam_agent_hooks_core:fire(
+            pre_tool_use,
+            #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
+    logger:set_primary_config(level, OldLevel),
+    %% Hook2 never fired — chain stopped by deny
+    receive {Ref, fired} -> ?assert(false)
+    after 100 -> ok
+    end.
+
+blocking_throw_returns_deny_test() ->
+    %% A throwing callback in a blocking event also returns {deny, _}.
+    H = beam_agent_hooks_core:hook(pre_tool_use, fun(_) -> throw(oops) end),
+    Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
+    #{level := OldLevel} = logger:get_primary_config(),
+    logger:set_primary_config(level, none),
+    ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
+        beam_agent_hooks_core:fire(
+            pre_tool_use,
+            #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
     logger:set_primary_config(level, OldLevel).
+
+blocking_crash_fail_closed_all_events_test_() ->
+    %% Every blocking event must fail-closed on callback crash.
+    BlockingEvents = [pre_tool_use, user_prompt_submit,
+                      permission_request, subagent_start,
+                      pre_compact, config_change],
+    [{"crash in " ++ atom_to_list(E) ++ " returns deny",
+      fun() ->
+          H = beam_agent_hooks_core:hook(E, fun(_) -> error(boom) end),
+          Reg = beam_agent_hooks_core:register_hook(
+              H, beam_agent_hooks_core:new_registry()),
+          #{level := OldLevel} = logger:get_primary_config(),
+          logger:set_primary_config(level, none),
+          Result = beam_agent_hooks_core:fire(E, #{event => E}, Reg),
+          logger:set_primary_config(level, OldLevel),
+          ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result)
+      end} || E <- BlockingEvents].
+
+notification_crash_fail_open_all_events_test_() ->
+    %% Every notification event must fail-open on callback crash.
+    NotificationEvents = [post_tool_use, post_tool_use_failure, stop,
+                          session_start, session_end, subagent_stop,
+                          notification, task_completed, teammate_idle],
+    [{"crash in " ++ atom_to_list(E) ++ " returns ok",
+      fun() ->
+          H = beam_agent_hooks_core:hook(E, fun(_) -> error(boom) end),
+          Reg = beam_agent_hooks_core:register_hook(
+              H, beam_agent_hooks_core:new_registry()),
+          Ctx = #{event => E},
+          #{level := OldLevel} = logger:get_primary_config(),
+          logger:set_primary_config(level, none),
+          Result = beam_agent_hooks_core:fire(E, Ctx, Reg),
+          logger:set_primary_config(level, OldLevel),
+          ?assertMatch({ok, _}, Result)
+      end} || E <- NotificationEvents].
 
 unexpected_return_treated_as_ok_test() ->
     %% A callback returning something unexpected (not {ok,_}, {deny,_}, {ask,_})

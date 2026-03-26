@@ -262,7 +262,10 @@ For notification-only events:
   passes through unmodified from those hooks.
 
 Handles `undefined` registry (no hooks configured) gracefully.
-Each callback is wrapped in try/catch for crash protection.
+Each callback is wrapped in try/catch for crash protection:
+- Blocking events: a crashing callback returns `{deny, _}` (fail-closed).
+- Notification events: a crashing callback passes the context through
+  unmodified (fail-open).
 """.
 -spec fire(hook_event(), hook_context(), hook_registry() | undefined) ->
     {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
@@ -337,7 +340,19 @@ fire_notification([Hook | Rest], Context) ->
     end.
 
 %% Invoke a hook callback with crash protection.
-%% Returns {ok, Context} on crash/throw/unexpected return (logged via logger).
+%%
+%% Blocking events (pre_tool_use, user_prompt_submit, permission_request,
+%% subagent_start, pre_compact, config_change): a crashing callback
+%% returns {deny, _} (fail-closed). A security hook that crashes must
+%% not allow the action through unchecked.
+%%
+%% Notification-only events: a crashing callback returns {ok, Context}
+%% (fail-open). Notifications are informational; a crash should not
+%% block forward progress.
+%%
+%% Unexpected returns (not {ok,_}, {deny,_}, {ask,_}) are always treated
+%% as {ok, Context} with a warning — the callback ran to completion but
+%% returned a wrong shape.
 -spec safe_call(hook_def(), hook_context()) ->
     {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
 safe_call(#{callback := Callback}, Context) ->
@@ -354,11 +369,15 @@ safe_call(#{callback := Callback}, Context) ->
             {ok, Context}
     catch
         Class:Reason:Stack ->
+            Event = maps:get(event, Context, undefined),
             logger:warning("SDK hook callback crashed: ~p:~p~n~p",
                            [Class,
                             beam_agent_redaction:reason(Reason),
                             beam_agent_redaction:stacktrace(Stack)]),
-            {ok, Context}
+            case is_blocking_event(Event) of
+                true  -> {deny, <<"hook crashed (fail-safe deny)">>};
+                false -> {ok, Context}
+            end
     end.
 
 %% Check if a hook's matcher allows it to fire for this context.
