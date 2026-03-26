@@ -1,8 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @doc EUnit tests for claude_session_handler pure-function coverage.
 %%%
-%%% Tests handle_set_model/2, handle_set_permission_mode/2, and
-%%% control_cancel_request normalization. No mocks, no processes.
+%%% Tests handle_set_model/2, handle_set_permission_mode/2,
+%%% validate_settings_path/1, and control_cancel_request normalization.
+%%% No mocks, no processes.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(claude_handler_tests).
@@ -82,6 +83,89 @@ normalize_control_cancel_request_missing_id_test() ->
     ?assertEqual(control_cancel_request, maps:get(type, Normalized)),
     %% request_id should not be present when absent from raw
     ?assertEqual(error, maps:find(request_id, Normalized)).
+
+%%====================================================================
+%% validate_settings_path/1
+%%====================================================================
+
+validate_settings_path_rejects_absolute_path_test() ->
+    ?assertMatch(
+        {error, <<"settings path must be relative">>},
+        claude_session_handler:validate_settings_path(<<"/etc/passwd.json">>)).
+
+validate_settings_path_rejects_traversal_test() ->
+    ?assertMatch(
+        {error, <<"settings path contains traversal components">>},
+        claude_session_handler:validate_settings_path(<<"../secrets.json">>)).
+
+validate_settings_path_rejects_nested_traversal_test() ->
+    ?assertMatch(
+        {error, <<"settings path contains traversal components">>},
+        claude_session_handler:validate_settings_path(
+            <<"config/../../../etc/passwd.json">>)).
+
+validate_settings_path_rejects_non_json_extension_test() ->
+    ?assertMatch(
+        {error, <<"settings path must have .json extension">>},
+        claude_session_handler:validate_settings_path(<<"settings.txt">>)).
+
+validate_settings_path_rejects_no_extension_test() ->
+    ?assertMatch(
+        {error, <<"settings path must have .json extension">>},
+        claude_session_handler:validate_settings_path(<<"settings">>)).
+
+validate_settings_path_rejects_nonexistent_file_test() ->
+    ?assertMatch(
+        {error, <<"settings file does not exist", _/binary>>},
+        claude_session_handler:validate_settings_path(
+            <<"nonexistent_file.json">>)).
+
+validate_settings_path_rejects_symlink_test() ->
+    TmpDir = filename:basedir(user_cache, "beam_agent_test"),
+    ok = filelib:ensure_dir(filename:join(TmpDir, "x")),
+    RealFile = filename:join(TmpDir, "real_settings.json"),
+    LinkFile = filename:join(TmpDir, "link_settings.json"),
+    ok = file:write_file(RealFile, <<"{}">>),
+    %% Clean up any stale symlink from a previous run.
+    file:delete(LinkFile),
+    ok = file:make_symlink(RealFile, LinkFile),
+    try
+        {ok, OrigCwd} = file:get_cwd(),
+        ok = file:set_cwd(TmpDir),
+        try
+            ?assertMatch(
+                {error, <<"settings path is a symbolic link">>},
+                claude_session_handler:validate_settings_path(
+                    <<"link_settings.json">>))
+        after
+            file:set_cwd(OrigCwd)
+        end
+    after
+        file:delete(LinkFile),
+        file:delete(RealFile)
+    end.
+
+validate_settings_path_accepts_valid_relative_json_test() ->
+    %% Write a temporary file so the is_regular check passes.
+    TmpDir = filename:basedir(user_cache, "beam_agent_test"),
+    ok = filelib:ensure_dir(filename:join(TmpDir, "x")),
+    TmpFile = filename:join(TmpDir, "test_settings.json"),
+    ok = file:write_file(TmpFile, <<"{}">>),
+    try
+        %% validate_settings_path needs a relative path — make one
+        %% by changing cwd into the temp dir.
+        {ok, OrigCwd} = file:get_cwd(),
+        ok = file:set_cwd(TmpDir),
+        try
+            ?assertEqual(ok,
+                claude_session_handler:validate_settings_path(
+                    <<"test_settings.json">>))
+        after
+            file:set_cwd(OrigCwd)
+        end
+    after
+        file:delete(TmpFile)
+    end.
 
 %%====================================================================
 %% Helpers

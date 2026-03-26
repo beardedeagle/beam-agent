@@ -26,6 +26,10 @@
     is_query_complete/2
 ]).
 
+%% Exported for testability (pure validation, no side effects beyond
+%% filelib:is_regular/1 on the validated path).
+-export([validate_settings_path/1]).
+
 %% Dialyzer: resume_args/1 and fork_session_args/1 return string literals
 %% whose character codes are more specific than [[byte()]]; suppressing
 %% since encoding the exact codepoints in a spec is impractical.
@@ -33,6 +37,8 @@
 %% validate_settings_path/1 returns literal error binaries whose minimum
 %% size is more specific than the declared binary() — same class of issue.
 -dialyzer({no_underspecs, [validate_settings_path/1]}).
+
+-include_lib("kernel/include/file.hrl").
 
 %%--------------------------------------------------------------------
 %% Handler state
@@ -1323,25 +1329,45 @@ load_settings_binary(Value) ->
 looks_like_json(<<"{", _/binary>>) -> true;
 looks_like_json(_)                 -> false.
 
-%% Validate that a settings file path is safe to read.
-%% Requires .json extension, no traversal components, and a regular file.
+-doc """
+Validate that a settings file path is safe to read.
+
+Rejects absolute paths, traversal components, symbolic links, and
+non-`.json` extensions.  Uses raw path components (not
+`filename:absname/1`) to prevent normalization from hiding `..`
+traversal.
+""".
 -spec validate_settings_path(binary()) -> ok | {error, binary()}.
 validate_settings_path(Path) ->
     PathStr = binary_to_list(Path),
-    Components = filename:split(filename:absname(PathStr)),
-    HasTraversal = lists:member("..", Components),
-    Ext = filename:extension(PathStr),
-    case {Ext, HasTraversal} of
-        {".json", false} ->
-            case filelib:is_regular(PathStr) of
-                true  -> ok;
-                false -> {error, <<"settings file does not exist"
-                                   " or is not a regular file">>}
-            end;
-        {_, true} ->
-            {error, <<"settings path contains traversal components">>};
+    case filename:pathtype(PathStr) of
+        absolute ->
+            {error, <<"settings path must be relative">>};
         _ ->
-            {error, <<"settings path must have .json extension">>}
+            Components = filename:split(PathStr),
+            HasTraversal = lists:member("..", Components),
+            Ext = filename:extension(PathStr),
+            case {Ext, HasTraversal} of
+                {".json", false} ->
+                    validate_settings_file(PathStr);
+                {_, true} ->
+                    {error, <<"settings path contains traversal components">>};
+                _ ->
+                    {error, <<"settings path must have .json extension">>}
+            end
+    end.
+
+%% Check that the path is a regular file and not a symbolic link.
+-spec validate_settings_file(string()) -> ok | {error, binary()}.
+validate_settings_file(PathStr) ->
+    case file:read_link_info(PathStr) of
+        {ok, #file_info{type = symlink}} ->
+            {error, <<"settings path is a symbolic link">>};
+        {ok, #file_info{type = regular}} ->
+            ok;
+        _ ->
+            {error, <<"settings file does not exist"
+                       " or is not a regular file">>}
     end.
 
 -spec decode_settings_json(binary()) ->
