@@ -283,7 +283,11 @@ defmodule BeamAgent.MCP do
 
   ## Example
 
+  Always validate AI-supplied file paths against an allowed root.
+
   ```elixir
+  root_dir = "/path/to/allowed/directory"
+
   tool = BeamAgent.MCP.tool(
     "read_file",
     "Read the contents of a file",
@@ -293,9 +297,17 @@ defmodule BeamAgent.MCP do
       "required" => ["path"]
     },
     fn %{"path" => path} ->
-      case File.read(path) do
-        {:ok, bin} -> {:ok, [%{type: :text, text: bin}]}
-        {:error, reason} -> {:error, inspect(reason)}
+      case :filename.safe_relative_path(String.to_charlist(path)) do
+        :unsafe ->
+          {:error, "path rejected: must be relative, no traversal allowed"}
+
+        safe_path ->
+          full = Path.join(root_dir, List.to_string(safe_path))
+
+          case File.read(full) do
+            {:ok, bin} -> {:ok, [%{type: :text, text: bin}]}
+            {:error, reason} -> {:error, inspect(reason)}
+          end
       end
     end
   )
