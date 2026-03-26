@@ -30,6 +30,7 @@ cleanup_session(SessionId) when is_binary(SessionId) ->
 
 -spec reset_state() -> ok.
 reset_state() ->
+    _ = beam_agent_test_setup:ensure_test_key(),
     ok = beam_agent_backend:clear(),
     ok = beam_agent_runtime_core:clear(),
     ok = beam_agent_control_core:clear(),

@@ -5,6 +5,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+ensure_credential_key_test() ->
+    _ = beam_agent_test_setup:ensure_test_key().
+
 provider_and_agent_state_test() ->
     ok = beam_agent_runtime_core:clear(),
     SessionId = <<"sess-runtime">>,
@@ -148,14 +151,15 @@ raw_ets_shows_protected_provider_config_test() ->
 
 top_level_sensitive_key_is_protected_in_ets_test() ->
     ok = beam_agent_runtime_core:clear(),
-    %% Directly test that credential protect/unprotect works
-    %% on a map with top-level sensitive keys.
+    %% Directly test that credential encrypt_map/decrypt_map works
+    %% on a map with top-level sensitive keys, using a test-derived key.
+    {ok, Key} = beam_agent_credential:cookie_to_key(beam_agent_test_cookie),
     TestMap = #{api_key => <<"sk-secret">>, base_url => <<"https://test">>},
-    Protected = beam_agent_credential:protect(TestMap),
+    Protected = beam_agent_credential:encrypt_map(TestMap, Key),
     ?assert(beam_agent_credential:is_protected(Protected)),
     ?assertMatch({beam_agent_protected, _, _, _}, maps:get(api_key, Protected)),
     ?assertEqual(<<"https://test">>, maps:get(base_url, Protected)),
-    Restored = beam_agent_credential:unprotect(Protected),
+    Restored = beam_agent_credential:decrypt_map(Protected, Key),
     ?assertEqual(TestMap, Restored).
 
 get_state_roundtrips_through_protection_test() ->

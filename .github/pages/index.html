@@ -783,6 +783,55 @@ session
     </div>
   </section>
 
+  <!-- Cookie Setup -->
+  <section>
+    <h2 class="section-title">Cookie Setup</h2>
+    <p class="section-desc">
+      BeamAgent encrypts credentials at rest using a key derived from the BEAM node cookie.
+      You don't need distributed Erlang &mdash; just a cookie set on the local node.
+    </p>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(event, 'cookie-elixir')">Elixir</button>
+      <button class="tab" onclick="switchTab(event, 'cookie-erlang')">Erlang</button>
+    </div>
+
+    <div id="tab-cookie-elixir" class="tab-content active">
+      <div class="code-block">
+<span class="comment"># Generate a secure cookie</span>
+cookie = <span class="module">BeamAgent.Credential</span>.<span class="func">generate_cookie</span>()
+
+<span class="comment"># Set it on the node (runtime.exs or iex)</span>
+<span class="module">Node</span>.<span class="func">set_cookie</span>(cookie)
+
+<span class="comment"># For releases, persist in rel/vm.args.eex:</span>
+<span class="comment">#   -setcookie &lt;%= release_cookie() %&gt;</span>
+<span class="comment">#</span>
+<span class="comment"># Or in config/runtime.exs:</span>
+<span class="comment">#   Node.set_cookie(:your_generated_cookie)</span>
+      </div>
+    </div>
+
+    <div id="tab-cookie-erlang" class="tab-content">
+      <div class="code-block">
+<span class="comment">%% Generate a secure cookie</span>
+Cookie = <span class="module">beam_agent_credential</span>:<span class="func">generate_cookie</span>(),
+
+<span class="comment">%% Set it on the node</span>
+<span class="module">erlang</span>:<span class="func">set_cookie</span>(<span class="func">node</span>(), Cookie).
+
+<span class="comment">%% For releases, persist in vm.args:</span>
+<span class="comment">%%   -setcookie &lt;generated_value&gt;</span>
+      </div>
+    </div>
+
+    <p style="margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+      Without a cookie, <code>erlang:get_cookie()</code> returns <code>nocookie</code> &mdash; a publicly
+      known atom. BeamAgent auto-generates a secure ephemeral cookie and logs persistence instructions.
+      Pre-configure a cookie for production to avoid ephemeral keys.
+    </p>
+  </section>
+
   <!-- Compatibility -->
   <section>
     <h2 class="section-title">Compatibility</h2>

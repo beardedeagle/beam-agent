@@ -33,3 +33,8 @@ AI_SLOP_*
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# temporary adds
+.beads-credential-key
+.serena
+BEAM_AGENT_HARDENING_*.md

@@ -7,6 +7,30 @@ via HKDF-SHA256 (RFC 5869). HKDF-Extract produces a pseudorandom key
 from the cookie and a fixed salt, then HKDF-Expand stretches it to the
 required 32 bytes with a purpose-specific info label.
 
+If no cookie is set (`erlang:get_cookie/0' returns `nocookie'),
+the module automatically generates a cryptographically secure cookie,
+applies it to the running node via `erlang:set_cookie/2', and logs a
+warning with instructions for persisting it across restarts.
+
+## Cookie Setup
+
+For production, pre-configure a cookie so the auto-generated ephemeral
+cookie is not used. You do not need full distributed Erlang — just a
+cookie set on the local node.
+
+Generate a secure cookie:
+
+```erlang
+Cookie = beam_agent_credential:generate_cookie().
+```
+
+Then configure it via one of:
+
+  - **vm.args** (releases): `-setcookie <generated_value>'
+  - **runtime.exs** (Elixir): `Node.set_cookie(:<generated_value>)'
+  - **CLI flag**: `--cookie <generated_value>'
+  - **Programmatic**: `erlang:set_cookie(node(), '<generated_value>')'
+
 Note: This is defense-in-depth, not a security boundary. Any process
 with access to the node cookie can derive the key. The goal is to
 prevent accidental exposure in logs, crash dumps, and admin UIs.
@@ -17,8 +41,19 @@ prevent accidental exposure in logs, crash dumps, and admin UIs.
     unprotect/1,
     is_protected/1,
     protect_value/1,
-    unprotect_value/1
+    unprotect_value/1,
+    generate_cookie/0
 ]).
+
+-ifdef(TEST).
+-export([
+    cookie_to_key/1,
+    encrypt_map/2,
+    decrypt_map/2,
+    encrypt_term/2,
+    decrypt_term/4
+]).
+-endif.
 
 -export_type([protected/0]).
 
@@ -49,15 +84,13 @@ Walks top-level keys and replaces values whose keys match the sensitive
 key list with `{beam_agent_protected, Nonce, Ciphertext, Tag}` tuples.
 Nested maps under sensitive keys are serialized to binary before encryption.
 Non-sensitive keys are left untouched.
+
+If no node cookie is set, one is auto-generated and applied to the
+running node. See the module doc for persistent cookie setup.
 """.
 -spec protect(map()) -> map().
 protect(Map) when is_map(Map) ->
-    maps:map(fun(Key, Value) ->
-        case is_sensitive(Key) of
-            true -> encrypt_value(Value);
-            false -> Value
-        end
-    end, Map).
+    encrypt_map(Map, require_key()).
 
 -doc """
 Decrypt previously protected fields in a map after ETS read.
@@ -65,17 +98,13 @@ Decrypt previously protected fields in a map after ETS read.
 Reverses `protect/1` by decrypting any values stored as
 `{beam_agent_protected, Nonce, Ciphertext, Tag}` tuples.
 Non-protected values pass through unchanged.
+
+If no node cookie is set, one is auto-generated and applied to the
+running node. See the module doc for persistent cookie setup.
 """.
 -spec unprotect(map()) -> map().
 unprotect(Map) when is_map(Map) ->
-    maps:map(fun(_Key, Value) ->
-        case Value of
-            {beam_agent_protected, Nonce, Ciphertext, Tag} ->
-                decrypt_value(Nonce, Ciphertext, Tag);
-            _ ->
-                Value
-        end
-    end, Map).
+    decrypt_map(Map, require_key()).
 
 -doc """
 Check whether a map contains any protected (encrypted) values.
@@ -96,42 +125,111 @@ Encrypt a single value directly.
 Unlike `protect/1`, which walks a map's keys, this encrypts any term and
 returns a `{beam_agent_protected, Nonce, Ciphertext, Tag}` tuple.  Use this
 for individual credential values stored outside of maps (e.g., record fields).
+
+If no node cookie is set, one is auto-generated and applied to the
+running node. See the module doc for persistent cookie setup.
 """.
 -spec protect_value(term()) -> protected().
 protect_value(Value) ->
-    encrypt_value(Value).
+    encrypt_term(Value, require_key()).
 
 -doc """
 Decrypt a single protected value.  Non-protected values pass through unchanged.
 
 Inverse of `protect_value/1`.
+
+If no node cookie is set, one is auto-generated and applied to the
+running node. See the module doc for persistent cookie setup.
 """.
 -spec unprotect_value(protected()) -> term();
                      (term()) -> term().
 unprotect_value({beam_agent_protected, Nonce, Ciphertext, Tag}) ->
-    decrypt_value(Nonce, Ciphertext, Tag);
+    decrypt_term(Nonce, Ciphertext, Tag, require_key());
 unprotect_value(Value) ->
     Value.
 
 %%--------------------------------------------------------------------
-%% Internal helpers
+%% Cookie generation
 %%--------------------------------------------------------------------
 
--spec is_sensitive(term()) -> boolean().
-is_sensitive(Key) ->
-    lists:member(Key, ?SENSITIVE_KEYS).
+-doc """
+Generate a cryptographically secure node cookie.
 
--spec derive_key() -> binary().
-derive_key() ->
-    case erlang:get_cookie() of
-        nocookie ->
-            logger:warning("beam_agent_credential: deriving key from 'nocookie' — "
-                           "credential encryption provides no protection without "
-                           "a real distribution cookie"),
-            do_derive(nocookie);
-        Cookie ->
-            do_derive(Cookie)
+Returns an atom suitable for `erlang:set_cookie/1'. The cookie is 32
+bytes of randomness encoded as URL-safe base64 (no padding), producing
+a 43-character atom with 256 bits of entropy.
+
+## Example
+
+```erlang
+Cookie = beam_agent_credential:generate_cookie(),
+erlang:set_cookie(node(), Cookie).
+```
+""".
+-spec generate_cookie() -> atom().
+generate_cookie() ->
+    Bytes = crypto:strong_rand_bytes(32),
+    binary_to_atom(urlsafe_base64(Bytes), utf8).
+
+%%--------------------------------------------------------------------
+%% Side-effect boundary
+%%--------------------------------------------------------------------
+
+%% @private Retrieve the cached encryption key, or derive it from the
+%% node cookie on first use. The derived key is stored in persistent_term
+%% for O(1) lookups — derive_key/0 (the sole erlang:get_cookie/0 caller)
+%% runs at most once per node lifetime.
+-spec require_key() -> binary().
+require_key() ->
+    case persistent_term:get(?MODULE, undefined) of
+        Key when is_binary(Key), byte_size(Key) =:= 32 -> Key;
+        _ -> derive_and_cache_key()
     end.
+
+-spec derive_and_cache_key() -> binary().
+derive_and_cache_key() ->
+    case derive_key() of
+        {ok, Key} ->
+            persistent_term:put(?MODULE, Key),
+            Key;
+        {error, nocookie} ->
+            auto_generate_and_cache()
+    end.
+
+%% @private No cookie was set — generate one, apply it to the running
+%% node, derive the encryption key, and tell the user how to persist it.
+-spec auto_generate_and_cache() -> binary().
+auto_generate_and_cache() ->
+    Cookie = generate_cookie(),
+    erlang:set_cookie(node(), Cookie),
+    {ok, Key} = cookie_to_key(Cookie),
+    persistent_term:put(?MODULE, Key),
+    logger:warning(
+        "beam_agent: No node cookie was set. A secure ephemeral cookie "
+        "has been generated and applied to this node.~n"
+        "~n"
+        "  This cookie will NOT survive a restart.~n"
+        "  To retrieve it for persistence:~n"
+        "    Erlang:  erlang:get_cookie()~n"
+        "    Elixir:  Node.get_cookie()~n"
+        "~n"
+        "  Then persist via one of:~n"
+        "    vm.args:      -setcookie <value>~n"
+        "    runtime.exs:  Node.set_cookie(:<value>)~n"
+        "    CLI flag:     --cookie <value>~n"),
+    Key.
+
+%%--------------------------------------------------------------------
+%% Key derivation (pure functions)
+%%--------------------------------------------------------------------
+
+-spec cookie_to_key(atom()) -> {ok, binary()} | {error, nocookie}.
+cookie_to_key(nocookie) -> {error, nocookie};
+cookie_to_key(Cookie) when is_atom(Cookie) -> {ok, do_derive(Cookie)}.
+
+-spec derive_key() -> {ok, binary()} | {error, nocookie}.
+derive_key() ->
+    cookie_to_key(erlang:get_cookie()).
 
 -spec do_derive(atom()) -> binary().
 do_derive(Cookie) ->
@@ -141,18 +239,45 @@ do_derive(Cookie) ->
     %% HKDF-Expand: OKM = HMAC-SHA256(PRK, info || 0x01) truncated to 32 bytes
     crypto:mac(hmac, sha256, PRK, <<?KDF_INFO/binary, 1>>).
 
--spec encrypt_value(term()) -> {beam_agent_protected, binary(), binary(), binary()}.
-encrypt_value(Value) ->
-    Key = derive_key(),
+%%--------------------------------------------------------------------
+%% Pure crypto functions (no side effects)
+%%--------------------------------------------------------------------
+
+-spec is_sensitive(term()) -> boolean().
+is_sensitive(Key) ->
+    lists:member(Key, ?SENSITIVE_KEYS).
+
+-spec encrypt_map(map(), binary()) -> map().
+encrypt_map(Map, Key) when is_map(Map), is_binary(Key) ->
+    maps:map(fun(K, V) ->
+        case is_sensitive(K) of
+            true -> encrypt_term(V, Key);
+            false -> V
+        end
+    end, Map).
+
+-spec decrypt_map(map(), binary()) -> map().
+decrypt_map(Map, Key) when is_map(Map), is_binary(Key) ->
+    maps:map(fun(_K, V) ->
+        case V of
+            {beam_agent_protected, Nonce, Ciphertext, Tag} ->
+                decrypt_term(Nonce, Ciphertext, Tag, Key);
+            _ ->
+                V
+        end
+    end, Map).
+
+-spec encrypt_term(term(), binary()) -> protected().
+encrypt_term(Value, Key) when is_binary(Key) ->
     Nonce = crypto:strong_rand_bytes(12),
     Plaintext = term_to_binary(Value),
     {Ciphertext, Tag} = crypto:crypto_one_time_aead(
         aes_256_gcm, Key, Nonce, Plaintext, <<>>, true),
     {beam_agent_protected, Nonce, Ciphertext, Tag}.
 
--spec decrypt_value(binary(), binary(), binary()) -> term().
-decrypt_value(Nonce, Ciphertext, Tag) ->
-    Key = derive_key(),
+-spec decrypt_term(binary(), binary(), binary(), binary()) -> term().
+decrypt_term(Nonce, Ciphertext, Tag, Key)
+  when is_binary(Nonce), is_binary(Ciphertext), is_binary(Tag), is_binary(Key) ->
     case crypto:crypto_one_time_aead(
              aes_256_gcm, Key, Nonce, Ciphertext, <<>>, Tag, false) of
         error ->
@@ -161,3 +286,17 @@ decrypt_value(Nonce, Ciphertext, Tag) ->
             %% [safe] prevents atom-table exhaustion and lambda injection
             binary_to_term(Plaintext, [safe])
     end.
+
+%%--------------------------------------------------------------------
+%% Encoding helpers (pure)
+%%--------------------------------------------------------------------
+
+%% @private URL-safe base64 encoding without padding (RFC 4648 Section 5).
+-spec urlsafe_base64(binary()) -> binary().
+urlsafe_base64(Bytes) ->
+    << <<(urlsafe_char(C))>> || <<C>> <= base64:encode(Bytes), C =/= $= >>.
+
+-spec urlsafe_char(byte()) -> byte().
+urlsafe_char($+) -> $-;
+urlsafe_char($/) -> $_;
+urlsafe_char(C)  -> C.

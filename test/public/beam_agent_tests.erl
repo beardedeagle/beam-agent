@@ -5,6 +5,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+ensure_credential_key_test() ->
+    _ = beam_agent_test_setup:ensure_test_key().
+
 list_backends_test() ->
     ?assertEqual([claude, codex, gemini, opencode, copilot],
         beam_agent:list_backends()).

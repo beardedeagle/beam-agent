@@ -36,7 +36,8 @@
 -dialyzer({nowarn_function, [resume_args/1, fork_session_args/1]}).
 %% validate_settings_path/1 returns literal error binaries whose minimum
 %% size is more specific than the declared binary() — same class of issue.
--dialyzer({no_underspecs, [validate_settings_path/1]}).
+-dialyzer({no_underspecs, [validate_settings_path/1,
+                           validate_settings_file/1]}).
 
 -include_lib("kernel/include/file.hrl").
 
