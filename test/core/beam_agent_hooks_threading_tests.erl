@@ -109,13 +109,16 @@ blocking_crash_denies_and_stops_chain_test() ->
     Ctx = #{event => pre_tool_use, tool_name => <<"X">>},
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    Result = beam_agent_hooks_core:fire(pre_tool_use, Ctx, Reg),
-    logger:set_primary_config(level, OldLevel),
-    %% Blocking crash returns deny (fail-closed)
-    ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result),
-    %% Hook C never fired — chain stopped by deny
-    receive {Ref, fired_c} -> ?assert(false)
-    after 100 -> ok
+    try
+        Result = beam_agent_hooks_core:fire(pre_tool_use, Ctx, Reg),
+        %% Blocking crash returns deny (fail-closed)
+        ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result),
+        %% Hook C never fired — chain stopped by deny
+        receive {Ref, fired_c} -> ?assert(false)
+        after 100 -> ok
+        end
+    after
+        logger:set_primary_config(level, OldLevel)
     end.
 
 blocking_final_context_returned_to_caller_test() ->

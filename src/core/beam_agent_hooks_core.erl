@@ -355,7 +355,7 @@ fire_notification([Hook | Rest], Context) ->
 %% returned a wrong shape.
 -spec safe_call(hook_def(), hook_context()) ->
     {ok, hook_context()} | {deny, binary()} | {ask, binary()}.
-safe_call(#{callback := Callback}, Context) ->
+safe_call(#{callback := Callback, event := Event}, Context) ->
     try Callback(Context) of
         {ok, Ctx1} when is_map(Ctx1) ->
             {ok, Ctx1};
@@ -369,7 +369,6 @@ safe_call(#{callback := Callback}, Context) ->
             {ok, Context}
     catch
         Class:Reason:Stack ->
-            Event = maps:get(event, Context, undefined),
             logger:warning("SDK hook callback crashed: ~p:~p~n~p",
                            [Class,
                             beam_agent_redaction:reason(Reason),

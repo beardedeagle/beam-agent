@@ -400,14 +400,17 @@ blocking_callback_crash_returns_deny_test() ->
         [H1, H2], beam_agent_hooks_core:new_registry()),
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
-        beam_agent_hooks_core:fire(
-            pre_tool_use,
-            #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
-    logger:set_primary_config(level, OldLevel),
-    %% Hook2 never fired — chain stopped by deny
-    receive {Ref, fired} -> ?assert(false)
-    after 100 -> ok
+    try
+        ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
+            beam_agent_hooks_core:fire(
+                pre_tool_use,
+                #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
+        %% Hook2 never fired — chain stopped by deny
+        receive {Ref, fired} -> ?assert(false)
+        after 100 -> ok
+        end
+    after
+        logger:set_primary_config(level, OldLevel)
     end.
 
 blocking_throw_returns_deny_test() ->
@@ -416,11 +419,14 @@ blocking_throw_returns_deny_test() ->
     Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
-        beam_agent_hooks_core:fire(
-            pre_tool_use,
-            #{event => pre_tool_use, tool_name => <<"X">>}, Reg)),
-    logger:set_primary_config(level, OldLevel).
+    try
+        ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>},
+            beam_agent_hooks_core:fire(
+                pre_tool_use,
+                #{event => pre_tool_use, tool_name => <<"X">>}, Reg))
+    after
+        logger:set_primary_config(level, OldLevel)
+    end.
 
 blocking_crash_fail_closed_all_events_test_() ->
     %% Every blocking event must fail-closed on callback crash.
@@ -434,9 +440,12 @@ blocking_crash_fail_closed_all_events_test_() ->
               H, beam_agent_hooks_core:new_registry()),
           #{level := OldLevel} = logger:get_primary_config(),
           logger:set_primary_config(level, none),
-          Result = beam_agent_hooks_core:fire(E, #{event => E}, Reg),
-          logger:set_primary_config(level, OldLevel),
-          ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result)
+          try
+              Result = beam_agent_hooks_core:fire(E, #{event => E}, Reg),
+              ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result)
+          after
+              logger:set_primary_config(level, OldLevel)
+          end
       end} || E <- BlockingEvents].
 
 notification_crash_fail_open_all_events_test_() ->
@@ -452,9 +461,12 @@ notification_crash_fail_open_all_events_test_() ->
           Ctx = #{event => E},
           #{level := OldLevel} = logger:get_primary_config(),
           logger:set_primary_config(level, none),
-          Result = beam_agent_hooks_core:fire(E, Ctx, Reg),
-          logger:set_primary_config(level, OldLevel),
-          ?assertMatch({ok, _}, Result)
+          try
+              Result = beam_agent_hooks_core:fire(E, Ctx, Reg),
+              ?assertMatch({ok, _}, Result)
+          after
+              logger:set_primary_config(level, OldLevel)
+          end
       end} || E <- NotificationEvents].
 
 unexpected_return_treated_as_ok_test() ->
