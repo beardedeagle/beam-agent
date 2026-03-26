@@ -8,7 +8,7 @@
 %%%   - Blocking: context flows through hook chain
 %%%   - Blocking: deny mid-chain preserves prior context
 %%%   - Blocking: ask mid-chain propagates to caller
-%%%   - Blocking: crash mid-chain passes context through unmodified
+%%%   - Blocking: crash mid-chain denies and stops chain (fail-closed)
 %%%   - Notification: context flows through hook chain
 %%%   - Notification: deny/ask ignored, context passes through
 %%%   - Handler integration: fire/3 returns final context
@@ -90,8 +90,9 @@ blocking_ask_stops_chain_test() ->
     after 100 -> ok
     end.
 
-blocking_crash_passes_context_through_test() ->
-    %% Hook A modifies context, Hook B crashes, Hook C sees Hook A's context
+blocking_crash_denies_and_stops_chain_test() ->
+    %% Hook A modifies context, Hook B crashes — chain stops with deny.
+    %% Hook C never fires (fail-closed for blocking events).
     Self = self(),
     Ref = make_ref(),
     HookA = beam_agent_hooks_core:hook(pre_tool_use,
@@ -100,7 +101,7 @@ blocking_crash_passes_context_through_test() ->
         fun(_) -> error(intentional_crash) end),
     HookC = beam_agent_hooks_core:hook(pre_tool_use,
         fun(Ctx) ->
-            Self ! {Ref, maps:get(from_a, Ctx, false)},
+            Self ! {Ref, fired_c},
             {ok, Ctx}
         end),
     Reg = beam_agent_hooks_core:register_hooks(
@@ -108,12 +109,17 @@ blocking_crash_passes_context_through_test() ->
     Ctx = #{event => pre_tool_use, tool_name => <<"X">>},
     #{level := OldLevel} = logger:get_primary_config(),
     logger:set_primary_config(level, none),
-    {ok, FinalCtx} = beam_agent_hooks_core:fire(pre_tool_use, Ctx, Reg),
-    logger:set_primary_config(level, OldLevel),
-    %% Hook C saw Hook A's modification (crash didn't lose it)
-    ?assertEqual(true, receive {Ref, V} -> V after 500 -> timeout end),
-    %% Final context still has Hook A's key
-    ?assertEqual(true, maps:get(from_a, FinalCtx)).
+    try
+        Result = beam_agent_hooks_core:fire(pre_tool_use, Ctx, Reg),
+        %% Blocking crash returns deny (fail-closed)
+        ?assertEqual({deny, <<"hook crashed (fail-safe deny)">>}, Result),
+        %% Hook C never fired — chain stopped by deny
+        receive {Ref, fired_c} -> ?assert(false)
+        after 100 -> ok
+        end
+    after
+        logger:set_primary_config(level, OldLevel)
+    end.
 
 blocking_final_context_returned_to_caller_test() ->
     %% Three hooks each add a key — caller gets the accumulated result

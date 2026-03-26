@@ -118,6 +118,10 @@ defmodule BeamAgent.Hooks do
 
   For notification-only events, `{:deny, _}` and `{:ask, _}` are ignored.
 
+  Callbacks are wrapped in try/catch for crash protection. Blocking hook
+  crashes return `{:deny, _}` (fail-closed); notification hook crashes pass
+  the context through unmodified (fail-open).
+
   Blocking events: `:pre_tool_use`, `:user_prompt_submit`, `:permission_request`,
   `:subagent_start`, `:pre_compact`, `:config_change`.
   """
@@ -303,7 +307,10 @@ defmodule BeamAgent.Hooks do
     `{:deny, _}` and `{:ask, _}` from callbacks are ignored.
 
   Handles `nil`/`undefined` registries (no hooks configured) gracefully. Each
-  callback is wrapped in a try/catch for crash protection.
+  callback is wrapped in a try/catch for crash protection. Blocking hook
+  crashes return `{:deny, "hook crashed (fail-safe deny)"}` (fail-closed).
+  Notification hook crashes are logged and the context passes through
+  unmodified (fail-open).
 
   ## Example
 

@@ -52,7 +52,9 @@ beam_agent:start_session(#{sdk_hooks => [DenyBash, LogTool]})
 
 - Hook callback: a fun/1 receiving a hook_context() map and returning
   {ok, Ctx}, {deny, Reason}, or {ask, Reason}. Callbacks are wrapped
-  in try/catch for crash protection.
+  in try/catch for crash protection. Blocking hook crashes return
+  {deny, _} (fail-closed); notification hook crashes pass through
+  (fail-open).
 
 - Matchers: optional filters that restrict which tools trigger a hook.
   The tool_name field in a matcher can be an exact string or a regex
@@ -104,10 +106,12 @@ and threaded through fire/3 at dispatch time.
 
 Fire order is registration order. Context is threaded through the
 chain: each hook receives the context as modified by the previous
-hook. Crash protection is provided by try/catch in fire/3 -- a
-crashing callback logs a warning and passes the context through
-unmodified. Blocking events short-circuit on the first {deny, Reason}
-or {ask, Reason} return.
+hook. Crash protection is provided by try/catch in fire/3. For blocking
+events a crashing callback returns {deny, _} (fail-closed) because
+a security hook that crashes must not allow the action through
+unchecked. For notification events a crashing callback passes the
+context through unmodified (fail-open). Blocking events also
+short-circuit on the first {deny, Reason} or {ask, Reason} return.
 
 This module is a thin re-export layer over beam_agent_hooks_core, which
 contains all constructor, registry building, and dispatch logic.
@@ -339,8 +343,10 @@ For notification-only events: always returns `{ok, FinalCtx}`.
 
 Handles an undefined registry (no hooks configured) gracefully by
 returning `{ok, Context}`. Each callback is wrapped in try/catch
-for crash protection -- a crashing callback is logged and the
-context passes through unmodified.
+for crash protection. Blocking hook crashes return
+`{deny, <<"hook crashed (fail-safe deny)">>}` (fail-closed).
+Notification hook crashes are logged and the context passes through
+unmodified (fail-open).
 
 Event is the hook_event() atom.
 Context is a hook_context() map describing the current lifecycle event.
