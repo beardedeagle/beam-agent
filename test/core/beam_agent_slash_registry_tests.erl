@@ -39,7 +39,7 @@ expect_commands_reload() ->
 test_opts() ->
     #{name => <<"/review">>,
       description => <<"Review current file">>,
-      handler => review_handler,
+      handler => fun(_) -> {ok, #{}} end,
       enabled => true,
       config => #{}}.
 

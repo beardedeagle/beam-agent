@@ -387,7 +387,7 @@ registry accessible for runtime management.
 register_session_registry(_Pid, undefined) -> ok;
 register_session_registry(Pid, Registry)
   when is_pid(Pid), is_map(Registry) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     beam_agent_ets:insert(?SESSION_REGISTRY_TABLE, {Pid, Registry}),
     beam_agent_reload_bus:notify(tools),
     ok.
@@ -396,7 +396,7 @@ register_session_registry(Pid, Registry)
 -spec get_session_registry(pid()) ->
     {ok, mcp_registry()} | {error, not_found}.
 get_session_registry(Pid) when is_pid(Pid) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     case ets:lookup(?SESSION_REGISTRY_TABLE, Pid) of
         [{_, Registry}] -> {ok, Registry};
         [] -> {error, not_found}
@@ -411,7 +411,7 @@ Uses a fun to transform the existing registry atomically.
     fun((mcp_registry()) -> mcp_registry())) -> ok | {error, not_found}.
 update_session_registry(Pid, UpdateFun)
   when is_pid(Pid), is_function(UpdateFun, 1) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     case ets:lookup(?SESSION_REGISTRY_TABLE, Pid) of
         [{_, Registry}] ->
             Updated = UpdateFun(Registry),
@@ -425,7 +425,7 @@ update_session_registry(Pid, UpdateFun)
 -doc "Remove a session's MCP registry (called on session termination).".
 -spec unregister_session_registry(pid()) -> ok.
 unregister_session_registry(Pid) when is_pid(Pid) ->
-    ensure_registry_table(),
+    ok = ensure_registry_table(),
     beam_agent_ets:delete(?SESSION_REGISTRY_TABLE, Pid),
     beam_agent_reload_bus:notify(tools),
     ok.

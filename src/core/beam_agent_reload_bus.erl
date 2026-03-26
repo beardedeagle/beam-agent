@@ -60,8 +60,8 @@ Type of component that was reloaded.
 
 Active reload types:
 - `hooks` — global hook registration/unregistration
-- `skills` — global skill registration/unregistration/config changes
-- `tools` — global MCP server registration/unregistration
+- `skills` — global or session-scoped skill registration/unregistration/config changes
+- `tools` — global or session-scoped MCP server/registry registration/unregistration
 - `plugins` — global plugin registration/unregistration
 - `agents` — global agent type registration/unregistration
 - `commands` — global slash command registration/unregistration

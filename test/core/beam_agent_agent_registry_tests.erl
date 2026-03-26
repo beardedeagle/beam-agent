@@ -39,7 +39,7 @@ expect_agents_reload() ->
 test_opts() ->
     #{name => <<"Code Reviewer">>,
       description => <<"Reviews code for quality">>,
-      role => <<"reviewer">>,
+      role => reviewer,
       enabled => true,
       config => #{}}.
 
