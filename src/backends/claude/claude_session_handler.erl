@@ -462,6 +462,15 @@ maybe_fire_message_hooks(#{type := error} = Msg,
               event => post_tool_use_failure},
             HookReg),
     HState;
+maybe_fire_message_hooks(#{type := system} = Msg,
+                          #hstate{sdk_hook_registry = HookReg,
+                                  session_id = SessionId} = HState) ->
+    _ = beam_agent_hooks_core:fire(notification,
+            #{event => notification,
+              content => maps:get(content, Msg, <<>>),
+              session_id => SessionId},
+            HookReg),
+    HState;
 maybe_fire_message_hooks(_Msg, HState) ->
     HState.
 

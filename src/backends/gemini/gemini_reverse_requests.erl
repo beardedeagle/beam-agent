@@ -3,7 +3,7 @@
 
 -dialyzer({no_underspecs, [permission_response/3, selected/1, cancelled/0]}).
 
--export([permission_response/3]).
+-export([permission_response/3, cancelled/0]).
 
 -spec permission_response(binary(), map(), [map()]) -> map().
 permission_response(SessionId, ToolCall, Options)

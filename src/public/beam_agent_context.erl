@@ -62,12 +62,14 @@ budget_estimate(SessionOrThread) ->
 
 -doc "Summarize, optionally promote to memory, and compact immediately.".
 -spec compact_now(scope(), map()) ->
-    {ok, compact_now_result()} | {error, context_error()}.
+    {ok, compact_now_result()}
+  | {error, context_error() | {hook_denied, binary()} | {hook_ask, binary()}}.
 compact_now(SessionOrThread, Opts) ->
     beam_agent_context_core:compact_now(SessionOrThread, Opts).
 
 -doc "Compact only when a configured policy trigger fires.".
 -spec maybe_compact(scope(), map()) ->
-    {ok, maybe_compact_result()} | {error, context_error()}.
+    {ok, maybe_compact_result()}
+  | {error, context_error() | {hook_denied, binary()} | {hook_ask, binary()}}.
 maybe_compact(SessionOrThread, Opts) ->
     beam_agent_context_core:maybe_compact(SessionOrThread, Opts).

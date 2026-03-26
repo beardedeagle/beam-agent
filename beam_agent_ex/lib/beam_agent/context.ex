@@ -45,12 +45,16 @@ defmodule BeamAgent.Context do
   @doc """
   Summarize, optionally promote to memory, and compact immediately.
   """
-  @spec compact_now(scope(), map()) :: {:ok, compact_now_result()} | {:error, context_error()}
+  @spec compact_now(scope(), map()) ::
+          {:ok, compact_now_result()}
+          | {:error, context_error() | {:hook_denied, binary()} | {:hook_ask, binary()}}
   defdelegate compact_now(session_or_thread, opts), to: :beam_agent_context
 
   @doc """
   Compact only when a configured policy trigger fires.
   """
-  @spec maybe_compact(scope(), map()) :: {:ok, maybe_compact_result()} | {:error, context_error()}
+  @spec maybe_compact(scope(), map()) ::
+          {:ok, maybe_compact_result()}
+          | {:error, context_error() | {:hook_denied, binary()} | {:hook_ask, binary()}}
   defdelegate maybe_compact(session_or_thread, opts), to: :beam_agent_context
 end

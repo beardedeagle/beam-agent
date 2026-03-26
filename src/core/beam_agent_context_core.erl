@@ -173,13 +173,22 @@ budget_estimate(SessionOrThread) ->
 Summarize a session, optionally promote the summary to memory, and compact the
 thread scope immediately.
 """.
--spec compact_now(scope(), map()) -> {ok, compact_now_result()} | {error, context_error()}.
+-spec compact_now(scope(), map()) ->
+    {ok, compact_now_result()}
+  | {error, context_error() | {hook_denied, binary()} | {hook_ask, binary()}}.
 compact_now(SessionOrThread, Opts) when is_map(Opts) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
     StartTime = telemetry_start(compact_now, TeleMeta),
     Result = case resolve_scope(SessionOrThread, Opts) of
         {ok, Scope} ->
-            compact_now_for_scope(Scope, Opts);
+            case maybe_fire_pre_compact(Scope, Opts) of
+                {deny, Reason} ->
+                    {error, {hook_denied, Reason}};
+                {ask, Reason} ->
+                    {error, {hook_ask, Reason}};
+                {ok, _} ->
+                    compact_now_for_scope(Scope, Opts)
+            end;
         {error, _} = Error ->
             Error
     end,
@@ -197,7 +206,9 @@ Supported triggers:
   - `idle_ms_threshold`
   - `task_boundary`
 """.
--spec maybe_compact(scope(), map()) -> {ok, maybe_compact_result()} | {error, context_error()}.
+-spec maybe_compact(scope(), map()) ->
+    {ok, maybe_compact_result()}
+  | {error, context_error() | {hook_denied, binary()} | {hook_ask, binary()}}.
 maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
     TeleMeta = telemetry_scope_meta(SessionOrThread, Opts),
     StartTime = telemetry_start(maybe_compact, TeleMeta),
@@ -214,14 +225,21 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
                                 triggers => []
                             }};
                         Triggers ->
-                            case compact_now_for_scope(Scope, Opts) of
-                                {ok, CompactResult} ->
-                                    {ok, CompactResult#{
-                                        budget_before => Budget,
-                                        triggers => Triggers
-                                    }};
-                                {error, _} = Error ->
-                                    Error
+                            case maybe_fire_pre_compact(Scope, Opts) of
+                                {deny, Reason} ->
+                                    {error, {hook_denied, Reason}};
+                                {ask, Reason} ->
+                                    {error, {hook_ask, Reason}};
+                                {ok, _} ->
+                                    case compact_now_for_scope(Scope, Opts) of
+                                        {ok, CompactResult} ->
+                                            {ok, CompactResult#{
+                                                budget_before => Budget,
+                                                triggers => Triggers
+                                            }};
+                                        {error, _} = Error ->
+                                            Error
+                                    end
                             end
                     end;
                 {error, _} = Error ->
@@ -232,6 +250,23 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
     end,
     telemetry_finish(maybe_compact, StartTime, Result, TeleMeta),
     Result.
+
+%%--------------------------------------------------------------------
+%% Internal: pre_compact hook gate
+%%--------------------------------------------------------------------
+
+%% Fire the pre_compact blocking hook before compaction.
+%% Always calls fire/3 so global hooks fire even when no per-session
+%% registry is present in Opts.
+-spec maybe_fire_pre_compact(resolved_scope(), map()) ->
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
+maybe_fire_pre_compact(#{session_id := SessionId}, Opts) ->
+    HookReg = maps:get(sdk_hook_registry, Opts, undefined),
+    beam_agent_hooks_core:fire(pre_compact,
+        #{event => pre_compact, session_id => SessionId},
+        HookReg).
 
 %%--------------------------------------------------------------------
 %% Internal

@@ -853,6 +853,32 @@ maybe_fire_message_hooks(#{type := result} = Msg, HState) ->
                     stop_reason => maps:get(stop_reason, Msg, <<>>)},
                   HState),
     HState;
+maybe_fire_message_hooks(#{type := system,
+                           subtype := <<"subagent_started">>} = Msg,
+                          HState) ->
+    Data = maps:get(content, Msg, #{}),
+    _ = fire_hook(subagent_start,
+                  #{event => subagent_start,
+                    agent_id => extract_agent_id(Data),
+                    metadata => ensure_map(Data)},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := system,
+                           subtype := <<"subagent_completed">>} = Msg,
+                          HState) ->
+    Data = maps:get(content, Msg, #{}),
+    _ = fire_hook(subagent_stop,
+                  #{event => subagent_stop,
+                    agent_id => extract_agent_id(Data),
+                    metadata => ensure_map(Data)},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := system} = Msg, HState) ->
+    _ = fire_hook(notification,
+                  #{event => notification,
+                    content => ensure_binary(maps:get(content, Msg, <<>>))},
+                  HState),
+    HState;
 maybe_fire_message_hooks(_Msg, HState) ->
     HState.
 
@@ -894,6 +920,29 @@ maybe_tag_session_id(Msg, SessionId) ->
     Msg#{session_id => SessionId}.
 
 %%====================================================================
+%% Internal: hook context helpers
+%%====================================================================
+
+%% Extract agent_id from subagent event data (wire key <<"agentId">>).
+-spec extract_agent_id(map() | term()) -> binary().
+extract_agent_id(Data) when is_map(Data) ->
+    maps:get(<<"agentId">>, Data, <<>>);
+extract_agent_id(_) ->
+    <<>>.
+
+%% Ensure content is binary for hook contexts.
+%% Copilot normalize_event/1 sets content to raw Data maps for some
+%% system events; hook_context() types content as binary().
+-spec ensure_binary(term()) -> binary().
+ensure_binary(Content) when is_binary(Content) -> Content;
+ensure_binary(_) -> <<>>.
+
+%% Ensure value is a map for metadata fields.
+-spec ensure_map(term()) -> map().
+ensure_map(Data) when is_map(Data) -> Data;
+ensure_map(_) -> #{}.
+
+%%====================================================================
 %% Internal: hook firing
 %%====================================================================
 
@@ -902,8 +951,6 @@ maybe_tag_session_id(Msg, SessionId) ->
     {ok, beam_agent_hooks_core:hook_context()}
   | {deny, binary()}
   | {ask, binary()}.
-fire_hook(_Event, Context, #hstate{sdk_hook_registry = undefined}) ->
-    {ok, Context};
 fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
     beam_agent_hooks_core:fire(Event, Context, Registry).
 

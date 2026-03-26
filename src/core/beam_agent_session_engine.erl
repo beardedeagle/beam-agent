@@ -54,6 +54,7 @@
     test_get_queue_max/1,
     test_get_reconnect_config/1,
     test_get_reconnect_attempts/1,
+    test_get_sdk_hook_registry/1,
     ensure_session_id/1,
     base_reconnect_delay/2,
     validate_reconnect_config/1
@@ -108,7 +109,11 @@
 
     %% Reconnection
     reconnect_config = #{enabled => false} :: reconnect_config(),
-    reconnect_attempts = 0 :: non_neg_integer()
+    reconnect_attempts = 0 :: non_neg_integer(),
+
+    %% SDK lifecycle hooks (engine-level events: config_change,
+    %% task_completed, teammate_idle)
+    sdk_hook_registry :: beam_agent_hooks_core:hook_registry() | undefined
 }).
 
 %%--------------------------------------------------------------------
@@ -207,6 +212,9 @@ init({HandlerMod, Opts}) ->
                                                                TRef, HState),
                             ReconnectCfg = validate_reconnect_config(
                                                 maps:get(reconnect, Opts1, #{})),
+                            HookRegistry = beam_agent_hooks_core:build_registry(
+                                              maps:get(sdk_hooks, Opts1,
+                                                       undefined)),
                             Data = #engine{
                                 handler_mod   = HandlerMod,
                                 handler_state = HState1,
@@ -223,7 +231,8 @@ init({HandlerMod, Opts}) ->
                                                          undefined),
                                 permission_mode = maps:get(permission_mode,
                                                            Opts1, undefined),
-                                opts          = Opts1
+                                opts          = Opts1,
+                                sdk_hook_registry = HookRegistry
                             },
                             _ = beam_agent_reload_bus:subscribe(),
                             TimeoutAction = timeout_action(InitState, Opts1),
@@ -721,16 +730,35 @@ dispatch_handler_info(Msg, StateName,
     gen_statem:event_handler_result(state_name()).
 dispatch_reload(Type, StateName,
                 #engine{handler_mod = H,
-                        handler_state = HState} = Data) ->
+                        handler_state = HState,
+                        sdk_hook_registry = HookReg,
+                        session_id = SessionId} = Data) ->
     case erlang:function_exported(H, handle_reload, 3) of
         false ->
             keep_state_and_data;
         true ->
-            case H:handle_reload(Type, StateName, HState) of
-                {ok, HState1} ->
-                    {keep_state, Data#engine{handler_state = HState1}};
-                ignore ->
-                    keep_state_and_data
+            Ctx = #{event => config_change,
+                    session_id => SessionId,
+                    reload_type => Type},
+            case beam_agent_hooks_core:fire(config_change, Ctx, HookReg) of
+                {deny, Reason} ->
+                    logger:info("SDK hook denied config_change"
+                                " [session=~s reload_type=~p reason=~s]",
+                                [SessionId, Type, Reason]),
+                    keep_state_and_data;
+                {ask, Reason} ->
+                    logger:info("SDK hook escalated config_change"
+                                " [session=~s reload_type=~p reason=~s]",
+                                [SessionId, Type, Reason]),
+                    keep_state_and_data;
+                {ok, _} ->
+                    case H:handle_reload(Type, StateName, HState) of
+                        {ok, HState1} ->
+                            {keep_state,
+                             Data#engine{handler_state = HState1}};
+                        ignore ->
+                            keep_state_and_data
+                    end
             end
     end.
 
@@ -955,17 +983,38 @@ fire_state_enter(NewState, OldState,
         Other    -> Other
     end,
     beam_agent_telemetry_core:state_change(Backend, OldForTelemetry, NewState),
-    case erlang:function_exported(H, on_state_enter, 3) of
+    Data1 = case erlang:function_exported(H, on_state_enter, 3) of
         true ->
             {ok, Actions, HState1} =
                 H:on_state_enter(NewState, OldForTelemetry, HState),
-            Data1 = execute_send_actions(
-                        Actions,
-                        Data#engine{handler_state = HState1}),
-            {keep_state, Data1, ExtraActions};
+            execute_send_actions(Actions,
+                                Data#engine{handler_state = HState1});
         false ->
-            {keep_state, Data, ExtraActions}
-    end.
+            Data
+    end,
+    maybe_fire_lifecycle_hooks(NewState, OldForTelemetry, Data1),
+    {keep_state, Data1, ExtraActions}.
+
+%% Fire SDK lifecycle hooks on state transitions.
+%% Notification-only: results are discarded.
+-spec maybe_fire_lifecycle_hooks(state_name(), state_name() | undefined,
+                                 #engine{}) -> ok.
+maybe_fire_lifecycle_hooks(ready, active_query,
+                           #engine{sdk_hook_registry = HookReg,
+                                   session_id = SessionId,
+                                   query_status = Status}) ->
+    _ = beam_agent_hooks_core:fire(task_completed,
+            #{event => task_completed,
+              session_id => SessionId,
+              status => Status},
+            HookReg),
+    _ = beam_agent_hooks_core:fire(teammate_idle,
+            #{event => teammate_idle,
+              session_id => SessionId},
+            HookReg),
+    ok;
+maybe_fire_lifecycle_hooks(_, _, _) ->
+    ok.
 
 %%====================================================================
 %% Internal: query completion detection
@@ -1338,7 +1387,9 @@ make_test_engine(Overrides) ->
         opts               = maps:get(opts, Overrides, #{}),
         reconnect_config   = maps:get(reconnect_config, Overrides,
                                       #{enabled => false}),
-        reconnect_attempts = maps:get(reconnect_attempts, Overrides, 0)
+        reconnect_attempts = maps:get(reconnect_attempts, Overrides, 0),
+        sdk_hook_registry  = maps:get(sdk_hook_registry, Overrides,
+                                      undefined)
     }.
 
 -doc false.
@@ -1364,5 +1415,10 @@ test_get_reconnect_config(#engine{reconnect_config = V}) -> V.
 -doc false.
 -spec test_get_reconnect_attempts(#engine{}) -> non_neg_integer().
 test_get_reconnect_attempts(#engine{reconnect_attempts = V}) -> V.
+
+-doc false.
+-spec test_get_sdk_hook_registry(#engine{}) ->
+    beam_agent_hooks_core:hook_registry() | undefined.
+test_get_sdk_hook_registry(#engine{sdk_hook_registry = V}) -> V.
 
 -endif.

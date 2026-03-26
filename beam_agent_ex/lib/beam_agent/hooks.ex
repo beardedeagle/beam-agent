@@ -155,7 +155,9 @@ defmodule BeamAgent.Hooks do
           optional(:metadata) => map(),
           optional(:agent_transcript_path) => binary(),
           optional(:system_info) => map(),
-          optional(:reason) => term()
+          optional(:reason) => term(),
+          optional(:reload_type) => atom(),
+          optional(:status) => atom()
         }
 
   @typedoc """
