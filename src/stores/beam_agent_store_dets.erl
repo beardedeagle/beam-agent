@@ -264,9 +264,10 @@ flush_counters(Table) ->
                 end
             end, Entries),
             %% Remove tracking entries so next update re-seeds from DETS.
-            lists:foreach(fun({EntryKey, _, _}) ->
-                beam_agent_ets:delete(?ATOMIC_COUNTERS_TABLE, EntryKey)
-            end, Entries),
+            %% Single bulk delete avoids N synchronous round-trips
+            %% through the write proxy in hardened mode.
+            beam_agent_ets:match_delete(?ATOMIC_COUNTERS_TABLE,
+                                        {{Table, '_'}, '_', '_'}),
             ok
     end.
 
