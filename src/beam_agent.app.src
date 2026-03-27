@@ -79,6 +79,7 @@
         beam_agent_audit_core,
         beam_agent_orchestrator_core,
         beam_agent_orchestrator_store,
+        beam_agent_os_signal,
         beam_agent_policy_core,
         beam_agent_tool_registry,
         beam_agent_mcp_protocol,
