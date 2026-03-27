@@ -279,12 +279,14 @@ match_rule(#{match := MatchSpec}, Cmd) ->
 match_spec('*', _Cmd) ->
     true;
 match_spec({program, Pattern}, #{program := Program}) ->
-    filename:basename(Program) =:= Pattern;
+    Program =:= Pattern orelse
+        normalize_basename(Program) =:= Pattern;
 match_spec({program, _Pattern}, _Cmd) ->
     false;
 match_spec({program_args, ProgramPattern, ArgPatterns},
            #{program := Program, args := Args}) ->
-    filename:basename(Program) =:= ProgramPattern andalso
+    (Program =:= ProgramPattern orelse
+         normalize_basename(Program) =:= ProgramPattern) andalso
         match_args(ArgPatterns, Args);
 match_spec({program_args, _, _}, _Cmd) ->
     false;
@@ -342,3 +344,9 @@ find_first_deny([{deny, _} = Denial | _]) ->
     Denial;
 find_first_deny([_ | Rest]) ->
     find_first_deny(Rest).
+
+%% Strip directory components from a program binary, consistent with
+%% beam_agent_command_parser:categorize/1.
+-spec normalize_basename(binary()) -> binary().
+normalize_basename(Program) ->
+    list_to_binary(filename:basename(binary_to_list(Program))).

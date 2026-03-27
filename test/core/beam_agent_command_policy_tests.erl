@@ -350,6 +350,25 @@ default_denies_rm_absolute_path_rf_test() ->
         Policy),
     ?assertMatch({deny, _}, Result).
 
+%% Full-path pattern still matches exactly (no false basename collapse)
+full_path_pattern_exact_match_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program, <<"/usr/local/bin/dd">>},
+                   reason => <<"exact path blocked">>}],
+        default_string_action => ask
+    },
+    %% Exact path matches
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/usr/local/bin/dd">>), Policy)),
+    %% Different path does NOT match (basename dd alone is insufficient)
+    ?assertEqual(ask, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/tmp/dd">>), Policy)),
+    %% Bare name does NOT match a full-path pattern
+    ?assertEqual(ask, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"dd">>), Policy)).
+
 %% program_args match with absolute path (basename normalization)
 program_args_basename_normalization_test() ->
     P = empty_policy(),
