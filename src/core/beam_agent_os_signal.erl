@@ -108,8 +108,10 @@ send_via_port(KillPath, SigFlag, PidStr) ->
                           stderr_to_stdout]),
         receive
             {Port, {exit_status, 0}} ->
+                flush_port(Port),
                 ok;
             {Port, {exit_status, N}} ->
+                flush_port(Port),
                 {error, {exit_status, N}}
         after ?KILL_TIMEOUT_MS ->
             catch port_close(Port),
@@ -137,7 +139,7 @@ signal_flag(sighup)  -> "-HUP".
 
 %% Log every signal delivery attempt for operational visibility.
 log_result(Signal, OsPid, ok) ->
-    logger:info("Signal ~s delivered to OS process ~b", [Signal, OsPid]);
+    logger:info("Signal ~p delivered to OS process ~b", [Signal, OsPid]);
 log_result(Signal, OsPid, {error, Reason}) ->
-    logger:warning("Signal ~s to OS process ~b failed: ~tp",
+    logger:warning("Signal ~p to OS process ~b failed: ~tp",
                    [Signal, OsPid, Reason]).
