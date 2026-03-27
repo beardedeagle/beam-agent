@@ -297,6 +297,22 @@ atomic_counter_flush_noop_when_disabled_test() ->
     ok = beam_agent_store_dets:flush_counters(?COUNTER_TABLE),
     cleanup_all().
 
+%% Verify the atomic counters ETS table is created via beam_agent_ets
+%% (not raw ets:new with hardcoded public access). The table's access
+%% mode must match beam_agent_table_owner:resolve_access/1.
+atomic_counter_table_access_mode_matches_resolved_test() ->
+    setup(),
+    ok = beam_agent_store_dets:ensure_table(?COUNTER_TABLE, [set], ?OPTS),
+    true = beam_agent_store_dets:insert(?COUNTER_TABLE, {counter, 0}, #{}),
+    %% Trigger atomic counters table creation.
+    _ = beam_agent_store_dets:update_counter(
+        ?COUNTER_TABLE, counter, {2, 1}, ?ATOMIC_OPTS),
+    Expected = beam_agent_table_owner:resolve_access(
+        beam_agent_dets_atomic_counters),
+    Actual = ets:info(beam_agent_dets_atomic_counters, protection),
+    ?assertEqual(Expected, Actual),
+    cleanup_all().
+
 %%====================================================================
 %% foldl/4
 %%====================================================================
