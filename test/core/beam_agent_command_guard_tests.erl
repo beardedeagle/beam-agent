@@ -267,6 +267,40 @@ per_program_rate_limit_test() ->
     end).
 
 %%====================================================================
+%% Rate limiting — atomic check-and-bump (TOCTOU fix, §3.9/S4)
+%%====================================================================
+
+atomic_rate_limit_counts_denied_attempts_test() ->
+    Config = #{
+        policy => allow_all_policy(),
+        rate_limits => #{
+            global => {2, 60000},
+            per_program => {1000, 60000},
+            per_category => #{}
+        },
+        temporal_rules => []
+    },
+    with_guard(Config, fun() ->
+        Cmd = simple_cmd(<<"echo">>),
+        %% First two allowed (global limit = 2)
+        ?assertEqual(allow,
+            beam_agent_command_guard:evaluate(Cmd, default_opts())),
+        ?assertEqual(allow,
+            beam_agent_command_guard:evaluate(Cmd, default_opts())),
+        %% Third is throttled
+        ?assertMatch({throttle, _},
+            beam_agent_command_guard:evaluate(Cmd, default_opts())),
+        %% Counter must include the denied attempt (count = 3, not 2).
+        %% This proves the atomic bump records denied attempts,
+        %% closing the TOCTOU gap where concurrent callers could both
+        %% pass a read-only check before either bumped the counter.
+        Status = beam_agent_command_guard:status(),
+        RateLimits = maps:get(rate_limits, Status),
+        GlobalRate = maps:get({global, global}, RateLimits),
+        ?assertEqual(3, maps:get(count, GlobalRate))
+    end).
+
+%%====================================================================
 %% Throttle -> active recovery via reset
 %%====================================================================
 

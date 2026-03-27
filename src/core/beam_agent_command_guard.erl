@@ -88,7 +88,7 @@
                     | beam_agent_rate_limits
                     | beam_agent_active_commands.
 
--type rate_status() :: #{count := integer(), window_start := integer()}.
+-type rate_status() :: #{count := non_neg_integer(), window_start := integer()}.
 
 -type status_map() :: #{
     state := security_state(),
@@ -318,11 +318,10 @@ unregister_command(Port) ->
                              evaluate_opts()) -> guard_result().
 handle_active_evaluate(CmdStruct, EvalOpts) ->
     RateConfig = persistent_term:get(?PT_RATE_CONFIG),
-    case check_rate_limits(CmdStruct, RateConfig) of
+    case check_and_bump_rate_limits(CmdStruct, RateConfig) of
         ok ->
             case do_evaluate(CmdStruct, EvalOpts) of
                 allow ->
-                    update_rate_limits(CmdStruct, RateConfig),
                     apply_temporal_actions(CmdStruct, EvalOpts, allow);
                 {deny, _} = Denial ->
                     Denial
@@ -418,89 +417,118 @@ do_evaluate(CmdStruct, EvalOpts) ->
 %% Internal: Rate limiting
 %%--------------------------------------------------------------------
 
--spec check_rate_limits(beam_agent_command_parser:command_struct(),
-                        rate_limit_config()) -> ok | {exceeded, pos_integer()}.
-check_rate_limits(CmdStruct, RC) ->
+%% Atomically check and bump rate limits for a command.
+%%
+%% Replaces the former check_rate_limits/2 + update_rate_limits/2 two-step
+%% sequence, which had a TOCTOU race: concurrent callers could both pass
+%% the read-only check before either bumped the counter.
+%%
+%% Each bucket (global, per-program, per-category) is bumped atomically
+%% via ets:update_counter/4 with a default tuple.  If a bucket is exceeded
+%% after the atomic bump, the bump stays — it represents a denied attempt
+%% and prevents concurrent callers from sneaking through the window.
+-spec check_and_bump_rate_limits(beam_agent_command_parser:command_struct(),
+                                 rate_limit_config()) ->
+    ok | {exceeded, pos_integer()}.
+check_and_bump_rate_limits(CmdStruct, RC) ->
     Now = erlang:monotonic_time(millisecond),
-    case check_one_rate({global, global}, Now, maps:get(global, RC, undefined)) of
+    case check_and_bump_one({global, global}, Now,
+                            maps:get(global, RC, undefined)) of
         {exceeded, Ms} -> {exceeded, Ms};
         ok ->
             Program = maps:get(program, CmdStruct, undefined),
-            case check_program_rate(Program, Now, RC) of
+            case check_and_bump_program(Program, Now, RC) of
                 {exceeded, Ms} -> {exceeded, Ms};
                 ok ->
-                    Program2 = maps:get(program, CmdStruct, <<>>),
-                    Category = beam_agent_command_parser:categorize(Program2),
-                    check_category_rate(Category, Now, RC)
+                    ProgramBin = case Program of
+                        undefined -> <<>>;
+                        P -> P
+                    end,
+                    Category = beam_agent_command_parser:categorize(ProgramBin),
+                    check_and_bump_category(Category, Now, RC)
             end
     end.
 
--spec check_program_rate(binary() | undefined, integer(), rate_limit_config()) ->
+-spec check_and_bump_program(binary() | undefined, integer(),
+                             rate_limit_config()) ->
     ok | {exceeded, pos_integer()}.
-check_program_rate(undefined, _Now, _RC) -> ok;
-check_program_rate(Program, Now, RC) ->
-    check_one_rate({per_program, Program}, Now,
-                   maps:get(per_program, RC, undefined)).
+check_and_bump_program(undefined, _Now, _RC) -> ok;
+check_and_bump_program(Program, Now, RC) ->
+    check_and_bump_one({per_program, Program}, Now,
+                       maps:get(per_program, RC, undefined)).
 
--spec check_category_rate(atom(), integer(), rate_limit_config()) ->
+-spec check_and_bump_category(atom(), integer(), rate_limit_config()) ->
     ok | {exceeded, pos_integer()}.
-check_category_rate(unknown, _Now, _RC) -> ok;
-check_category_rate(Category, Now, RC) ->
+check_and_bump_category(unknown, _Now, _RC) -> ok;
+check_and_bump_category(Category, Now, RC) ->
     CategoryLimits = maps:get(per_category, RC, #{}),
-    check_one_rate({per_category, Category}, Now,
-                   maps:get(Category, CategoryLimits, undefined)).
+    check_and_bump_one({per_category, Category}, Now,
+                       maps:get(Category, CategoryLimits, undefined)).
 
--spec check_one_rate(term(), integer(), {pos_integer(), pos_integer()} | undefined) ->
+%% Atomically bump a single rate-limit bucket and check the result.
+%%
+%% Uses ets:update_counter/4 with a default tuple so the increment is
+%% a single atomic ETS operation.  After the bump:
+%%   - If the window has expired, reset to a fresh 1-count window.
+%%   - If the new count exceeds the limit, report exceeded (the bump
+%%     stays as a record of the denied attempt — safe direction).
+%%   - Otherwise, the bump counts a successful check.
+-spec check_and_bump_one(term(), integer(),
+                         {pos_integer(), pos_integer()} | undefined) ->
     ok | {exceeded, pos_integer()}.
-check_one_rate(_Key, _Now, undefined) -> ok;
-check_one_rate(Key, Now, {MaxCount, WindowMs}) ->
+check_and_bump_one(_Key, _Now, undefined) -> ok;
+check_and_bump_one(Key, Now, {MaxCount, WindowMs}) ->
+    do_check_and_bump(Key, Now, MaxCount, WindowMs, 1).
+
+%% @private Atomic check-and-bump with bounded retry on CAS contention.
+%% Retries tracks remaining attempts after a failed compare-and-swap at
+%% window rollover.  One retry suffices: the CAS loser re-bumps into
+%% the window the winner just opened, so a second CAS race is
+%% astronomically unlikely.
+do_check_and_bump(_Key, _Now, _MaxCount, _WindowMs, Retries)
+  when Retries < 0 ->
+    %% Retry exhausted — concurrent CAS contention persisted.
+    %% Fail-open: allow the request rather than crash the caller.
+    ok;
+do_check_and_bump(Key, Now, MaxCount, WindowMs, Retries) ->
+    Default = {Key, 0, Now},
+    NewCount = beam_agent_ets:update_counter(
+        ?RATE_TABLE, Key, {2, 1}, Default),
     case beam_agent_ets:lookup(?RATE_TABLE, Key) of
-        [{_, Count, WindowStart}] ->
+        [{_, _, WindowStart}] ->
             WindowEnd = WindowStart + WindowMs,
             if
-                Now >= WindowEnd  -> ok;
-                Count >= MaxCount -> {exceeded, WindowEnd - Now};
-                true              -> ok
+                Now >= WindowEnd ->
+                    %% Window expired — atomic compare-and-swap reset.
+                    %% Only resets if WindowStart still matches the
+                    %% stale value this caller observed.
+                    case beam_agent_ets:select_replace(?RATE_TABLE,
+                            [{{Key, '_', WindowStart}, [],
+                              [{{const, {Key, 1, Now}}}]}]) of
+                        1 ->
+                            %% CAS succeeded — we reset the window and
+                            %% are counted as request 1.
+                            ok;
+                        0 ->
+                            %% CAS failed — another caller already
+                            %% reset the window.  Our bump went into
+                            %% the old (now-replaced) window.  Retry
+                            %% so this request is counted in the
+                            %% current window.
+                            do_check_and_bump(Key, Now, MaxCount,
+                                             WindowMs, Retries - 1)
+                    end;
+                NewCount > MaxCount ->
+                    %% Over limit.  The bump stays as a record of the
+                    %% denied attempt — prevents concurrent callers
+                    %% from sneaking in.
+                    {exceeded, WindowEnd - Now};
+                true ->
+                    ok
             end;
-        [] -> ok
-    end.
-
--spec update_rate_limits(beam_agent_command_parser:command_struct(),
-                         rate_limit_config()) -> ok.
-update_rate_limits(CmdStruct, RC) ->
-    Now = erlang:monotonic_time(millisecond),
-    bump({global, global}, Now, maps:get(global, RC, undefined)),
-    case maps:get(program, CmdStruct, undefined) of
-        undefined -> ok;
-        Prog -> bump({per_program, Prog}, Now,
-                     maps:get(per_program, RC, undefined))
-    end,
-    Category = beam_agent_command_parser:categorize(
-        maps:get(program, CmdStruct, <<>>)),
-    case Category of
-        unknown -> ok;
-        _ ->
-            CatLimits = maps:get(per_category, RC, #{}),
-            case maps:get(Category, CatLimits, undefined) of
-                undefined -> ok;
-                {_, WindowMs} ->
-                    bump_counter({per_category, Category}, Now, WindowMs)
-            end
-    end,
-    ok.
-
--spec bump(term(), integer(), {pos_integer(), pos_integer()} | undefined) -> ok.
-bump(_Key, _Now, undefined) -> ok;
-bump(Key, Now, {_, WindowMs}) -> bump_counter(Key, Now, WindowMs).
-
--spec bump_counter(term(), integer(), pos_integer()) -> ok.
-bump_counter(Key, Now, WindowMs) ->
-    case beam_agent_ets:lookup(?RATE_TABLE, Key) of
-        [{_, _Count, WS}] when Now < WS + WindowMs ->
-            _ = beam_agent_ets:update_counter(?RATE_TABLE, Key, {2, 1}),
-            ok;
-        _ ->
-            beam_agent_ets:insert(?RATE_TABLE, {Key, 1, Now}),
+        [] ->
+            %% Row deleted between bump and lookup (concurrent reset/0).
+            %% The counter was just wiped — treat as a fresh window.
             ok
     end.
 
