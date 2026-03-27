@@ -1128,7 +1128,7 @@ maybe_send_sigint(undefined) ->
 maybe_send_sigint(Port) when is_port(Port) ->
     case erlang:port_info(Port, os_pid) of
         {os_pid, OsPid} ->
-            _ = os:cmd("kill -INT " ++ integer_to_list(OsPid)),
+            _ = beam_agent_os_signal:send_signal(sigint, OsPid),
             ok;
         undefined ->
             ok
