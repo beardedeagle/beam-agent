@@ -246,10 +246,10 @@ Called automatically by `close_table/1` and `sync_table/1`.
 """.
 -spec flush_counters(beam_agent_store:table_name()) -> ok.
 flush_counters(Table) ->
-    case ets:whereis(?ATOMIC_COUNTERS_TABLE) of
+    case beam_agent_ets:whereis(?ATOMIC_COUNTERS_TABLE) of
         undefined -> ok;
         _ ->
-            Entries = ets:match_object(?ATOMIC_COUNTERS_TABLE,
+            Entries = beam_agent_ets:match_object(?ATOMIC_COUNTERS_TABLE,
                                        {{Table, '_'}, '_', '_'}),
             lists:foreach(fun({{_T, Key}, Ref, Pos}) ->
                 Val = atomics:get(Ref, 1),
@@ -265,7 +265,7 @@ flush_counters(Table) ->
             end, Entries),
             %% Remove tracking entries so next update re-seeds from DETS.
             lists:foreach(fun({EntryKey, _, _}) ->
-                ets:delete(?ATOMIC_COUNTERS_TABLE, EntryKey)
+                beam_agent_ets:delete(?ATOMIC_COUNTERS_TABLE, EntryKey)
             end, Entries),
             ok
     end.
@@ -347,15 +347,7 @@ parse_update_op(Incr) when is_integer(Incr) ->
 
 -spec ensure_atomic_table() -> ok.
 ensure_atomic_table() ->
-    case ets:whereis(?ATOMIC_COUNTERS_TABLE) of
-        undefined ->
-            try
-                _ = ets:new(?ATOMIC_COUNTERS_TABLE, [named_table, public, set]),
-                ok
-            catch error:badarg -> ok  %% race: another process created it
-            end;
-        _ -> ok
-    end.
+    beam_agent_ets:ensure_table(?ATOMIC_COUNTERS_TABLE, [named_table, set]).
 
 -spec atomic_update_counter(beam_agent_store:table_name(),
                             beam_agent_store:store_key(),
@@ -379,18 +371,18 @@ atomic_update_counter(Table, Key, UpdateOp, Default) ->
                            tuple() | undefined) -> atomics:atomics_ref().
 get_or_create_atomic(Table, Key, Pos, Default) ->
     LookupKey = {Table, Key},
-    case ets:lookup(?ATOMIC_COUNTERS_TABLE, LookupKey) of
+    case beam_agent_ets:lookup(?ATOMIC_COUNTERS_TABLE, LookupKey) of
         [{_, Ref, _}] -> Ref;
         [] ->
             InitVal = seed_value(Table, Key, Pos, Default),
             Ref = atomics:new(1, [{signed, true}]),
             atomics:put(Ref, 1, InitVal),
-            case ets:insert_new(?ATOMIC_COUNTERS_TABLE, {LookupKey, Ref, Pos}) of
+            case beam_agent_ets:insert_new(?ATOMIC_COUNTERS_TABLE, {LookupKey, Ref, Pos}) of
                 true -> Ref;
                 false ->
                     %% Lost the race — use the winner's ref.
                     [{_, ExistingRef, _}] =
-                        ets:lookup(?ATOMIC_COUNTERS_TABLE, LookupKey),
+                        beam_agent_ets:lookup(?ATOMIC_COUNTERS_TABLE, LookupKey),
                     ExistingRef
             end
     end.
