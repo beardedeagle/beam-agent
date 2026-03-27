@@ -478,30 +478,57 @@ check_and_bump_category(Category, Now, RC) ->
     ok | {exceeded, pos_integer()}.
 check_and_bump_one(_Key, _Now, undefined) -> ok;
 check_and_bump_one(Key, Now, {MaxCount, WindowMs}) ->
+    do_check_and_bump(Key, Now, MaxCount, WindowMs, 1).
+
+%% @private Atomic check-and-bump with bounded retry on CAS contention.
+%% Retries tracks remaining attempts after a failed compare-and-swap at
+%% window rollover.  One retry suffices: the CAS loser re-bumps into
+%% the window the winner just opened, so a second CAS race is
+%% astronomically unlikely.
+do_check_and_bump(_Key, _Now, _MaxCount, _WindowMs, Retries)
+  when Retries < 0 ->
+    %% Retry exhausted — concurrent CAS contention persisted.
+    %% Fail-open: allow the request rather than crash the caller.
+    ok;
+do_check_and_bump(Key, Now, MaxCount, WindowMs, Retries) ->
     Default = {Key, 0, Now},
     NewCount = beam_agent_ets:update_counter(
         ?RATE_TABLE, Key, {2, 1}, Default),
-    %% Read window_start — safe because we just ensured the row exists.
-    %% A concurrent caller may reset the window between the bump and
-    %% this read; that is handled by select_replace below (CAS).
-    [{_, _, WindowStart}] = beam_agent_ets:lookup(?RATE_TABLE, Key),
-    WindowEnd = WindowStart + WindowMs,
-    if
-        Now >= WindowEnd ->
-            %% Window expired — atomic compare-and-swap reset.
-            %% Only resets if WindowStart still matches the stale value
-            %% this caller observed.  If another caller already reset
-            %% the window, the match fails and this is a safe no-op
-            %% (our bump into the old window is harmlessly lost).
-            beam_agent_ets:select_replace(?RATE_TABLE,
-                [{{Key, '_', WindowStart}, [],
-                  [{{const, {Key, 1, Now}}}]}]),
-            ok;
-        NewCount > MaxCount ->
-            %% Over limit. The bump stays as a record of the denied
-            %% attempt — prevents concurrent callers from sneaking in.
-            {exceeded, WindowEnd - Now};
-        true ->
+    case beam_agent_ets:lookup(?RATE_TABLE, Key) of
+        [{_, _, WindowStart}] ->
+            WindowEnd = WindowStart + WindowMs,
+            if
+                Now >= WindowEnd ->
+                    %% Window expired — atomic compare-and-swap reset.
+                    %% Only resets if WindowStart still matches the
+                    %% stale value this caller observed.
+                    case beam_agent_ets:select_replace(?RATE_TABLE,
+                            [{{Key, '_', WindowStart}, [],
+                              [{{const, {Key, 1, Now}}}]}]) of
+                        1 ->
+                            %% CAS succeeded — we reset the window and
+                            %% are counted as request 1.
+                            ok;
+                        0 ->
+                            %% CAS failed — another caller already
+                            %% reset the window.  Our bump went into
+                            %% the old (now-replaced) window.  Retry
+                            %% so this request is counted in the
+                            %% current window.
+                            do_check_and_bump(Key, Now, MaxCount,
+                                             WindowMs, Retries - 1)
+                    end;
+                NewCount > MaxCount ->
+                    %% Over limit.  The bump stays as a record of the
+                    %% denied attempt — prevents concurrent callers
+                    %% from sneaking in.
+                    {exceeded, WindowEnd - Now};
+                true ->
+                    ok
+            end;
+        [] ->
+            %% Row deleted between bump and lookup (concurrent reset/0).
+            %% The counter was just wiped — treat as a fresh window.
             ok
     end.
 
