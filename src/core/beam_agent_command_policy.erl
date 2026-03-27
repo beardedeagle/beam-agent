@@ -102,11 +102,18 @@ default_policy() ->
 -spec default_deny_rules() -> [policy_rule()].
 default_deny_rules() ->
     [
+        %% rm — combined flags (substring catches -rfi, -rf /, etc.)
         #{type => deny,
           match => {contains, <<"rm -rf">>},
           reason => <<"Recursive force removal blocked">>},
         #{type => deny,
           match => {contains, <<"rm -fr">>},
+          reason => <<"Recursive force removal blocked">>},
+        #{type => deny,
+          match => {contains, <<"rm -Rf">>},
+          reason => <<"Recursive force removal blocked">>},
+        #{type => deny,
+          match => {contains, <<"rm -fR">>},
           reason => <<"Recursive force removal blocked">>},
         #{type => deny,
           match => {program, <<"mkfs">>},
@@ -135,7 +142,37 @@ default_deny_rules() ->
         #{type => deny,
           match => {program, <<"poweroff">>},
           reason => <<"System poweroff blocked">>}
-    ].
+    ] ++ rm_separated_flag_rules().
+
+%% @private Generate deny rules for rm with separated recursive + force
+%% flags.  Covers all combinations of -r/-R/--recursive with -f/--force
+%% in both orderings, catching evasions like `rm -r -f /` or
+%% `rm --force --recursive /`.
+-spec rm_separated_flag_rules() -> [policy_rule()].
+rm_separated_flag_rules() ->
+    dangerous_flag_combo_rules(
+        <<"rm">>,
+        [<<"-r">>, <<"-R">>, <<"--recursive">>],
+        [<<"-f">>, <<"--force">>],
+        <<"Recursive force removal blocked">>).
+
+%% @private Generate deny rules for a program where any combination of
+%% a flag from GroupA with a flag from GroupB is dangerous.  Produces
+%% rules for both orderings (A then B, B then A) so the check is
+%% order-independent.  Uses program_args match specs, which benefit
+%% from basename normalization.
+-spec dangerous_flag_combo_rules(binary(), [binary()], [binary()],
+                                  binary()) -> [policy_rule()].
+dangerous_flag_combo_rules(Program, GroupA, GroupB, Reason) ->
+    [#{type => deny,
+       match => {program_args, Program, [{exact, A}, {exact, B}]},
+       reason => Reason}
+     || A <- GroupA, B <- GroupB]
+    ++
+    [#{type => deny,
+       match => {program_args, Program, [{exact, B}, {exact, A}]},
+       reason => Reason}
+     || A <- GroupA, B <- GroupB].
 
 %%--------------------------------------------------------------------
 %% Internal: Structure evaluation
@@ -242,12 +279,15 @@ match_rule(#{match := MatchSpec}, Cmd) ->
 match_spec('*', _Cmd) ->
     true;
 match_spec({program, Pattern}, #{program := Program}) ->
-    Program =:= Pattern;
+    Program =:= Pattern orelse
+        normalize_basename(Program) =:= Pattern;
 match_spec({program, _Pattern}, _Cmd) ->
     false;
 match_spec({program_args, ProgramPattern, ArgPatterns},
            #{program := Program, args := Args}) ->
-    Program =:= ProgramPattern andalso match_args(ArgPatterns, Args);
+    (Program =:= ProgramPattern orelse
+         normalize_basename(Program) =:= ProgramPattern) andalso
+        match_args(ArgPatterns, Args);
 match_spec({program_args, _, _}, _Cmd) ->
     false;
 match_spec({contains, Pattern}, Cmd) ->
@@ -304,3 +344,9 @@ find_first_deny([{deny, _} = Denial | _]) ->
     Denial;
 find_first_deny([_ | Rest]) ->
     find_first_deny(Rest).
+
+%% Strip directory components from a program binary, consistent with
+%% beam_agent_command_parser:categorize/1.
+-spec normalize_basename(binary()) -> binary().
+normalize_basename(Program) ->
+    list_to_binary(filename:basename(binary_to_list(Program))).

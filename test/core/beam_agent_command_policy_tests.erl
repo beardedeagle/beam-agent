@@ -273,6 +273,115 @@ default_denies_dd_test() ->
         simple_cmd(<<"dd">>), Policy),
     ?assertMatch({deny, _}, Result).
 
+%% Path normalization — /usr/bin/dd must still hit {program, dd} rule
+default_denies_dd_absolute_path_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/usr/bin/dd">>), Policy),
+    ?assertMatch({deny, _}, Result).
+
+default_denies_shutdown_absolute_path_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/sbin/shutdown">>), Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% rm flag variants — capital R (combined)
+default_denies_rm_capital_Rf_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"-Rf">>, <<"/">>]), Policy),
+    ?assertMatch({deny, _}, Result).
+
+default_denies_rm_fR_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"-fR">>, <<"/">>]), Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% rm flag variants — separated flags
+default_denies_rm_r_f_separated_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"-r">>, <<"-f">>, <<"/">>]), Policy),
+    ?assertMatch({deny, _}, Result).
+
+default_denies_rm_f_r_separated_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"-f">>, <<"-r">>, <<"/">>]), Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% rm flag variants — long flags
+default_denies_rm_recursive_force_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"--recursive">>, <<"--force">>, <<"/">>]),
+        Policy),
+    ?assertMatch({deny, _}, Result).
+
+default_denies_rm_force_recursive_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"--force">>, <<"--recursive">>, <<"/">>]),
+        Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% rm flag variants — mixed short/long
+default_denies_rm_recursive_short_f_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"--recursive">>, <<"-f">>, <<"/">>]),
+        Policy),
+    ?assertMatch({deny, _}, Result).
+
+default_denies_rm_r_force_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"rm">>, [<<"-r">>, <<"--force">>, <<"/">>]),
+        Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% rm with absolute path — basename normalization applies
+default_denies_rm_absolute_path_rf_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/bin/rm">>, [<<"-r">>, <<"-f">>, <<"/">>]),
+        Policy),
+    ?assertMatch({deny, _}, Result).
+
+%% Full-path pattern still matches exactly (no false basename collapse)
+full_path_pattern_exact_match_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program, <<"/usr/local/bin/dd">>},
+                   reason => <<"exact path blocked">>}],
+        default_string_action => ask
+    },
+    %% Exact path matches
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/usr/local/bin/dd">>), Policy)),
+    %% Different path does NOT match (basename dd alone is insufficient)
+    ?assertEqual(ask, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/tmp/dd">>), Policy)),
+    %% Bare name does NOT match a full-path pattern
+    ?assertEqual(ask, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"dd">>), Policy)).
+
+%% program_args match with absolute path (basename normalization)
+program_args_basename_normalization_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_args, <<"chmod">>, [{exact, <<"777">>}]},
+                   reason => <<"chmod 777 blocked">>}],
+        default_string_action => allow
+    },
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/usr/bin/chmod">>, [<<"777">>, <<"/tmp/x">>]), Policy),
+    ?assertMatch({deny, _}, Result).
+
 default_denies_shutdown_test() ->
     Policy = beam_agent_command_policy:default_policy(),
     Result = beam_agent_command_policy:evaluate(
