@@ -104,9 +104,15 @@ If the leader's process dies (e.g. killed), followers retry and one
 becomes the new leader.  Retries are bounded to avoid infinite loops.
 """.
 -spec execute_or_wait(binary(), fun(() -> term()), coalesce_opts()) -> term().
-execute_or_wait(Key, Fun, Opts) when is_binary(Key), is_function(Fun, 0) ->
+execute_or_wait(Key, Fun, Opts)
+  when is_binary(Key), is_function(Fun, 0), is_map(Opts) ->
     ensure_tables(),
-    do_execute_or_wait(Key, Fun, Opts, 0).
+    do_execute_or_wait(Key, Fun, Opts, 0);
+execute_or_wait(Key, Fun, _Opts)
+  when is_binary(Key), is_function(Fun, 0) ->
+    %% Normalize non-map options to empty map to avoid badmap crashes
+    ensure_tables(),
+    do_execute_or_wait(Key, Fun, #{}, 0).
 
 %%--------------------------------------------------------------------
 %% Internal

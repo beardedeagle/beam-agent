@@ -27,18 +27,23 @@ Process-free.  No background eviction.  Caller-driven cleanup via
 ## When NOT to use
 
   - Conversational queries where session history affects the response.
-    The cache keys by `{backend, model, prompt}` only — session state
-    is NOT part of the key.
+    The cache keys by `{backend, model, prompt, context}` — session
+    history or other dynamic state is NOT automatically part of the key
+    unless you encode it into the prompt or cache context yourself.
 
 ## Security
 
-Cache keys are derived from `{backend, model, prompt}` only.  Session
-identity and caller identity are NOT part of the key.  If multiple
-callers share a BEAM node, any caller sending an identical prompt to the
-same backend and model receives the same cached response.  Do NOT use
-this module when prompts contain user-identifying data, access tokens,
-or session-scoped context.  Use `beam_agent:query/2,3` directly in
-those cases.
+Cache keys are derived from `{backend, model, prompt, context}`.  By
+default, `cache_context` is `auto`, which uses the session's working
+directory as the context (via `resolve_session_cwd/1`).  Calls from
+different working directories will not share cache entries, but callers
+in the same directory on the same BEAM node can.  Session identity and
+caller identity are NOT part of the key.  If multiple callers share a
+BEAM node and an effective context, any caller sending an identical
+prompt to the same backend and model receives the same cached response.
+Do NOT use this module when prompts or cache contexts contain
+user-identifying data, access tokens, or session-scoped context.  Use
+`beam_agent:query/2,3` directly in those cases.
 
 ## Example
 
@@ -153,7 +158,12 @@ lookup(Session, Prompt) ->
 lookup(Session, Prompt, Opts)
   when is_pid(Session), is_binary(Prompt), is_map(Opts) ->
     Key = resolve_key(Session, Prompt, Opts),
-    beam_agent_prompt_cache_core:get(Key).
+    case beam_agent_prompt_cache_core:get(Key) of
+        {hit, {cached_error, _Reason}, _Meta} ->
+            miss;
+        Other ->
+            Other
+    end.
 
 -doc """
 Manually store a result in the cache for the given session and prompt.
@@ -256,7 +266,10 @@ resolve_context(Session, Opts) ->
         auto ->
             resolve_session_cwd(Session);
         Custom when is_binary(Custom) ->
-            Custom
+            Custom;
+        _ ->
+            %% Fallback to auto behavior for unexpected values
+            resolve_session_cwd(Session)
     end.
 
 -spec resolve_session_cwd(pid()) -> binary().

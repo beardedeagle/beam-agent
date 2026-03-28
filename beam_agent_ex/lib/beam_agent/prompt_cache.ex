@@ -25,18 +25,21 @@ defmodule BeamAgent.PromptCache do
   ## When NOT to use
 
     - Conversational queries where session history affects the response.
-      The cache keys by `{backend, model, prompt}` only — session state
-      is NOT part of the key.
+      The cache key is `{backend, model, prompt, context}` — conversational
+      history is NOT part of the key.  The `context` component is derived
+      from the `cache_context` setting (by default `:auto`, which uses
+      the session's current working directory).
 
   ## Security
 
-  Cache keys are derived from `{backend, model, prompt}` only.  Session
-  identity and caller identity are NOT part of the key.  If multiple
-  callers share a BEAM node, any caller sending an identical prompt to the
-  same backend and model receives the same cached response.  Do NOT use
-  this module when prompts contain user-identifying data, access tokens,
-  or session-scoped context.  Use `BeamAgent.query/2,3` directly in
-  those cases.
+  Cache keys are derived from `{backend, model, prompt, context}`.  Session
+  identity and caller identity are NOT part of the key.  The `context`
+  component is controlled via the `cache_context` option; with
+  `cache_context: :auto` the session's current working directory is used,
+  so callers that share the same backend, model, prompt, and context will
+  share cached responses.  Do NOT use this module when prompts or context
+  contain user-identifying data, access tokens, or other session-scoped
+  secrets.  Use `BeamAgent.query/2,3` directly in those cases.
 
   ## Example
 
