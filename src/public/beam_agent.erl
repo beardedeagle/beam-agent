@@ -23,6 +23,7 @@ public modules:
 - beam_agent_mcp: MCP server management
 - beam_agent_policy: reusable allow/deny policy profiles
 - beam_agent_orchestrator: parent-child orchestration and delegation lineage
+- beam_agent_prompt_cache: SDK-layer prompt deduplication and caching
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_routing: backend routing and policy-driven selection
 - beam_agent_routines: durable routines and caller-driven scheduled execution
