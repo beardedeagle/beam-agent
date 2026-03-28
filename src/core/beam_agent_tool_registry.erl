@@ -25,7 +25,6 @@ claude_agent_session:start_link(#{sdk_mcp_servers => [Server]})
 -export([
     %% Constructors
     tool/4,
-    tool/5,
     server/2,
     server/3,
     %% Registry management
@@ -92,15 +91,11 @@ claude_agent_session:start_link(#{sdk_mcp_servers => [Server]})
                             mime_type := binary()}.
 
 %% Tool definition with name, description, JSON schema, and handler.
-%% Optional `cacheable` and `cache_ttl` fields enable result caching
-%% via `beam_agent_tool_cache` for deterministic tools.
 -type tool_def() :: #{
     name := binary(),
     description := binary(),
     input_schema := map(),
-    handler := tool_handler(),
-    cacheable => boolean(),       %% default false
-    cache_ttl => pos_integer()    %% per-tool TTL in ms (default 120 000)
+    handler := tool_handler()
 }.
 
 %% An SDK MCP server grouping one or more tools under a name.
@@ -127,33 +122,6 @@ tool(Name, Description, InputSchema, Handler)
        is_map(InputSchema), is_function(Handler, 1) ->
     #{name => Name, description => Description,
       input_schema => InputSchema, handler => Handler}.
-
--doc """
-Create a tool definition with options.
-
-Options:
-  - `cacheable` — when `true`, results are eligible for caching
-    via `beam_agent_tool_cache` (default `false`)
-  - `cache_ttl` — per-tool TTL in ms for cached results
-    (default 120 000 / 2 min)
-""".
--spec tool(binary(), binary(), map(), tool_handler(), map()) -> tool_def().
-tool(Name, Description, InputSchema, Handler, Opts)
-  when is_binary(Name), is_binary(Description),
-       is_map(InputSchema), is_function(Handler, 1), is_map(Opts) ->
-    Base = tool(Name, Description, InputSchema, Handler),
-    apply_tool_opts(Base, Opts).
-
--spec apply_tool_opts(tool_def(), map()) -> tool_def().
-apply_tool_opts(Tool, Opts) ->
-    T1 = case maps:get(cacheable, Opts, false) of
-        true -> Tool#{cacheable => true};
-        false -> Tool
-    end,
-    case maps:get(cache_ttl, Opts, undefined) of
-        TTL when is_integer(TTL), TTL > 0 -> T1#{cache_ttl => TTL};
-        _ -> T1
-    end.
 
 -doc "Create an SDK MCP server with default version \"1.0.0\".".
 -spec server(binary(), [tool_def()]) -> sdk_mcp_server().

@@ -77,11 +77,7 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.SDKConfig,
           BeamAgent.Telemetry,
           BeamAgent.Threads,
-          BeamAgent.Todo,
-          BeamAgent.Cassette,
-          BeamAgent.PlanCache,
-          BeamAgent.PromptCache,
-          BeamAgent.ToolCache
+          BeamAgent.Todo
         ],
         "Canonical Domains": [
           BeamAgent.Artifacts,
