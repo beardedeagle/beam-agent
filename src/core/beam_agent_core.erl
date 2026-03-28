@@ -344,7 +344,11 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     %% OpenCode / catalog-oriented overrides
     mode => binary(),
     system => binary() | map(),
-    tools => map() | list()
+    tools => map() | list(),
+    %% Reserved for future API SDK integration (currently unused —
+    %% all 5 CLI backends handle caching internally and do not
+    %% expose cache control parameters to callers)
+    cache_control => map()
 }.
 
 %% Options for establishing an agent session.
