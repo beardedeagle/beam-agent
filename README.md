@@ -27,11 +27,13 @@ Consumer → beam_agent / BeamAgent (canonical public API)
          → beam_agent_transport (byte I/O — port, HTTP, WebSocket)
 ```
 
-Each backend implements `beam_agent_session_handler` with ~6 required callbacks.
-The engine provides all shared orchestration (state machine, consumer/queue,
-telemetry, error recovery) so handlers focus only on what is unique to their
-backend's wire protocol. Zero additional processes — the engine gen_statem IS
-the session process.
+Each backend facade module implements the `beam_agent_adapter` behaviour
+(identity and capabilities) and the `beam_agent_adapter_session` sub-behaviour
+(session lifecycle). Under the hood, a `beam_agent_session_handler` callback
+module handles the wire protocol for the engine. The engine provides all shared
+orchestration (state machine, consumer/queue, telemetry, error recovery) so
+handlers focus only on what is unique to their backend's wire protocol. Zero
+additional processes — the engine gen_statem IS the session process.
 
 ```
                      +----------------------+
@@ -66,8 +68,12 @@ natively, the handler can route to that implementation; when it does not,
 `beam_agent` provides the universal fallback recorded in the architecture
 matrices.
 
-To add a new backend, implement a `beam_agent_session_handler` callback module.
-See the moduledoc in `beam_agent_session_handler.erl` for a complete example.
+To add a new agentic backend, implement three modules: a facade implementing
+`beam_agent_adapter`, a session module implementing `beam_agent_adapter_session`,
+and a handler implementing `beam_agent_session_handler`. Stateless API backends
+implement `beam_agent_adapter` plus `beam_agent_adapter_api` instead. See the
+[Backend Integration Guide](docs/guides/backend_integration_guide.md) for a
+complete walkthrough.
 
 ## Quick Start
 

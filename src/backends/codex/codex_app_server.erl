@@ -1,5 +1,9 @@
 -module(codex_app_server).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
+
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
 -export([start_session/1,
          start_exec/1,
          stop/1,
@@ -892,3 +896,22 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> codex.
+backend_name() -> codex.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].

@@ -1,9 +1,9 @@
 -module(codex_realtime_session).
 -moduledoc false.
 
--behaviour(beam_agent_behaviour).
+-behaviour(beam_agent_adapter_session).
 
-%% beam_agent_behaviour callbacks
+%% beam_agent_adapter_session callbacks
 -export([
     start_link/1,
     send_query/4,
@@ -30,7 +30,7 @@
 ]).
 
 %%====================================================================
-%% beam_agent_behaviour callbacks
+%% beam_agent_adapter_session callbacks
 %%====================================================================
 
 -spec start_link(beam_agent_core:session_opts()) ->

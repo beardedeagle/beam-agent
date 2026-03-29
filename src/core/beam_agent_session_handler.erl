@@ -300,7 +300,7 @@ Default: checks for `type => result` in the message map.
 ) -> boolean().
 
 -doc """
-Handle backend-specific API calls not covered by `beam_agent_behaviour`.
+Handle backend-specific API calls not covered by `beam_agent_adapter_session`.
 
 Called when the engine receives a `gen_statem:call` it does not recognize.
 This allows backends to expose custom functions (e.g., Codex RT's

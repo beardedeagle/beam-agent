@@ -166,7 +166,7 @@ capability_specs() ->
                      {beam_agent_mcp, server_reload, 1}],
             proof_files => [
                 "test/public/beam_agent_tests.erl",
-                "test/core/beam_agent_behaviour_tests.erl"
+                "test/core/beam_agent_adapter_session_tests.erl"
             ]
         },
         #{

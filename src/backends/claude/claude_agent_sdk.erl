@@ -1,5 +1,6 @@
 -module(claude_agent_sdk).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
 -type session_meta() :: beam_agent_adapter_types:session_meta().
 -type session_share() :: beam_agent_adapter_types:session_share().
 -type session_summary() :: beam_agent_adapter_types:session_summary().
@@ -15,6 +16,9 @@
     health  => active_query | connecting | error | initializing | ready,
     _       => _
 }.
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
+
 -export([start_session/1,
          stop/1,
          health/1,
@@ -757,3 +761,22 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> claude.
+backend_name() -> claude.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].

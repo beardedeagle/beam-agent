@@ -1,5 +1,9 @@
 -module(gemini_cli_client).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
+
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
 
 %% Thread record — canonical definition in beam_agent_adapter_types.
 -type thread_record() :: beam_agent_adapter_types:thread_meta().
@@ -832,3 +836,22 @@ opt_value([Key | Rest], Opts, Default) ->
         {ok, Value} -> Value;
         error -> opt_value(Rest, Opts, Default)
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> gemini.
+backend_name() -> gemini.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].
