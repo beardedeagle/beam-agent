@@ -119,10 +119,10 @@ exports_artifacts_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_artifacts, delete, 1)).
 
 exports_audit_domain_surface_test() ->
-    ensure_loaded(beam_agent_audit),
-    ?assert(erlang:function_exported(beam_agent_audit, list_events, 0)),
-    ?assert(erlang:function_exported(beam_agent_audit, list_events, 1)),
-    ?assert(erlang:function_exported(beam_agent_audit, get_event, 1)).
+    ensure_loaded(beam_agent_journal),
+    ?assert(erlang:function_exported(beam_agent_journal, list_events, 0)),
+    ?assert(erlang:function_exported(beam_agent_journal, list_events, 1)),
+    ?assert(erlang:function_exported(beam_agent_journal, get_event, 1)).
 
 exports_journal_domain_surface_test() ->
     ensure_loaded(beam_agent_journal),

@@ -69,7 +69,7 @@ Five tables are classified as single-writer (primarily written by
 consumer-facing APIs or the router):
 
   - `beam_agent_runtime` — unified runtime table, primarily consumer-facing APIs
-  - `beam_agent_backend_sessions` — primarily `beam_agent_router`
+  - `beam_agent_backend_sessions` — primarily `beam_agent_routing`
 
 Note: the session engine may also write to these tables during lifecycle
 events (e.g., termination cleanup). In `public` mode all tables use public

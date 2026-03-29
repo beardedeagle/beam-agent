@@ -785,31 +785,31 @@ thread_compact(Session, Opts) when is_map(Opts) ->
 -spec thread_realtime_start(pid(), map()) -> {ok, map()}.
 thread_realtime_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:start_realtime(SessionId, with_backend(Params, opencode)).
+    beam_agent_control:start_realtime(SessionId, with_backend(Params, opencode)).
 -spec thread_realtime_append_audio(pid(), binary(), map()) ->
                                       {ok, map()} | {error, not_found}.
 thread_realtime_append_audio(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:append_realtime_audio(SessionId, ThreadId, Params).
+    beam_agent_control:append_realtime_audio(SessionId, ThreadId, Params).
 -spec thread_realtime_append_text(pid(), binary(), map()) ->
                                      {ok, map()} | {error, not_found}.
 thread_realtime_append_text(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:append_realtime_text(SessionId, ThreadId, Params).
+    beam_agent_control:append_realtime_text(SessionId, ThreadId, Params).
 -spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, not_found}.
 thread_realtime_stop(Session, ThreadId) when is_binary(ThreadId) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:stop_realtime(SessionId, ThreadId).
+    beam_agent_control:stop_realtime(SessionId, ThreadId).
 -spec review_start(pid(), map()) -> {ok, map()}.
 review_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:start_review(SessionId, with_backend(Params, opencode)).
+    beam_agent_control:start_review(SessionId, with_backend(Params, opencode)).
 -spec collaboration_mode_list(pid()) -> {ok, session_view()}.
 collaboration_mode_list(Session) ->
     SessionId = get_session_id(Session),
-    {ok, Result} = beam_agent_collaboration:collaboration_modes(SessionId),
+    {ok, Result} = beam_agent_control:collaboration_modes(SessionId),
     {ok, with_adapter_source(Session, Result)}.
 -spec experimental_feature_list(pid()) -> {ok, session_view()}.
 experimental_feature_list(Session) ->
@@ -817,7 +817,7 @@ experimental_feature_list(Session) ->
 -spec experimental_feature_list(pid(), map()) -> {ok, session_view()}.
 experimental_feature_list(Session, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
-    {ok, Result} = beam_agent_collaboration:experimental_features(SessionId, Opts),
+    {ok, Result} = beam_agent_control:experimental_features(SessionId, Opts),
     {ok, with_adapter_source(Session, Result)}.
 -spec mcp_server_status(pid()) -> {ok, map()}.
 mcp_server_status(Session) ->

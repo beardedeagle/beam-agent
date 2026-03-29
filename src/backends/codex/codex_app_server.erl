@@ -365,7 +365,7 @@ thread_realtime_stop(Session, ThreadId) ->
 review_start(Session, Params) when is_map(Params) ->
     case session_transport(Session) of
         realtime ->
-            beam_agent_collaboration:start_review(
+            beam_agent_control:start_review(
                 get_session_id(Session),
                 with_backend_transport(Params, Session));
         _ ->
@@ -375,7 +375,7 @@ review_start(Session, Params) when is_map(Params) ->
 collaboration_mode_list(Session) ->
     case session_transport(Session) of
         realtime ->
-            {ok, Result} = beam_agent_collaboration:collaboration_modes(get_session_id(Session)),
+            {ok, Result} = beam_agent_control:collaboration_modes(get_session_id(Session)),
             {ok, with_adapter_source(Session, Result)};
         _ ->
             send_control_to(Session, <<"collaborationMode/list">>, #{})
@@ -388,7 +388,7 @@ experimental_feature_list(Session) ->
 experimental_feature_list(Session, Params) when is_map(Params) ->
     case session_transport(Session) of
         realtime ->
-            {ok, Result} = beam_agent_collaboration:experimental_features(get_session_id(Session), Params),
+            {ok, Result} = beam_agent_control:experimental_features(get_session_id(Session), Params),
             {ok, with_adapter_source(Session, Result)};
         _ ->
             send_control_to(Session, <<"experimentalFeature/list">>, Params)

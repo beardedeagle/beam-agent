@@ -3,7 +3,7 @@
 Symmetric encryption for sensitive credential fields.
 
 The set of keys requiring encryption is defined centrally in
-`beam_agent_sensitive_keys' — this module encrypts all keys with
+`beam_agent_redaction' — this module encrypts all keys with
 `encrypt_and_redact' handling via `credential_match_keys/0'.
 
 Uses AES-256-GCM with a per-node key derived from the BEAM node cookie
@@ -269,7 +269,7 @@ do_derive(Cookie) ->
 
 -spec is_sensitive(term()) -> boolean().
 is_sensitive(Key) ->
-    lists:member(Key, beam_agent_sensitive_keys:credential_match_keys()).
+    lists:member(Key, beam_agent_redaction:credential_match_keys()).
 
 -spec encrypt_map(map(), binary()) -> map().
 encrypt_map(Map, Key) when is_map(Map), is_binary(Key) ->

@@ -99,7 +99,7 @@ normalize_server_event(#{<<"type">> := <<"error">>} = Json) ->
     ErrContent = event_message(Json),
     [(base_message(error, Json))#{
         content => ErrContent,
-        category => beam_agent_error_core:infer_category(ErrContent),
+        category => beam_agent_core:infer_category(ErrContent),
         raw => Json
     }];
 normalize_server_event(#{<<"type">> := <<"response.audio.delta">>} = Json) ->

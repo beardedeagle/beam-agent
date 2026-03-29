@@ -112,7 +112,12 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     session_backend/1,
     with_session_backend/2,
     safe_session_health/1,
-    opt_value/3
+    opt_value/3,
+    %% Error categorization (absorbed from beam_agent_error_core)
+    categorize/1,
+    infer_category/1,
+    enrich_error/2,
+    parse_retry_after/1
 ]).
 
 -export_type([
@@ -126,7 +131,8 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     system_prompt_config/0,
     permission_result/0,
     receive_fun/0,
-    terminal_pred/0
+    terminal_pred/0,
+    error_category/0
 ]).
 
 %% Internal helpers where the declared spec is intentionally broader
@@ -285,7 +291,7 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     permission_denials => list(),
     fast_mode_state => map(),
     %% Error enrichment fields (beam_agent_error_core)
-    category => beam_agent_error_core:error_category(),
+    category => error_category(),
     retry_after => non_neg_integer(),
     error_type => atom(),
     %% User message fields
@@ -473,7 +479,7 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 -doc "Start a unified session. `Opts.backend` is required.".
 -spec start_session(session_opts()) -> {ok, pid()} | {error, term()}.
 start_session(Opts) when is_map(Opts) ->
-    beam_agent_router:start_session(Opts).
+    beam_agent_routing:start_session(Opts).
 
 -doc """
 Restore a previously tracked session.
@@ -507,12 +513,12 @@ restore_session(SessionId, Opts)
 -doc "Build a supervisor child spec for a unified session.".
 -spec child_spec(session_opts()) -> supervisor:child_spec().
 child_spec(Opts) when is_map(Opts) ->
-    beam_agent_router:child_spec(Opts).
+    beam_agent_routing:child_spec(Opts).
 
 -doc "Stop a unified session.".
 -spec stop(pid()) -> ok.
 stop(Session) when is_pid(Session) ->
-    beam_agent_router:stop(Session).
+    beam_agent_routing:stop(Session).
 
 -doc "Send a blocking query with default params.".
 -spec query(pid(), binary()) -> {ok, [message()]} | {error, term()}.
@@ -523,12 +529,12 @@ query(Session, Prompt) ->
 -spec query(pid(), binary(), query_opts()) -> {ok, [message()]} | {error, term()}.
 query(Session, Prompt, Params)
   when is_pid(Session), is_binary(Prompt), is_map(Params) ->
-    beam_agent_router:query(Session, Prompt, Params).
+    beam_agent_routing:query(Session, Prompt, Params).
 
 -doc "Query session info for a live unified session or persisted session id.".
 -spec session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
 session_info(Session) when is_pid(Session) ->
-    beam_agent_router:session_info(Session);
+    beam_agent_routing:session_info(Session);
 session_info(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     beam_agent_session_store_core:get_session(SessionId).
 
@@ -555,7 +561,7 @@ session_identity(Session) ->
 -doc "Return the current health state for a live unified session or persisted session id.".
 -spec health(pid() | binary()) -> atom().
 health(Session) when is_pid(Session) ->
-    beam_agent_router:health(Session);
+    beam_agent_routing:health(Session);
 health(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     case beam_agent_session_store_core:get_session(SessionId) of
         {ok, Info} when is_map(Info) ->
@@ -567,7 +573,7 @@ health(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
 -doc "Resolve the backend for a live unified session or persisted session id.".
 -spec backend(pid() | binary()) -> {ok, backend()} | {error, term()}.
 backend(Session) when is_pid(Session) ->
-    beam_agent_router:backend(Session);
+    beam_agent_routing:backend(Session);
 backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     beam_agent_backend:session_backend(SessionId).
 
@@ -579,128 +585,128 @@ list_backends() ->
 -doc "Change the model at runtime.".
 -spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
 set_model(Session, Model) when is_pid(Session), is_binary(Model) ->
-    beam_agent_router:set_model(Session, Model).
+    beam_agent_routing:set_model(Session, Model).
 
 -doc "Change the permission mode at runtime.".
 -spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
 set_permission_mode(Session, Mode) when is_pid(Session), is_binary(Mode) ->
-    beam_agent_router:set_permission_mode(Session, Mode).
+    beam_agent_routing:set_permission_mode(Session, Mode).
 
 -doc "Interrupt active work for a live session.".
 -spec interrupt(pid()) -> ok | {error, term()}.
 interrupt(Session) when is_pid(Session) ->
-    beam_agent_router:interrupt(Session).
+    beam_agent_routing:interrupt(Session).
 
 -doc "Abort active work for a live session.".
 -spec abort(pid()) -> ok | {error, term()}.
 abort(Session) when is_pid(Session) ->
-    beam_agent_router:abort(Session).
+    beam_agent_routing:abort(Session).
 
 -doc "Send a control message through the canonical router.".
 -spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
 send_control(Session, Method, Params)
   when is_pid(Session), is_binary(Method), is_map(Params) ->
-    beam_agent_router:send_control(Session, Method, Params).
+    beam_agent_routing:send_control(Session, Method, Params).
 
 -doc "List tracked sessions from the shared session store.".
 -spec list_sessions() -> {ok, [beam_agent_session_store_core:session_meta()]}.
 list_sessions() ->
-    beam_agent_router:list_sessions().
+    beam_agent_routing:list_sessions().
 
 -doc "List tracked sessions with filters.".
 -spec list_sessions(beam_agent_session_store_core:list_opts()) ->
     {ok, [beam_agent_session_store_core:session_meta()]}.
 list_sessions(Opts) when is_map(Opts) ->
-    beam_agent_router:list_sessions(Opts).
+    beam_agent_routing:list_sessions(Opts).
 
 -doc "Get visible messages for a tracked session id.".
 -spec get_session_messages(binary()) ->
     {ok, [message()]} | {error, not_found}.
 get_session_messages(SessionId) ->
-    beam_agent_router:get_session_messages(SessionId).
+    beam_agent_routing:get_session_messages(SessionId).
 
 -doc "Get visible messages for a tracked session id with options.".
 -spec get_session_messages(binary(), beam_agent_session_store_core:message_opts()) ->
     {ok, [message()]} | {error, not_found}.
 get_session_messages(SessionId, Opts) when is_map(Opts) ->
-    beam_agent_router:get_session_messages(SessionId, Opts).
+    beam_agent_routing:get_session_messages(SessionId, Opts).
 
 -doc "Get tracked session metadata by session id.".
 -spec get_session(binary()) ->
     {ok, beam_agent_session_store_core:session_meta()} | {error, not_found}.
 get_session(SessionId) ->
-    beam_agent_router:get_session(SessionId).
+    beam_agent_routing:get_session(SessionId).
 
 -doc "Delete a tracked session by session id.".
 -spec delete_session(binary()) -> ok.
 delete_session(SessionId) ->
-    beam_agent_router:delete_session(SessionId).
+    beam_agent_routing:delete_session(SessionId).
 
 -doc "Fork a live session.".
 -spec fork_session(pid(), map()) -> {ok, map()} | {error, term()}.
 fork_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_router:fork_session(Session, Opts).
+    beam_agent_routing:fork_session(Session, Opts).
 
 -doc "Revert a live session.".
 -spec revert_session(pid(), map()) -> {ok, map()} | {error, term()}.
 revert_session(Session, Selector) when is_pid(Session), is_map(Selector) ->
-    beam_agent_router:revert_session(Session, Selector).
+    beam_agent_routing:revert_session(Session, Selector).
 
 -doc "Clear a live session's revert state.".
 -spec unrevert_session(pid()) -> {ok, map()} | {error, term()}.
 unrevert_session(Session) when is_pid(Session) ->
-    beam_agent_router:unrevert_session(Session).
+    beam_agent_routing:unrevert_session(Session).
 
 -doc "Share a live session using default opts.".
 -spec share_session(pid()) -> {ok, map()} | {error, term()}.
 share_session(Session) when is_pid(Session) ->
-    beam_agent_router:share_session(Session).
+    beam_agent_routing:share_session(Session).
 
 -doc "Share a live session.".
 -spec share_session(pid(), map()) -> {ok, map()} | {error, term()}.
 share_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_router:share_session(Session, Opts).
+    beam_agent_routing:share_session(Session, Opts).
 
 -doc "Revoke sharing for a live session.".
 -spec unshare_session(pid()) -> ok | {error, term()}.
 unshare_session(Session) when is_pid(Session) ->
-    beam_agent_router:unshare_session(Session).
+    beam_agent_routing:unshare_session(Session).
 
 -doc "Summarize a live session using default opts.".
 -spec summarize_session(pid()) -> {ok, map()} | {error, term()}.
 summarize_session(Session) when is_pid(Session) ->
-    beam_agent_router:summarize_session(Session).
+    beam_agent_routing:summarize_session(Session).
 
 -doc "Summarize a live session.".
 -spec summarize_session(pid(), map()) -> {ok, map()} | {error, term()}.
 summarize_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_router:summarize_session(Session, Opts).
+    beam_agent_routing:summarize_session(Session, Opts).
 
 -doc "Start a thread for a live session or persisted session id.".
 -spec thread_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 thread_start(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_router:thread_start(Session, Opts);
+    beam_agent_routing:thread_start(Session, Opts);
 thread_start(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
     beam_agent_threads_core:start_thread(SessionId, Opts).
 
 -doc "Resume a thread for a live session or persisted session id.".
 -spec thread_resume(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_resume(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_resume(Session, ThreadId);
+    beam_agent_routing:thread_resume(Session, ThreadId);
 thread_resume(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
     beam_agent_threads_core:resume_thread(SessionId, ThreadId).
 
 -doc "List threads for a live session or persisted session id.".
 -spec thread_list(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 thread_list(Session) when is_pid(Session) ->
-    beam_agent_router:thread_list(Session);
+    beam_agent_routing:thread_list(Session);
 thread_list(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 ->
     beam_agent_threads_core:list_threads(SessionId).
 
 -doc "Fork a thread with default opts.".
 -spec thread_fork(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_fork(Session, ThreadId);
+    beam_agent_routing:thread_fork(Session, ThreadId);
 thread_fork(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
     beam_agent_threads_core:fork_thread(SessionId, ThreadId, #{}).
 
@@ -708,7 +714,7 @@ thread_fork(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) 
 -spec thread_fork(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_fork(Session, ThreadId, Opts)
   when is_pid(Session), is_binary(ThreadId), is_map(Opts) ->
-    beam_agent_router:thread_fork(Session, ThreadId, Opts);
+    beam_agent_routing:thread_fork(Session, ThreadId, Opts);
 thread_fork(SessionId, ThreadId, Opts)
   when is_binary(SessionId), is_binary(ThreadId), is_map(Opts) ->
     beam_agent_threads_core:fork_thread(SessionId, ThreadId, Opts).
@@ -716,7 +722,7 @@ thread_fork(SessionId, ThreadId, Opts)
 -doc "Read a thread with default opts.".
 -spec thread_read(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_read(Session, ThreadId);
+    beam_agent_routing:thread_read(Session, ThreadId);
 thread_read(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
     beam_agent_threads_core:read_thread(SessionId, ThreadId, #{}).
 
@@ -724,7 +730,7 @@ thread_read(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) 
 -spec thread_read(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_read(Session, ThreadId, Opts)
   when is_pid(Session), is_binary(ThreadId), is_map(Opts) ->
-    beam_agent_router:thread_read(Session, ThreadId, Opts);
+    beam_agent_routing:thread_read(Session, ThreadId, Opts);
 thread_read(SessionId, ThreadId, Opts)
   when is_binary(SessionId), is_binary(ThreadId), is_map(Opts) ->
     beam_agent_threads_core:read_thread(SessionId, ThreadId, Opts).
@@ -732,14 +738,14 @@ thread_read(SessionId, ThreadId, Opts)
 -doc "Archive a thread.".
 -spec thread_archive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_archive(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_archive(Session, ThreadId);
+    beam_agent_routing:thread_archive(Session, ThreadId);
 thread_archive(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
     beam_agent_threads_core:archive_thread(SessionId, ThreadId).
 
 -doc "Unarchive a thread.".
 -spec thread_unarchive(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_unarchive(Session, ThreadId) when is_pid(Session), is_binary(ThreadId) ->
-    beam_agent_router:thread_unarchive(Session, ThreadId);
+    beam_agent_routing:thread_unarchive(Session, ThreadId);
 thread_unarchive(SessionId, ThreadId) when is_binary(SessionId), is_binary(ThreadId) ->
     beam_agent_threads_core:unarchive_thread(SessionId, ThreadId).
 
@@ -747,7 +753,7 @@ thread_unarchive(SessionId, ThreadId) when is_binary(SessionId), is_binary(Threa
 -spec thread_rollback(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_rollback(Session, ThreadId, Selector)
   when is_pid(Session), is_binary(ThreadId), is_map(Selector) ->
-    beam_agent_router:thread_rollback(Session, ThreadId, Selector);
+    beam_agent_routing:thread_rollback(Session, ThreadId, Selector);
 thread_rollback(SessionId, ThreadId, Selector)
   when is_binary(SessionId), is_binary(ThreadId), is_map(Selector) ->
     beam_agent_threads_core:rollback_thread(SessionId, ThreadId, Selector).
@@ -755,22 +761,22 @@ thread_rollback(SessionId, ThreadId, Selector)
 -doc "List supported slash commands from session init data.".
 -spec supported_commands(pid()) -> {ok, list()} | {error, term()}.
 supported_commands(Session) when is_pid(Session) ->
-    beam_agent_router:supported_commands(Session).
+    beam_agent_routing:supported_commands(Session).
 
 -doc "List supported models from session init data.".
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) when is_pid(Session) ->
-    beam_agent_router:supported_models(Session).
+    beam_agent_routing:supported_models(Session).
 
 -doc "List supported agents from session init data.".
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) when is_pid(Session) ->
-    beam_agent_router:supported_agents(Session).
+    beam_agent_routing:supported_agents(Session).
 
 -doc "Read account info from session init data.".
 -spec account_info(pid()) -> {ok, map()} | {error, term()}.
 account_info(Session) when is_pid(Session) ->
-    beam_agent_router:account_info(Session).
+    beam_agent_routing:account_info(Session).
 
 -doc "List tools from the shared metadata catalog.".
 -spec list_tools(pid() | binary()) -> {ok, [map()]} | {error, term()}.
@@ -1161,7 +1167,7 @@ add_fields(result, Raw, Base) ->
 
 add_fields(error, Raw, Base) ->
     Base1 = Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw},
-    beam_agent_error_core:enrich(Base1, Raw);
+    enrich_error(Base1, Raw);
 
 add_fields(user, Raw, Base) ->
     M0 = Base#{content => maps:get(<<"content">>, Raw, <<>>), raw => Raw},
@@ -1439,3 +1445,183 @@ collect_loop(Session, Ref, Deadline, ReceiveFun, IsTerminal, Acc) ->
 default_terminal(#{type := result}) -> true;
 default_terminal(#{type := error}) -> true;
 default_terminal(_) -> false.
+
+%%====================================================================
+%% Error Categorization (absorbed from beam_agent_error_core)
+%%====================================================================
+
+-type error_category() ::
+    rate_limit
+  | subscription_exhausted
+  | context_exceeded
+  | auth_expired
+  | server_error
+  | unknown.
+
+-doc """
+Ensure an error message has a `category` field.
+
+If the message already has a category (set by the protocol module),
+it passes through unchanged.  Otherwise, `infer_category/1` is applied
+to the `content` field.  Non-error messages are returned unchanged.
+""".
+-spec categorize(map()) -> map().
+categorize(#{type := error, category := _} = Msg) ->
+    Msg;
+categorize(#{type := error, content := Content} = Msg) ->
+    Msg#{category => infer_category(Content)};
+categorize(#{type := error} = Msg) ->
+    Msg#{category => unknown};
+categorize(Msg) ->
+    Msg.
+
+-doc """
+Enrich an error message from the `normalize_message/1` path.
+
+Extracts protocol-level category and retry_after hints from the
+wire-format `Raw` map (binary keys), then applies the universal
+fallback via `categorize/1`.
+""".
+-spec enrich_error(map(), map()) -> map().
+enrich_error(#{type := error} = Msg, Raw) ->
+    Msg1 = apply_protocol_category(Msg, Raw),
+    Msg2 = apply_retry_after(Msg1, Raw),
+    categorize(Msg2);
+enrich_error(Msg, _Raw) ->
+    Msg.
+
+-doc """
+Infer an error category from the content text.
+
+Uses case-insensitive substring matching against known error patterns.
+Returns `unknown` if no pattern matches.  This is a pure function
+suitable for use in protocol modules.
+""".
+-spec infer_category(binary() | term()) -> error_category().
+infer_category(Content) when is_binary(Content) ->
+    Lower = string:lowercase(Content),
+    infer_error_from_text(Lower);
+infer_category(_) ->
+    unknown.
+
+-doc """
+Parse a retry-after value into seconds.
+
+Accepts integers (pass-through), binaries of decimal digits,
+or returns `undefined` for unparseable values.
+""".
+-spec parse_retry_after(term()) -> non_neg_integer() | undefined.
+parse_retry_after(Seconds) when is_integer(Seconds), Seconds > 0 ->
+    Seconds;
+parse_retry_after(Bin) when is_binary(Bin) ->
+    try binary_to_integer(Bin) of
+        N when N > 0 -> N;
+        _ -> undefined
+    catch
+        error:badarg -> undefined
+    end;
+parse_retry_after(N) when is_float(N), N > 0 ->
+    ceil(N);
+parse_retry_after(_) ->
+    undefined.
+
+%% Internal: text-based error inference
+
+-spec infer_error_from_text(binary()) -> error_category().
+infer_error_from_text(Lower) ->
+    Checks = [
+        {fun matches_rate_limit/1,              rate_limit},
+        {fun matches_subscription_exhausted/1,  subscription_exhausted},
+        {fun matches_context_exceeded/1,        context_exceeded},
+        {fun matches_auth_expired/1,            auth_expired},
+        {fun matches_server_error/1,            server_error}
+    ],
+    first_error_match(Checks, Lower).
+
+-spec first_error_match([{fun((binary()) -> boolean()), error_category()}],
+                  binary()) -> error_category().
+first_error_match([], _Lower) ->
+    unknown;
+first_error_match([{Pred, Category} | Rest], Lower) ->
+    case Pred(Lower) of
+        true  -> Category;
+        false -> first_error_match(Rest, Lower)
+    end.
+
+-spec matches_rate_limit(binary()) -> boolean().
+matches_rate_limit(T) ->
+    has_error_pattern(T, [<<"rate limit">>, <<"rate_limit">>, <<"ratelimit">>,
+                <<"too many requests">>, <<"429">>,
+                <<"throttled">>, <<"throttling">>]).
+
+-spec matches_subscription_exhausted(binary()) -> boolean().
+matches_subscription_exhausted(T) ->
+    has_error_pattern(T, [<<"quota exceeded">>, <<"quota_exceeded">>,
+                <<"usage cap">>, <<"usage limit">>,
+                <<"plan limit">>, <<"subscription limit">>,
+                <<"billing">>, <<"credits exhausted">>,
+                <<"tokens exhausted">>]).
+
+-spec matches_context_exceeded(binary()) -> boolean().
+matches_context_exceeded(T) ->
+    has_error_pattern(T, [<<"context length">>, <<"context window">>,
+                <<"context_length">>, <<"context_window">>,
+                <<"token limit">>, <<"too many tokens">>,
+                <<"maximum context">>, <<"max_tokens">>,
+                <<"input too long">>]).
+
+-spec matches_auth_expired(binary()) -> boolean().
+matches_auth_expired(T) ->
+    has_error_pattern(T, [<<"unauthorized">>, <<"unauthenticated">>,
+                <<"invalid api key">>, <<"invalid_api_key">>,
+                <<"api key expired">>, <<"token expired">>,
+                <<"access denied">>, <<"forbidden">>,
+                <<"401 ">>, <<"403 ">>]).
+
+-spec matches_server_error(binary()) -> boolean().
+matches_server_error(T) ->
+    has_error_pattern(T, [<<"internal server error">>, <<"server error">>,
+                <<"service unavailable">>, <<"bad gateway">>,
+                <<"gateway timeout">>, <<"overloaded">>,
+                <<"500 ">>, <<"502 ">>, <<"503 ">>, <<"504 ">>]).
+
+-spec has_error_pattern(binary(), [binary()]) -> boolean().
+has_error_pattern(Haystack, Needles) ->
+    lists:any(fun(Needle) ->
+        binary:match(Haystack, Needle) =/= nomatch
+    end, Needles).
+
+%% Internal: protocol-level extraction from Raw (binary keys)
+
+-spec apply_protocol_category(#{type := error, _ => _}, map()) ->
+    #{type := error, _ => _}.
+apply_protocol_category(Msg, Raw) ->
+    case maps:find(<<"category">>, Raw) of
+        {ok, Cat} when is_binary(Cat) ->
+            Msg#{category => parse_category_bin(Cat)};
+        {ok, Cat} when is_atom(Cat), Cat =/= undefined ->
+            Msg#{category => Cat};
+        _ ->
+            Msg
+    end.
+
+-spec apply_retry_after(#{type := error, _ => _}, map()) ->
+    #{type := error, _ => _}.
+apply_retry_after(Msg, Raw) ->
+    case maps:find(<<"retry_after">>, Raw) of
+        {ok, Val} ->
+            case parse_retry_after(Val) of
+                undefined -> Msg;
+                Seconds   -> Msg#{retry_after => Seconds}
+            end;
+        error ->
+            Msg
+    end.
+
+-spec parse_category_bin(binary()) -> error_category().
+parse_category_bin(<<"rate_limit">>)              -> rate_limit;
+parse_category_bin(<<"subscription_exhausted">>)  -> subscription_exhausted;
+parse_category_bin(<<"context_exceeded">>)        -> context_exceeded;
+parse_category_bin(<<"auth_expired">>)            -> auth_expired;
+parse_category_bin(<<"server_error">>)            -> server_error;
+parse_category_bin(_)                             -> unknown.

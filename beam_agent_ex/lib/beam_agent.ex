@@ -115,7 +115,7 @@ defmodule BeamAgent do
   back to a universal implementation in one of the core modules.
 
   The call chain is: `BeamAgent` -> `:beam_agent` -> `:beam_agent_core` ->
-  `:beam_agent_router` -> `:beam_agent_session_engine` -> backend handler.
+  `:beam_agent_routing` -> `:beam_agent_session_engine` -> backend handler.
   This thin wrapper design means `BeamAgent` contains zero business logic --
   it is purely a delegation layer.
 
@@ -896,7 +896,7 @@ defmodule BeamAgent do
 
     Stream.resource(
       fn ->
-        case :beam_agent_router.send_query(session, prompt, query_params, timeout) do
+        case :beam_agent_routing.send_query(session, prompt, query_params, timeout) do
           {:ok, ref} -> {session, ref, deadline, false}
           {:error, reason} -> raise "Query failed: #{inspect(reason)}"
         end
@@ -911,7 +911,7 @@ defmodule BeamAgent do
           if remaining <= 0 do
             raise "Stream error: timeout"
           else
-            case :beam_agent_router.receive_message(sess, ref, remaining) do
+            case :beam_agent_routing.receive_message(sess, ref, remaining) do
               {:ok, msg} ->
                 {[msg], {sess, ref, dl, true}}
 
@@ -964,7 +964,7 @@ defmodule BeamAgent do
 
     Stream.resource(
       fn ->
-        case :beam_agent_router.send_query(session, prompt, query_params, timeout) do
+        case :beam_agent_routing.send_query(session, prompt, query_params, timeout) do
           {:ok, ref} -> {session, ref, deadline, false}
           {:error, _} = err -> {:error_init, err}
         end
@@ -984,7 +984,7 @@ defmodule BeamAgent do
               {[{:error, :timeout}], :halt_state}
 
             true ->
-              case :beam_agent_router.receive_message(sess, ref, remaining) do
+              case :beam_agent_routing.receive_message(sess, ref, remaining) do
                 {:ok, msg} ->
                   {[{:ok, msg}], {sess, ref, dl, true}}
 

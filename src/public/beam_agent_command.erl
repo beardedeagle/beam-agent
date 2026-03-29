@@ -558,7 +558,7 @@ universal_command_run(Session, Command, Opts) ->
     {ok, #{'source' := 'universal', _ => _}} | {error, _}.
 universal_prompt_async(Session, Prompt, Opts) when is_binary(Prompt), is_map(Opts) ->
     Timeout = maps:get(timeout, Opts, 120000),
-    case beam_agent_router:send_query(Session, Prompt, Opts, Timeout) of
+    case beam_agent_routing:send_query(Session, Prompt, Opts, Timeout) of
         {ok, QueryRef} ->
             {ok, beam_agent_core:with_universal_source(Session, #{
                 accepted => true,

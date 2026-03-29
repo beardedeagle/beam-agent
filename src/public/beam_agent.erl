@@ -7,7 +7,6 @@ querying, and event streaming. Domain-specific operations live in dedicated
 public modules:
 
 - beam_agent_artifacts: typed artifact and context storage
-- beam_agent_audit: durable audit records layered on the journal
 - beam_agent_capabilities: feature introspection
 - beam_agent_catalog: tools, skills, plugins, agents, models, files, search
 - beam_agent_checkpoint: checkpoint and rewind
@@ -15,7 +14,7 @@ public modules:
 - beam_agent_config: session configuration read/write
 - beam_agent_control: collaboration, review, realtime, server admin
 - beam_agent_context: context pressure, summaries, and policy-driven compaction
-- beam_agent_journal: durable canonical domain-event journal
+- beam_agent_journal: durable domain-event journal and audit convenience API
 - beam_agent_memory: long-term memory and recall
 - beam_agent_mcp: MCP server management
 - beam_agent_policy: reusable allow/deny policy profiles
@@ -91,7 +90,7 @@ optional fields that vary by type. Common fields present on most messages:
 Result messages additionally carry `duration_ms`, `num_turns`,
 `stop_reason_atom`, `usage`, and `total_cost_usd`. Tool-use messages
 carry `tool_name` and `tool_input`. Error messages carry `category`
-(a `beam_agent_error_core:error_category()` atom for structured error
+(a `beam_agent_core:error_category()` atom for structured error
 handling), optionally `retry_after` (seconds), and optionally
 `error_type` (backend-specific: `tool_error`, `session_error`,
 `subagent_failed`). See beam_agent_core for the full field reference

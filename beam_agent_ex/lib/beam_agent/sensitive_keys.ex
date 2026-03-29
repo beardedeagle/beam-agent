@@ -27,12 +27,12 @@ defmodule BeamAgent.SensitiveKeys do
       BeamAgent.SensitiveKeys.is_sensitive("apiKey")        # true
       BeamAgent.SensitiveKeys.is_sensitive("username")      # false
 
-  Delegates to `:beam_agent_sensitive_keys` (Erlang).
+  Delegates to `:beam_agent_redaction` (Erlang).
   """
 
   @doc "Return the canonical list of sensitive key triples."
   @spec all() :: [{atom(), atom(), atom()}]
-  defdelegate all(), to: :beam_agent_sensitive_keys
+  defdelegate all(), to: :beam_agent_redaction
 
   @doc """
   Flat list of all format variants for keys that require encryption.
@@ -41,17 +41,17 @@ defmodule BeamAgent.SensitiveKeys do
   binary, and a snake_case binary. Single-word keys produce two.
   """
   @spec credential_match_keys() :: [atom() | binary()]
-  defdelegate credential_match_keys(), to: :beam_agent_sensitive_keys
+  defdelegate credential_match_keys(), to: :beam_agent_redaction
 
   @doc """
   Canonical lowercase binary keys (no separators) for all sensitive keys.
   """
   @spec redaction_match_keys() :: [binary()]
-  defdelegate redaction_match_keys(), to: :beam_agent_sensitive_keys
+  defdelegate redaction_match_keys(), to: :beam_agent_redaction
 
   @doc """
   Check whether a key (atom or binary, any format) is sensitive.
   """
   @spec is_sensitive(atom() | binary()) :: boolean()
-  defdelegate is_sensitive(key), to: :beam_agent_sensitive_keys
+  defdelegate is_sensitive(key), to: :beam_agent_redaction
 end
