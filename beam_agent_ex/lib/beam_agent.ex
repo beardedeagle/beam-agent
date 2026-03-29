@@ -486,6 +486,12 @@ defmodule BeamAgent do
     `:allowed_tools`, `:disallowed_tools`, `:output_format`, `:thinking`,
     `:max_budget_usd`, `:agent`, and `:attachments`.
 
+  > #### Size limit {: .info}
+  >
+  > Files larger than 512 KB are rejected with a descriptive text block
+  > instead of being read into memory. Override the default via
+  > `Application.put_env(:beam_agent, :max_attachment_size, bytes)`.
+
   > #### Security {: .warning}
   >
   > Attachment file paths are read without sandboxing. Do not pass untrusted

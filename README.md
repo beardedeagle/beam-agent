@@ -217,7 +217,7 @@ All families have universal fallback coverage:
 - runtime provider and agent defaults
 - universal config/provider fallbacks for backends without native admin APIs
 - universal review/realtime participation for backends without native review APIs
-- attachment materialization: native content blocks for Claude, canonical blocks for Gemini, text fallback for unknown backends
+- attachment materialization with size gating (512 KB default, configurable): native content blocks for Claude, canonical blocks for Gemini, text fallback for unknown backends
 - catalog accessors for tools/skills/plugins/agents
 - capability introspection (`support_level`, `implementation`, `fidelity`)
 - raw native escape hatches for backend-specific APIs

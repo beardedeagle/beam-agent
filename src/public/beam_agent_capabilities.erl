@@ -505,7 +505,7 @@ capability_definitions() ->
      {realtime_review, <<"Realtime, review, collaboration">>},
      {config_management, <<"Config management">>},
      {provider_management, <<"Provider and runtime management">>},
-     {attachments, <<"Attachments in query and send">>},
+     {attachments, <<"Attachments in query and send (512 KB default size limit, configurable)">>},
      {event_streaming, <<"Backend event streaming">>}].
 
 %%--------------------------------------------------------------------
@@ -663,10 +663,10 @@ default_matrix() ->
         cap(attachments, #{
             claude => support(full, direct_backend_and_universal, exact,
                 #{available_paths => [direct_backend, universal],
-                  notes => <<"Claude receives native content blocks (text + base64 image) matching the Claude Code wire protocol. Files and documents are inlined as text when decodable. Audio, mention, and skill attachments are rendered as text descriptions.">>}),
+                  notes => <<"Claude receives native content blocks (text + base64 image) matching the Claude Code wire protocol. Files and documents are inlined as text when decodable. Audio, mention, and skill attachments are rendered as text descriptions. Files exceeding the size limit (512 KB default) produce a rejection text block instead.">>}),
             codex => support(full, direct_backend, exact),
             gemini => support(full, universal, exact,
-                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Gemini sessions.">>}),
+                #{notes => <<"Universal attachment materialization renders canonical attachment blocks into backend-safe input for Gemini sessions. Files exceeding the size limit (512 KB default) produce a rejection text block instead.">>}),
             opencode => support(full, direct_backend, exact),
             copilot => support(full, direct_backend, exact)
         }),

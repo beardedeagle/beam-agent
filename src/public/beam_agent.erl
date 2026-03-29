@@ -136,6 +136,9 @@ Key fields:
   - max_budget_usd: cost cap for this query
   - agent: select a specific sub-agent
   - attachments: structured file or data attachments.
+    Files larger than 512 KB are rejected with a text block instead of
+    being read into memory.  Override the limit via
+    `application:set_env(beam_agent, max_attachment_size, Bytes)'.
     Security: attachment file paths are read without sandboxing.  Do not
     pass untrusted user input directly into the attachments list.  Path
     validation and directory confinement, when required, are the caller's
