@@ -1,7 +1,10 @@
 -module(beam_agent_attachments).
+-include_lib("kernel/include/file.hrl").
 -moduledoc false.
 
 -export([prepare/3]).
+
+-define(DEFAULT_MAX_ATTACHMENT_SIZE, 524288). %% 512 KB
 
 -dialyzer({no_underspecs,
            [describe_named_attachment/2,
@@ -13,7 +16,9 @@
             fallback_attachment_backend/1,
             attachment_manifest_entry/1,
             claude_attachment_blocks/1,
-            claude_file_blocks/1]}).
+            claude_file_blocks/1,
+            rejection_text/3,
+            format_bytes/1]}).
 
 -doc """
 Prepare query input for the selected backend.
@@ -206,6 +211,9 @@ claude_file_blocks(Attachment) ->
                 error ->
                     [text_block(<<"[binary file: ", (describe_media(Attachment))/binary, "]">>)]
             end;
+        {error, {file_too_large, _Path, Size, Limit}} ->
+            Name = attachment_name(Attachment, <<"file">>),
+            [text_block(rejection_text(Name, Size, Limit))];
         error ->
             [text_block(<<"[file: ", (describe_media(Attachment))/binary, "]">>)]
     end.
@@ -258,6 +266,9 @@ image_blocks(Attachment) ->
     case media_block(<<"image">>, Attachment, <<"image/png">>) of
         {ok, Block} ->
             [Block];
+        {error, {file_too_large, _Path, Size, Limit}} ->
+            Name = attachment_name(Attachment, <<"image">>),
+            [text_block(rejection_text(Name, Size, Limit))];
         error ->
             resource_link_or_text_blocks(<<"image">>, Attachment)
     end.
@@ -266,6 +277,9 @@ audio_blocks(Attachment) ->
     case media_block(<<"audio">>, Attachment, <<"audio/wav">>) of
         {ok, Block} ->
             [Block];
+        {error, {file_too_large, _Path, Size, Limit}} ->
+            Name = attachment_name(Attachment, <<"audio">>),
+            [text_block(rejection_text(Name, Size, Limit))];
         error ->
             resource_link_or_text_blocks(<<"audio">>, Attachment)
     end.
@@ -274,6 +288,9 @@ resource_blocks(Attachment) ->
     case embedded_resource_block(Attachment) of
         {ok, Block} ->
             [Block];
+        {error, {file_too_large, _Path, Size, Limit}} ->
+            Name = attachment_name(Attachment, <<"file">>),
+            [text_block(rejection_text(Name, Size, Limit))];
         error ->
             resource_link_or_text_blocks(<<"file">>, Attachment)
     end.
@@ -307,6 +324,8 @@ media_block(Type, Attachment, DefaultMime) ->
                     undefined -> #{};
                     _ -> #{<<"uri">> => Uri}
                 end)};
+        {error, {file_too_large, _, _, _}} = Err ->
+            Err;
         error ->
             error
     end.
@@ -335,6 +354,8 @@ embedded_resource_block(Attachment) ->
                 <<"type">> => <<"resource">>,
                 <<"resource">> => Resource2
             }};
+        {error, {file_too_large, _, _, _}} = Err ->
+            Err;
         error ->
             error
     end.
@@ -369,28 +390,44 @@ preferred_uri(Attachment) ->
             undefined
     end.
 
--spec read_attachment_file(map()) -> {ok, binary(), binary()} | error.
+-spec read_attachment_file(map()) ->
+    {ok, binary(), binary()}
+    | {error, {file_too_large, binary(), non_neg_integer(), pos_integer()}}
+    | error.
 read_attachment_file(Attachment) ->
     case value(Attachment, [path, <<"path">>], undefined) of
         Path when is_binary(Path), byte_size(Path) > 0 ->
             case read_local_file(Path) of
                 {ok, Data} -> {ok, Path, Data};
+                {error, _} = Err -> Err;
                 error -> error
             end;
         _ ->
             error
     end.
 
--spec read_local_file(binary()) -> {ok, binary()} | error.
+-spec read_local_file(binary()) ->
+    {ok, binary()}
+    | {error, {file_too_large, binary(), non_neg_integer(), pos_integer()}}
+    | error.
 read_local_file(Path) ->
     case is_uri(Path) of
         true ->
             error;
         false ->
-            case file:read_file(ensure_list(Path)) of
-                {ok, Data} when is_binary(Data) ->
-                    {ok, Data};
-                _ ->
+            PathStr = ensure_list(Path),
+            MaxSize = max_attachment_size(),
+            case file:read_file_info(PathStr) of
+                {ok, #file_info{size = Size}} when MaxSize =/= infinity, Size > MaxSize ->
+                    {error, {file_too_large, Path, Size, MaxSize}};
+                {ok, #file_info{}} ->
+                    case file:read_file(PathStr) of
+                        {ok, Data} when is_binary(Data) ->
+                            {ok, Data};
+                        _ ->
+                            error
+                    end;
+                {error, _} ->
                     error
             end
     end.
@@ -605,6 +642,36 @@ normalize_type(<<"skill">>) ->
     skill;
 normalize_type(_) ->
     normalized_other.
+
+%%--------------------------------------------------------------------
+%% Internal: Attachment size gating
+%%--------------------------------------------------------------------
+
+-spec max_attachment_size() -> pos_integer() | infinity.
+max_attachment_size() ->
+    case application:get_env(beam_agent, max_attachment_size) of
+        {ok, infinity} -> infinity;
+        {ok, N} when is_integer(N), N > 0 -> N;
+        _ -> ?DEFAULT_MAX_ATTACHMENT_SIZE
+    end.
+
+-spec rejection_text(binary(), non_neg_integer(), pos_integer()) -> binary().
+rejection_text(Name, Size, Limit) ->
+    <<"[attachment rejected: ", Name/binary, " is ",
+      (format_bytes(Size))/binary, ", limit ",
+      (format_bytes(Limit))/binary, "]">>.
+
+-spec format_bytes(non_neg_integer()) -> binary().
+format_bytes(Bytes) when Bytes >= 1048576 ->
+    iolist_to_binary(io_lib:format("~.1f MB", [Bytes / 1048576.0]));
+format_bytes(Bytes) when Bytes >= 1024 ->
+    iolist_to_binary(io_lib:format("~.1f KB", [Bytes / 1024.0]));
+format_bytes(Bytes) ->
+    iolist_to_binary(io_lib:format("~B B", [Bytes])).
+
+%%--------------------------------------------------------------------
+%% Internal: Conversion helpers
+%%--------------------------------------------------------------------
 
 ensure_list(Value) when is_binary(Value) ->
     binary_to_list(Value).

@@ -261,6 +261,274 @@ claude_no_attachments_passes_through_test() ->
     ok = beam_agent_session_store_core:delete_session(SessionId).
 
 %%====================================================================
+%% Attachment size gating
+%%====================================================================
+
+claude_oversized_file_produces_rejection_block_test() ->
+    SessionId = <<"attachments-claude-oversize">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"large.txt">>),
+    %% Write 200 bytes, then set limit to 100 so the file is rejected
+    Content = binary:copy(<<"x">>, 200),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 100),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"large.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Review">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"attachment rejected">>) =/= nomatch
+                andalso binary:match(Text, <<"large.txt">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+gemini_oversized_file_produces_rejection_block_test() ->
+    SessionId = <<"attachments-gemini-oversize">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => gemini
+    }),
+    TmpFile = temp_path(<<"big_resource.dat">>),
+    Content = binary:copy(<<"y">>, 300),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 50),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Analyze">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"attachment rejected">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+claude_oversized_image_produces_rejection_block_test() ->
+    SessionId = <<"attachments-claude-oversize-img">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"big_photo.png">>),
+    Content = binary:copy(<<0>>, 500),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 100),
+    try
+        Params = #{attachments => [#{type => image, path => TmpFile, name => <<"big_photo.png">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Describe">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"attachment rejected">>) =/= nomatch
+                andalso binary:match(Text, <<"big_photo.png">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+file_at_size_limit_is_accepted_test() ->
+    SessionId = <<"attachments-claude-atlimit">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"exact.txt">>),
+    %% Write exactly 100 bytes, set limit to 100 — should pass (not >)
+    Content = binary:copy(<<"z">>, 100),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 100),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"exact.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        %% File at limit should be inlined, NOT rejected
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"exact.txt">>) =/= nomatch
+                andalso binary:match(Text, <<"attachment rejected">>) =:= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+file_under_limit_is_accepted_test() ->
+    SessionId = <<"attachments-claude-underlimit">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"small.txt">>),
+    Content = <<"tiny file">>,
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 1000),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"small.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        %% Should be inlined with content
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"tiny file">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+default_limit_is_512kb_test() ->
+    %% Save prior env value so we can restore it after the test
+    Prev = application:get_env(beam_agent, max_attachment_size),
+    application:unset_env(beam_agent, max_attachment_size),
+    SessionId = <<"attachments-default-limit">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"within_default.txt">>),
+    %% 100 bytes is well within the 512 KB default
+    ok = file:write_file(binary_to_list(TmpFile), <<"hello">>),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"within_default.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        %% Should be inlined, not rejected
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"hello">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        case Prev of
+            {ok, V} -> application:set_env(beam_agent, max_attachment_size, V);
+            undefined -> application:unset_env(beam_agent, max_attachment_size)
+        end,
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+rejection_text_includes_human_readable_sizes_test() ->
+    SessionId = <<"attachments-rejection-text">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"big_enough.txt">>),
+    Content = binary:copy(<<"a">>, 2000),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    ok = application:set_env(beam_agent, max_attachment_size, 500),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"big_enough.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        [RejectionBlock] = [B || #{<<"type">> := <<"text">>, <<"text">> := T} = B <- PromptBlocks,
+                                  binary:match(T, <<"attachment rejected">>) =/= nomatch],
+        RejText = maps:get(<<"text">>, RejectionBlock),
+        %% 2000 bytes → "2.0 KB", 500 bytes → "500 B"
+        ?assertNotEqual(nomatch, binary:match(RejText, <<"KB">>)),
+        ?assertNotEqual(nomatch, binary:match(RejText, <<"500 B">>))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+native_backend_ignores_size_gating_test() ->
+    %% Native backends (codex, opencode, copilot) pass attachments through
+    %% unchanged — size gating only applies to materialized backends
+    SessionId = <<"attachments-codex-nogate">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => codex
+    }),
+    ok = application:set_env(beam_agent, max_attachment_size, 1),
+    try
+        Params = #{attachments => [#{type => file, path => <<"/tmp/any.txt">>}]},
+        {Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Go">>, Params),
+        ?assertEqual(<<"Go">>, Prompt),
+        %% Native backend passes through — no materialization, no size check
+        ?assertEqual({ok, [#{type => file, path => <<"/tmp/any.txt">>}]},
+            maps:find(attachments, Prepared))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+infinity_disables_size_gating_test() ->
+    SessionId = <<"attachments-claude-infinity">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"big_allowed.txt">>),
+    Content = binary:copy(<<"x">>, 2000),
+    ok = file:write_file(binary_to_list(TmpFile), Content),
+    %% infinity disables the limit entirely — 2000 bytes should pass
+    ok = application:set_env(beam_agent, max_attachment_size, infinity),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"big_allowed.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        %% Should be inlined, NOT rejected
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"big_allowed.txt">>) =/= nomatch
+                andalso binary:match(Text, <<"attachment rejected">>) =:= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+invalid_env_falls_back_to_default_test() ->
+    SessionId = <<"attachments-claude-badenv">>,
+    ok = beam_agent_session_store_core:register_session(SessionId, #{
+        session_id => SessionId,
+        backend => claude
+    }),
+    TmpFile = temp_path(<<"safe.txt">>),
+    ok = file:write_file(binary_to_list(TmpFile), <<"ok">>),
+    %% Invalid env value (binary) should fall back to 512 KB default
+    ok = application:set_env(beam_agent, max_attachment_size, <<"not_a_number">>),
+    try
+        Params = #{attachments => [#{type => file, path => TmpFile, name => <<"safe.txt">>}]},
+        {_Prompt, Prepared} = beam_agent_attachments:prepare(SessionId, <<"Read">>, Params),
+        PromptBlocks = maps:get(beam_agent_prompt_blocks, Prepared),
+        %% Should succeed (2 bytes is under 512 KB default fallback)
+        ?assert(lists:any(fun
+            (#{<<"type">> := <<"text">>, <<"text">> := Text}) ->
+                binary:match(Text, <<"ok">>) =/= nomatch;
+            (_) -> false
+        end, PromptBlocks))
+    after
+        application:unset_env(beam_agent, max_attachment_size),
+        _ = file:delete(binary_to_list(TmpFile)),
+        ok = beam_agent_session_store_core:delete_session(SessionId)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
