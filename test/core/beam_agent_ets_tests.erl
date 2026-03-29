@@ -80,7 +80,7 @@ ensure_table_always_protected_names_public_in_public_mode_test() ->
     %% must be able to write directly.
     cleanup(),
     ok = beam_agent_table_owner:init(#{table_access => public}),
-    TableName = beam_agent_apps,
+    TableName = beam_agent_runtime,
     delete_table(TableName),
     ok = beam_agent_ets:ensure_table(TableName,
         [set, named_table, {read_concurrency, true}]),

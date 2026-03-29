@@ -68,26 +68,26 @@
     enabled => boolean()
 }.
 
-%% ETS table backing per-session skill state.
--define(SKILLS_TABLE, beam_agent_skills).
-%% ETS table backing global (cross-session) skill registrations.
--define(GLOBAL_SKILLS_TABLE, beam_agent_global_skills).
+%% Per-session skills and global skills are stored in the shared
+%% beam_agent_registry table with namespaced keys:
+%%   {skill, {Key, skill, SkillId}} and {skill, {Key, config, Path}}
+%%   {skill_global, SkillId}
+-define(REG_TABLE, beam_agent_registry).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
 
--doc "Ensure the ETS table exists. Idempotent — safe to call multiple times.".
+-doc "Ensure the shared registry table exists. Idempotent — safe to call multiple times.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?SKILLS_TABLE, [set, named_table,
-        {read_concurrency, true}]).
+    beam_agent_registry:ensure_table().
 
--doc "Delete all skill and config data from the ETS table.".
+-doc "Delete all skill and config data from the shared registry.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?SKILLS_TABLE),
+    beam_agent_ets:match_delete(?REG_TABLE, {{skill, '_'}, '_'}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -96,9 +96,9 @@ clear() ->
 clear_session(Session) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    %% Skills are stored under {Key, skill, SkillId}; configs under
-    %% {Key, config, SkillId}. A single match on {Key, _, _} covers both.
-    beam_agent_ets:match_delete(?SKILLS_TABLE, {{Key, '_', '_'}, '_'}),
+    %% Skills are stored under {skill, {Key, skill, SkillId}}; configs under
+    %% {skill, {Key, config, Path}}. A single match covers both.
+    beam_agent_ets:match_delete(?REG_TABLE, {{skill, {Key, '_', '_'}}, '_'}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -126,7 +126,7 @@ register_skill(Session, SkillId, Opts)
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
     Entry = build_entry(SkillId, Opts),
-    beam_agent_ets:insert(?SKILLS_TABLE, {{Key, skill, SkillId}, Entry}),
+    beam_agent_ets:insert(?REG_TABLE, {{skill, {Key, skill, SkillId}}, Entry}),
     beam_agent_reload_bus:notify(skills),
     {ok, Entry}.
 
@@ -137,7 +137,7 @@ unregister_skill(Session, SkillId)
        is_binary(SkillId) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    beam_agent_ets:delete(?SKILLS_TABLE, {Key, skill, SkillId}),
+    beam_agent_ets:delete(?REG_TABLE, {skill, {Key, skill, SkillId}}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -234,7 +234,7 @@ skills_config_write(Session, Path, Enabled)
     Key = beam_agent_ets:session_key(Session),
     Now = erlang:system_time(millisecond),
     Config = #{path => Path, enabled => Enabled, updated_at => Now},
-    beam_agent_ets:insert(?SKILLS_TABLE, {{Key, config, Path}, Config}),
+    beam_agent_ets:insert(?REG_TABLE, {{skill, {Key, config, Path}}, Config}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -268,17 +268,17 @@ skills_config_read(Session, _Opts)
 -spec get_skills(pid() | binary()) -> [skill_entry()].
 get_skills(Session) ->
     Key = beam_agent_ets:session_key(Session),
-    %% Match all objects whose ETS key is {Key, skill, _}.
-    Pattern = {{Key, skill, '_'}, '_'},
-    Matches = ets:match_object(?SKILLS_TABLE, Pattern),
+    %% Match all objects whose ETS key is {skill, {Key, skill, _}}.
+    Pattern = {{skill, {Key, skill, '_'}}, '_'},
+    Matches = ets:match_object(?REG_TABLE, Pattern),
     [Entry || {_, Entry} <- Matches].
 
 %% Collect all config entries for a session from ETS.
 -spec get_configs(pid() | binary()) -> [skill_config()].
 get_configs(Session) ->
     Key = beam_agent_ets:session_key(Session),
-    Pattern = {{Key, config, '_'}, '_'},
-    Matches = ets:match_object(?SKILLS_TABLE, Pattern),
+    Pattern = {{skill, {Key, config, '_'}}, '_'},
+    Matches = ets:match_object(?REG_TABLE, Pattern),
     [Config || {_, Config} <- Matches].
 
 %%--------------------------------------------------------------------
@@ -332,11 +332,10 @@ matches_enabled(_, _) ->
 %% Global Skill Registration
 %%--------------------------------------------------------------------
 
--doc "Create the global skills ETS table. Idempotent.".
+-doc "Ensure the shared registry table exists for global skills. Idempotent.".
 -spec ensure_global_table() -> ok.
 ensure_global_table() ->
-    beam_agent_ets:ensure_table(?GLOBAL_SKILLS_TABLE,
-        [set, named_table, {read_concurrency, true}]).
+    beam_agent_registry:ensure_table().
 
 -doc """
 Register a skill globally (shared across all sessions).
@@ -352,7 +351,7 @@ register_global_skill(SkillId, Opts)
   when is_binary(SkillId), is_map(Opts) ->
     ok = ensure_global_table(),
     Entry = build_entry(SkillId, Opts),
-    beam_agent_ets:insert(?GLOBAL_SKILLS_TABLE, {SkillId, Entry}),
+    beam_agent_ets:insert(?REG_TABLE, {{skill_global, SkillId}, Entry}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -365,7 +364,7 @@ Emits a `skills` reload notification.
 -spec unregister_global_skill(binary()) -> ok.
 unregister_global_skill(SkillId) when is_binary(SkillId) ->
     ok = ensure_global_table(),
-    beam_agent_ets:delete(?GLOBAL_SKILLS_TABLE, SkillId),
+    beam_agent_ets:delete(?REG_TABLE, {skill_global, SkillId}),
     beam_agent_reload_bus:notify(skills),
     ok.
 
@@ -373,8 +372,8 @@ unregister_global_skill(SkillId) when is_binary(SkillId) ->
 -spec get_global_skill(binary()) -> {ok, skill_entry()} | {error, not_found}.
 get_global_skill(SkillId) when is_binary(SkillId) ->
     ok = ensure_global_table(),
-    case ets:lookup(?GLOBAL_SKILLS_TABLE, SkillId) of
-        [{_, Entry}] -> {ok, Entry};
+    case ets:lookup(?REG_TABLE, {skill_global, SkillId}) of
+        [{{skill_global, SkillId}, Entry}] -> {ok, Entry};
         [] -> {error, not_found}
     end.
 
@@ -382,7 +381,8 @@ get_global_skill(SkillId) when is_binary(SkillId) ->
 -spec list_global_skills() -> [skill_entry()].
 list_global_skills() ->
     ok = ensure_global_table(),
-    [Entry || {_, Entry} <- ets:tab2list(?GLOBAL_SKILLS_TABLE)].
+    [Entry || {{skill_global, _}, Entry} <-
+        ets:match_object(?REG_TABLE, {{skill_global, '_'}, '_'})].
 
 -doc "List globally registered skills with optional filters.".
 -spec list_global_skills(list_opts()) -> [skill_entry()].
@@ -397,6 +397,6 @@ Emits a `skills` reload notification.
 -spec clear_global_skills() -> ok.
 clear_global_skills() ->
     ok = ensure_global_table(),
-    beam_agent_ets:delete_all_objects(?GLOBAL_SKILLS_TABLE),
+    beam_agent_ets:match_delete(?REG_TABLE, {{skill_global, '_'}, '_'}),
     beam_agent_reload_bus:notify(skills),
     ok.

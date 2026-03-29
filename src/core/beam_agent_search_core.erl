@@ -46,7 +46,7 @@
     roots       => [binary()]
 }.
 
--define(SESSIONS_TABLE, beam_agent_search_sessions).
+-define(TABLE, beam_agent_runtime).
 -define(DEFAULT_MAX_RESULTS, 50).
 -define(MAX_WALK_DEPTH, 10).
 -define(EXCLUDED_DIRS, [<<".git">>, <<"_build">>, <<"node_modules">>, <<"deps">>]).
@@ -58,14 +58,13 @@
 -doc "Ensure the search sessions ETS table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?SESSIONS_TABLE, [set, named_table,
-        {read_concurrency, true}]).
+    beam_agent_runtime:app_ensure_tables().
 
 -doc "Delete all search session data.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{search, '_'}, '_'}),
     ok.
 
 -doc "Delete all search sessions associated with a session pid or id.".
@@ -73,8 +72,8 @@ clear() ->
 clear_session(Session) ->
     ensure_tables(),
     SKey = beam_agent_ets:session_key(Session),
-    %% Search sessions are stored under {SKey, SearchSessionId}.
-    beam_agent_ets:match_delete(?SESSIONS_TABLE, {{SKey, '_'}, '_'}),
+    %% Search sessions are stored under {search, {SKey, SearchSessionId}}.
+    beam_agent_ets:match_delete(?TABLE, {{search, {SKey, '_'}}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -134,7 +133,7 @@ session_start(Session, SearchSessionId, Roots)
         last_results => [],
         created_at   => Now
     },
-    beam_agent_ets:insert(?SESSIONS_TABLE, {{SKey, SearchSessionId}, Entry}),
+    beam_agent_ets:insert(?TABLE, {{search, {SKey, SearchSessionId}}, Entry}),
     {ok, Entry}.
 
 -doc """
@@ -149,13 +148,13 @@ session_update(Session, SearchSessionId, Query)
   when is_binary(SearchSessionId), is_binary(Query) ->
     ensure_tables(),
     SKey = beam_agent_ets:session_key(Session),
-    EtsKey = {SKey, SearchSessionId},
-    case ets:lookup(?SESSIONS_TABLE, EtsKey) of
+    EtsKey = {search, {SKey, SearchSessionId}},
+    case ets:lookup(?TABLE, EtsKey) of
         [{_, Entry}] ->
             Roots = maps:get(roots, Entry),
             {ok, Matches} = fuzzy_file_search(Query, Roots, #{}),
             Updated = Entry#{last_query => Query, last_results => Matches},
-            beam_agent_ets:insert(?SESSIONS_TABLE, {EtsKey, Updated}),
+            beam_agent_ets:insert(?TABLE, {EtsKey, Updated}),
             {ok, Matches};
         [] ->
             {error, not_found}
@@ -167,7 +166,7 @@ session_stop(Session, SearchSessionId)
   when is_binary(SearchSessionId) ->
     ensure_tables(),
     SKey = beam_agent_ets:session_key(Session),
-    beam_agent_ets:delete(?SESSIONS_TABLE, {SKey, SearchSessionId}),
+    beam_agent_ets:delete(?TABLE, {search, {SKey, SearchSessionId}}),
     ok.
 
 %%--------------------------------------------------------------------

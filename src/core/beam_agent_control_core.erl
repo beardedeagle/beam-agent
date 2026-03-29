@@ -142,11 +142,8 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
                            {normalize_pending_request, 2}]}).
 
 %% ETS tables.
--define(CONFIG_TABLE, beam_agent_control_config).
--define(TASKS_TABLE, beam_agent_control_tasks).
+-define(TABLE, beam_agent_runtime).
 -define(FEEDBACK_TABLE, beam_agent_control_feedback).
--define(CALLBACKS_TABLE, beam_agent_control_callbacks).
--define(PENDING_TABLE, beam_agent_control_pending).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -155,24 +152,19 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
 -doc "Ensure all control ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?CONFIG_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?TASKS_TABLE, [set, named_table]),
+    beam_agent_runtime:app_ensure_tables(),
     beam_agent_ets:ensure_table(?FEEDBACK_TABLE, [ordered_set, named_table]),
-    beam_agent_ets:ensure_table(?CALLBACKS_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?PENDING_TABLE, [set, named_table]),
     ok.
 
 -doc "Clear all control state.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?CONFIG_TABLE),
-    beam_agent_ets:delete_all_objects(?TASKS_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{control_config, '_'}, '_'}),
+    beam_agent_ets:match_delete(?TABLE, {{control_task, '_'}, '_'}),
     beam_agent_ets:delete_all_objects(?FEEDBACK_TABLE),
-    beam_agent_ets:delete_all_objects(?CALLBACKS_TABLE),
-    beam_agent_ets:delete_all_objects(?PENDING_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{control_callback, '_'}, '_'}),
+    beam_agent_ets:match_delete(?TABLE, {{control_pending, '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -253,7 +245,7 @@ dispatch(SessionId, Method, Params)
 get_config(SessionId, Key)
   when is_binary(SessionId), is_atom(Key) ->
     ensure_tables(),
-    case ets:lookup(?CONFIG_TABLE, {SessionId, Key}) of
+    case ets:lookup(?TABLE, {control_config, {SessionId, Key}}) of
         [{_, Value}] -> {ok, Value};
         [] -> {error, not_set}
     end.
@@ -263,7 +255,7 @@ get_config(SessionId, Key)
 set_config(SessionId, Key, Value)
   when is_binary(SessionId), is_atom(Key) ->
     ensure_tables(),
-    beam_agent_ets:insert(?CONFIG_TABLE, {{SessionId, Key}, Value}),
+    beam_agent_ets:insert(?TABLE, {{control_config, {SessionId, Key}}, Value}),
     ok.
 
 -doc "Get all config for a session as a map.".
@@ -271,11 +263,11 @@ set_config(SessionId, Key, Value)
 get_all_config(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     Config = ets:foldl(fun
-        ({{SId, Key}, Value}, Acc) when SId =:= SessionId ->
+        ({{control_config, {SId, Key}}, Value}, Acc) when SId =:= SessionId ->
             Acc#{Key => Value};
         (_, Acc) ->
             Acc
-    end, #{}, ?CONFIG_TABLE),
+    end, #{}, ?TABLE),
     {ok, Config}.
 
 -doc "Clear all config for a session.".
@@ -283,13 +275,7 @@ get_all_config(SessionId) when is_binary(SessionId) ->
 clear_config(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     %% Delete all keys for this session
-    ets:foldl(fun
-        ({{SId, _} = Key, _}, ok) when SId =:= SessionId ->
-            beam_agent_ets:delete(?CONFIG_TABLE, Key),
-            ok;
-        (_, ok) ->
-            ok
-    end, ok, ?CONFIG_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{control_config, {SessionId, '_'}}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -332,8 +318,8 @@ get_max_thinking_tokens(SessionId) when is_binary(SessionId) ->
 register_task(SessionId, TaskId, Pid)
   when is_binary(SessionId), is_binary(TaskId), is_pid(Pid) ->
     ensure_tables(),
-    Key = {SessionId, TaskId},
-    Replaced = case ets:lookup(?TASKS_TABLE, Key) of
+    Key = {control_task, {SessionId, TaskId}},
+    Replaced = case ets:lookup(?TABLE, Key) of
         [{_, ExistingTask}] ->
             ok = reconcile_replaced_task(ExistingTask),
             true;
@@ -350,7 +336,7 @@ register_task(SessionId, TaskId, Pid)
         status => running,
         run_id => RunId
     },
-    beam_agent_ets:insert(?TASKS_TABLE, {Key, Task}),
+    beam_agent_ets:insert(?TABLE, {Key, Task}),
     {ok, _Entry} = journal_task_event(<<"task_registered">>, SessionId, Task, #{
         replaced => Replaced
     }),
@@ -361,11 +347,11 @@ register_task(SessionId, TaskId, Pid)
 unregister_task(SessionId, TaskId)
   when is_binary(SessionId), is_binary(TaskId) ->
     ensure_tables(),
-    Key = {SessionId, TaskId},
-    case ets:lookup(?TASKS_TABLE, Key) of
+    Key = {control_task, {SessionId, TaskId}},
+    case ets:lookup(?TABLE, Key) of
         [{_, Task}] ->
             ok = reconcile_unregistered_task(Task),
-            beam_agent_ets:delete(?TASKS_TABLE, {SessionId, TaskId}),
+            beam_agent_ets:delete(?TABLE, Key),
             {ok, _Entry} = journal_task_event(<<"task_unregistered">>, SessionId, Task, #{}),
             ok;
         [] ->
@@ -380,8 +366,8 @@ Returns `ok` if the task was found and signaled, error otherwise.
 stop_task(SessionId, TaskId)
   when is_binary(SessionId), is_binary(TaskId) ->
     ensure_tables(),
-    Key = {SessionId, TaskId},
-    case ets:lookup(?TASKS_TABLE, Key) of
+    Key = {control_task, {SessionId, TaskId}},
+    case ets:lookup(?TABLE, Key) of
         [{_, #{pid := Pid, status := running} = Task}] ->
             Now = erlang:system_time(millisecond),
             %% Signal the process to stop
@@ -402,7 +388,7 @@ stop_task(SessionId, TaskId)
                 status => stopped,
                 stopped_at => Now
             },
-            beam_agent_ets:insert(?TASKS_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?TABLE, {Key, Updated}),
             {ok, _Entry} = journal_task_event(<<"task_stopped">>, SessionId, Updated, #{}),
             ok;
         [{_, #{status := stopped}}] ->
@@ -416,11 +402,11 @@ stop_task(SessionId, TaskId)
 list_tasks(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     Tasks = ets:foldl(fun
-        ({{SId, _}, Task}, Acc) when SId =:= SessionId ->
+        ({{control_task, {SId, _}}, Task}, Acc) when SId =:= SessionId ->
             [Task | Acc];
         (_, Acc) ->
             Acc
-    end, [], ?TASKS_TABLE),
+    end, [], ?TABLE),
     {ok, Tasks}.
 
 %%--------------------------------------------------------------------
@@ -502,9 +488,9 @@ register_session_callbacks(SessionId, Opts)
     }),
     case map_size(CallbackState) of
         0 ->
-            beam_agent_ets:delete(?CALLBACKS_TABLE, SessionId);
+            beam_agent_ets:delete(?TABLE, {control_callback, SessionId});
         _ ->
-            beam_agent_ets:insert(?CALLBACKS_TABLE, {SessionId, CallbackState})
+            beam_agent_ets:insert(?TABLE, {{control_callback, SessionId}, CallbackState})
     end,
     ok.
 
@@ -512,7 +498,7 @@ register_session_callbacks(SessionId, Opts)
 -spec clear_session_callbacks(binary()) -> ok.
 clear_session_callbacks(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    beam_agent_ets:delete(?CALLBACKS_TABLE, SessionId),
+    beam_agent_ets:delete(?TABLE, {control_callback, SessionId}),
     ok.
 
 -doc "Request canonical permission handling for a session.".
@@ -642,7 +628,7 @@ store_pending_request(SessionId, RequestId, Request)
         status => pending,
         created_at => Now
     },
-    beam_agent_ets:insert(?PENDING_TABLE, {{SessionId, RequestId}, Entry}),
+    beam_agent_ets:insert(?TABLE, {{control_pending, {SessionId, RequestId}}, Entry}),
     beam_agent_events:publish(SessionId, #{
         type => system,
         subtype => <<"pending_request_stored">>,
@@ -665,8 +651,8 @@ store_pending_request(SessionId, RequestId, Request)
 resolve_pending_request(SessionId, RequestId, Response)
   when is_binary(SessionId), is_binary(RequestId), is_map(Response) ->
     ensure_tables(),
-    Key = {SessionId, RequestId},
-    case ets:lookup(?PENDING_TABLE, Key) of
+    Key = {control_pending, {SessionId, RequestId}},
+    case ets:lookup(?TABLE, Key) of
         [{_, #{status := pending} = Entry}] ->
             Now = erlang:system_time(millisecond),
             Updated = Entry#{
@@ -674,7 +660,7 @@ resolve_pending_request(SessionId, RequestId, Response)
                 response => Response,
                 resolved_at => Now
             },
-            beam_agent_ets:insert(?PENDING_TABLE, {Key, Updated}),
+            beam_agent_ets:insert(?TABLE, {Key, Updated}),
             beam_agent_events:publish(SessionId, #{
                 type => system,
                 subtype => <<"pending_request_resolved">>,
@@ -702,8 +688,8 @@ resolve_pending_request(SessionId, RequestId, Response)
 get_pending_response(SessionId, RequestId)
   when is_binary(SessionId), is_binary(RequestId) ->
     ensure_tables(),
-    Key = {SessionId, RequestId},
-    case ets:lookup(?PENDING_TABLE, Key) of
+    Key = {control_pending, {SessionId, RequestId}},
+    case ets:lookup(?TABLE, Key) of
         [{_, #{status := resolved, response := Response}}] ->
             {ok, Response};
         [{_, #{status := pending}}] ->
@@ -717,11 +703,11 @@ get_pending_response(SessionId, RequestId)
 list_pending_requests(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     Requests = ets:foldl(fun
-        ({{SId, _}, Entry}, Acc) when SId =:= SessionId ->
+        ({{control_pending, {SId, _}}, Entry}, Acc) when SId =:= SessionId ->
             [beam_agent_redaction:pending_entry(Entry) | Acc];
         (_, Acc) ->
             Acc
-    end, [], ?PENDING_TABLE),
+    end, [], ?TABLE),
     {ok, lists:sort(fun(A, B) ->
         maps:get(created_at, A, 0) =< maps:get(created_at, B, 0)
     end, Requests)}.
@@ -732,8 +718,8 @@ list_pending_requests(SessionId) when is_binary(SessionId) ->
 
 -spec lookup_callbacks(binary()) -> map().
 lookup_callbacks(SessionId) ->
-    case ets:lookup(?CALLBACKS_TABLE, SessionId) of
-        [{SessionId, Callbacks}] when is_map(Callbacks) ->
+    case ets:lookup(?TABLE, {control_callback, SessionId}) of
+        [{_, Callbacks}] when is_map(Callbacks) ->
             Callbacks;
         [] ->
             #{}

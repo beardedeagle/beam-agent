@@ -79,19 +79,18 @@ keeps lookups cheap and avoids introducing a central process bottleneck.
     known_provider => boolean()
 }.
 
--define(RUNTIME_TABLE, beam_agent_runtime_core).
+-define(RUNTIME_TABLE, beam_agent_runtime).
 
 -doc "Ensure the runtime ETS table exists.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?RUNTIME_TABLE, [set, named_table,
-        {read_concurrency, true}]).
+    beam_agent_runtime:app_ensure_tables().
 
 -doc "Clear all runtime state.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?RUNTIME_TABLE),
+    beam_agent_ets:match_delete(?RUNTIME_TABLE, {{runtime, '_'}, '_'}),
     ok.
 
 -doc """
@@ -117,7 +116,7 @@ register_session(Session, Opts) when is_map(Opts) ->
 -spec clear_session(pid() | binary()) -> ok.
 clear_session(Session) ->
     ensure_tables(),
-    beam_agent_ets:delete(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)),
+    beam_agent_ets:delete(?RUNTIME_TABLE, {runtime, beam_agent_ets:session_key(Session)}),
     ok.
 
 -doc "Read the current runtime state map for a session.".
@@ -129,7 +128,7 @@ get_state(Session) ->
 -spec get_raw_state(pid() | binary()) -> {ok, runtime_state()}.
 get_raw_state(Session) ->
     ensure_tables(),
-    case ets:lookup(?RUNTIME_TABLE, beam_agent_ets:session_key(Session)) of
+    case ets:lookup(?RUNTIME_TABLE, {runtime, beam_agent_ets:session_key(Session)}) of
         [{_, State}] when is_map(State) ->
             {ok, beam_agent_credential:unprotect(State)};
         [] ->
@@ -398,7 +397,7 @@ merge_query_opts(Session, Params) when is_map(Params) ->
 -spec put_state(pid() | binary(), map()) -> ok.
 put_state(Session, Updates) when is_map(Updates) ->
     ensure_tables(),
-    Key = beam_agent_ets:session_key(Session),
+    Key = {runtime, beam_agent_ets:session_key(Session)},
     put_state_cas(Key, Updates, 10).
 
 -spec put_state_cas(pid() | binary(), map(), pos_integer()) -> ok.
@@ -434,7 +433,7 @@ put_state_cas(Key, Updates, Retries) ->
 -spec update_state(pid() | binary(), fun((map()) -> map())) -> ok.
 update_state(Session, Fun) ->
     ensure_tables(),
-    Key = beam_agent_ets:session_key(Session),
+    Key = {runtime, beam_agent_ets:session_key(Session)},
     update_state_cas(Key, Fun, 10).
 
 -spec update_state_cas(pid() | binary(), fun((map()) -> map()), pos_integer()) -> ok.

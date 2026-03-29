@@ -34,8 +34,7 @@
             {review_metrics, 4},
             {increment_input_summary, 2}]}).
 
--define(REVIEWS_TABLE, beam_agent_review_sessions).
--define(REALTIME_TABLE, beam_agent_realtime_sessions).
+-define(TABLE, beam_agent_runtime).
 
 -type review_session() :: #{
     review_id := binary(),
@@ -88,18 +87,14 @@
 -doc "Ensure collaboration ETS tables exist.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?REVIEWS_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?REALTIME_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    ok.
+    beam_agent_runtime:app_ensure_tables().
 
 -doc "Clear all universal collaboration state.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?REVIEWS_TABLE),
-    beam_agent_ets:delete_all_objects(?REALTIME_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{review, '_'}, '_'}),
+    beam_agent_ets:match_delete(?TABLE, {{realtime, '_'}, '_'}),
     ok.
 
 -doc "Start a universal review session for the canonical API.".
@@ -141,7 +136,7 @@ start_review(SessionId, Params)
         updated_at => Now,
         params => Params
     },
-    beam_agent_ets:insert(?REVIEWS_TABLE, {{SessionId, ReviewId}, Review}),
+    beam_agent_ets:insert(?TABLE, {{review, {SessionId, ReviewId}}, Review}),
     ok = record_thread_event(SessionId, ThreadId, <<"review_started">>, #{
         review_id => ReviewId,
         backend => Backend,
@@ -230,7 +225,7 @@ start_realtime(SessionId, Params)
               metadata => TransportMetadata}
         ]
     },
-    beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Session}),
+    beam_agent_ets:insert(?TABLE, {{realtime, {SessionId, ThreadId}}, Session}),
     ok = record_thread_event(SessionId, ThreadId, <<"thread_realtime_started">>, #{
         realtime_id => RealtimeId,
         backend => Backend,
@@ -271,7 +266,7 @@ append_realtime_text(SessionId, ThreadId, Params)
                     sequence => EventCount
                 })
             },
-            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?TABLE, {{realtime, {SessionId, ThreadId}}, Updated}),
             {ok, Updated};
         {error, not_found} ->
             {error, not_found}
@@ -313,7 +308,7 @@ append_realtime_audio(SessionId, ThreadId, Params)
                     sequence => EventCount
                 })
             },
-            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?TABLE, {{realtime, {SessionId, ThreadId}}, Updated}),
             {ok, Updated};
         {error, not_found} ->
             {error, not_found}
@@ -339,7 +334,7 @@ stop_realtime(SessionId, ThreadId)
                     sequence => EventCount
                 })
             },
-            beam_agent_ets:insert(?REALTIME_TABLE, {{SessionId, ThreadId}, Updated}),
+            beam_agent_ets:insert(?TABLE, {{realtime, {SessionId, ThreadId}}, Updated}),
             ok = record_thread_event(SessionId, ThreadId, <<"thread_realtime_stopped">>, #{}),
             {ok, Updated};
         {error, not_found} ->
@@ -370,8 +365,8 @@ ensure_thread(SessionId, Params, DefaultName) ->
 -spec lookup_realtime(binary(), binary()) -> {ok, map()} | {error, not_found}.
 lookup_realtime(SessionId, ThreadId) ->
     ensure_tables(),
-    case ets:lookup(?REALTIME_TABLE, {SessionId, ThreadId}) of
-        [{{SessionId, ThreadId}, Session}] ->
+    case ets:lookup(?TABLE, {realtime, {SessionId, ThreadId}}) of
+        [{_, Session}] ->
             {ok, Session};
         [] ->
             {error, not_found}

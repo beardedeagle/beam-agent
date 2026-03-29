@@ -189,7 +189,7 @@ level deep. The built-in provider catalog is compiled-in static data.
 %% App Types and Defines (folded from beam_agent_app_core)
 %%--------------------------------------------------------------------
 
--define(APP_TABLE, beam_agent_apps).
+-define(TABLE, beam_agent_runtime).
 -define(DEFAULT_APP_MODES, [<<"default">>, <<"debug">>, <<"verbose">>]).
 
 -type app_entry() :: #{
@@ -782,17 +782,17 @@ todo_summary(Todos) ->
 %% App Registry Implementation (folded from beam_agent_app_core)
 %%--------------------------------------------------------------------
 
--doc "Ensure the app registry ETS table exists. Idempotent.".
+-doc "Ensure the unified runtime ETS table exists. Idempotent.".
 -spec app_ensure_tables() -> ok.
 app_ensure_tables() ->
-    beam_agent_ets:ensure_table(?APP_TABLE, [set, named_table,
+    beam_agent_ets:ensure_table(?TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all app registry data.".
 -spec app_clear() -> ok.
 app_clear() ->
     app_ensure_tables(),
-    beam_agent_ets:delete_all_objects(?APP_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{app, '_', '_'}, '_'}),
     ok.
 
 -doc """
@@ -812,8 +812,8 @@ app_register(Session, AppId, Opts)
   when (is_pid(Session) orelse is_binary(Session)),
        is_binary(AppId), is_map(Opts) ->
     app_ensure_tables(),
-    Key = {beam_agent_ets:session_key(Session), AppId},
-    Existing = case ets:lookup(?APP_TABLE, Key) of
+    Key = {app, beam_agent_ets:session_key(Session), AppId},
+    Existing = case ets:lookup(?TABLE, Key) of
         [{_, E}] -> E;
         []       -> new_app_entry(Session, AppId)
     end,
@@ -827,7 +827,7 @@ app_register(Session, AppId, Opts)
         metadata => Meta,
         status   => maps:get(status, Opts, maps:get(status, Existing, active))
     },
-    beam_agent_ets:insert(?APP_TABLE, {Key, Entry}),
+    beam_agent_ets:insert(?TABLE, {Key, Entry}),
     {ok, Entry}.
 
 -doc "Remove an app entry for a session. No-op if the entry does not exist.".
@@ -835,8 +835,8 @@ app_register(Session, AppId, Opts)
 app_unregister(Session, AppId)
   when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
     app_ensure_tables(),
-    Key = {beam_agent_ets:session_key(Session), AppId},
-    beam_agent_ets:delete(?APP_TABLE, Key),
+    Key = {app, beam_agent_ets:session_key(Session), AppId},
+    beam_agent_ets:delete(?TABLE, Key),
     ok.
 
 %% Internal app implementations used as native_or fallbacks.
@@ -851,14 +851,14 @@ apps_list_impl(Session, Opts)
     app_ensure_tables(),
     SK = beam_agent_ets:session_key(Session),
     All = ets:foldl(fun
-        ({{S, _}, Entry}, Acc) when S =:= SK ->
+        ({{app, S, _}, Entry}, Acc) when S =:= SK ->
             case matches_app_status(Entry, Opts) of
                 true  -> [Entry | Acc];
                 false -> Acc
             end;
         (_, Acc) ->
             Acc
-    end, [], ?APP_TABLE),
+    end, [], ?TABLE),
     {ok, All}.
 
 -spec app_info_impl(pid() | binary()) -> {ok, app_entry()} | {error, no_app}.
@@ -896,14 +896,14 @@ app_log_impl(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
             {error, no_app};
         {ok, Entry} ->
             AppId = maps:get(id, Entry),
-            Key   = {SK, AppId},
+            Key   = {app, SK, AppId},
             LogEntry = #{
                 timestamp => erlang:system_time(millisecond),
                 body      => Body
             },
             Log0  = maps:get(log, Entry, []),
             Entry2 = Entry#{log => [LogEntry | Log0]},
-            beam_agent_ets:insert(?APP_TABLE, {Key, Entry2}),
+            beam_agent_ets:insert(?TABLE, {Key, Entry2}),
             ok
     end.
 

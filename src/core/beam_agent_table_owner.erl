@@ -68,11 +68,8 @@ In public mode (no owner process), `monitor_for_cleanup/2` returns
 Five tables are classified as single-writer (primarily written by
 consumer-facing APIs or the router):
 
-  - `beam_agent_control_callbacks` — primarily consumer-facing APIs
+  - `beam_agent_runtime` — unified runtime table, primarily consumer-facing APIs
   - `beam_agent_backend_sessions` — primarily `beam_agent_router`
-  - `beam_agent_apps` — primarily consumer-facing APIs
-  - `beam_agent_skills` — primarily consumer-facing APIs
-  - `beam_agent_checkpoints` — primarily consumer-facing APIs
 
 Note: the session engine may also write to these tables during lifecycle
 events (e.g., termination cleanup). In `public` mode all tables use public
@@ -241,12 +238,9 @@ termination cleanup). This classification is informational — it does not
 affect the access mode, which is determined solely by `resolve_access/1`.
 """.
 -spec is_always_protected(atom()) -> boolean().
-is_always_protected(beam_agent_control_callbacks) -> true;
-is_always_protected(beam_agent_backend_sessions)  -> true;
-is_always_protected(beam_agent_apps)              -> true;
-is_always_protected(beam_agent_skills)            -> true;
-is_always_protected(beam_agent_checkpoints)       -> true;
-is_always_protected(_)                            -> false.
+is_always_protected(beam_agent_runtime)            -> true;
+is_always_protected(beam_agent_backend_sessions)   -> true;
+is_always_protected(_)                             -> false.
 
 -doc """
 Resolve the effective access mode for a given table.

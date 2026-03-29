@@ -27,8 +27,7 @@ setup() ->
     ok = beam_agent_reload_bus:subscribe().
 
 cleanup_tables() ->
-    catch ets:delete(beam_agent_reload_subscribers),
-    catch ets:delete(beam_agent_reload_version),
+    catch ets:delete(beam_agent_reload),
     catch ets:delete(beam_agent_registry),
     ok.
 

@@ -61,13 +61,13 @@ belong in beam_agent_artifacts_core. The default adapter is ETS via
     since => integer()
 }.
 
--define(ARTIFACTS_TABLE, beam_agent_artifact_records).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(STORE_DOMAIN, artifacts).
 
--doc "Ensure the artifacts ETS table exists. Idempotent.".
+-doc "Ensure the shared domains table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?ARTIFACTS_TABLE, [set,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set,
         named_table,
         {read_concurrency, true}]).
 
@@ -75,22 +75,22 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?ARTIFACTS_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{artifact, '_'}, '_'}),
     ok.
 
 -doc "Insert or overwrite an artifact record.".
 -spec put_artifact(artifact_record()) -> ok.
 put_artifact(#{artifact_id := ArtifactId} = Artifact) when is_binary(ArtifactId) ->
     ensure_tables(),
-    true = beam_agent_store:insert(?STORE_DOMAIN, ?ARTIFACTS_TABLE,
-        {ArtifactId, Artifact}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE,
+        {{artifact, ArtifactId}, Artifact}),
     ok.
 
 -doc "Fetch an artifact by id.".
 -spec get_artifact(binary()) -> {ok, artifact_record()} | {error, not_found}.
 get_artifact(ArtifactId) when is_binary(ArtifactId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {artifact, ArtifactId}) of
         [{_, Artifact}] -> {ok, Artifact};
         [] -> {error, not_found}
     end.
@@ -99,9 +99,9 @@ get_artifact(ArtifactId) when is_binary(ArtifactId) ->
 -spec delete_artifact(binary()) -> ok | {error, not_found}.
 delete_artifact(ArtifactId) when is_binary(ArtifactId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {artifact, ArtifactId}) of
         [{_, _Artifact}] ->
-            beam_agent_store:delete(?STORE_DOMAIN, ?ARTIFACTS_TABLE, ArtifactId),
+            beam_agent_store:delete(?STORE_DOMAIN, ?DOMAINS_TABLE, {artifact, ArtifactId}),
             ok;
         [] ->
             {error, not_found}
@@ -112,12 +112,14 @@ delete_artifact(ArtifactId) when is_binary(ArtifactId) ->
 list_artifacts(Filter) when is_map(Filter) ->
     ensure_tables(),
     Artifacts = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({_, Artifact}, Acc) ->
+        ({{artifact, _}, Artifact}, Acc) ->
             case matches_filters(Artifact, Filter) of
                 true -> [Artifact | Acc];
                 false -> Acc
-            end
-    end, [], ?ARTIFACTS_TABLE),
+            end;
+        (_, Acc) ->
+            Acc
+    end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_artifacts/2, Artifacts),
     {ok, apply_limit(Sorted, Filter)}.
 

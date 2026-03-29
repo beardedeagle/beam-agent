@@ -131,8 +131,7 @@ events into the BeamAgent journal.
         atom() => term()
     }.
 
--define(AFFINITY_TABLE, beam_agent_routing_affinity).
--define(ROUND_ROBIN_TABLE, beam_agent_routing_round_robin).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(STORE_DOMAIN, routing).
 -define(SUPPORTED_KEYS,
     [backend, preferred_backends, excluded_backends, fallback_backends,
@@ -142,10 +141,7 @@ events into the BeamAgent journal.
 -doc "Ensure routing state tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?AFFINITY_TABLE, [set,
-        named_table,
-        {read_concurrency, true}]),
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?ROUND_ROBIN_TABLE, [set,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set,
         named_table,
         {read_concurrency, true}]),
     ok.
@@ -154,8 +150,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?AFFINITY_TABLE),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?ROUND_ROBIN_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{routing_affinity, '_'}, '_'}),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{routing_rr, '_'}, '_'}),
     ok.
 
 -doc """
@@ -325,9 +321,10 @@ choose_round_robin(Request, Candidates, Sticky) ->
         [] ->
             no_backend_error(Request, Candidates);
         Ordered ->
-            RouteKey = route_key(Request, Ordered, Sticky),
+            RouteKey0 = route_key(Request, Ordered, Sticky),
+            RouteKey = {routing_rr, RouteKey0},
             Counter = beam_agent_store:update_counter(?STORE_DOMAIN,
-                ?ROUND_ROBIN_TABLE, RouteKey, {2, 1}, {RouteKey, 0}),
+                ?DOMAINS_TABLE, RouteKey, {2, 1}, {RouteKey, 0}),
             Index = (Counter - 1) rem length(Ordered),
             Backend = lists:nth(Index + 1, Ordered),
             Rotated = rotate_candidates(Ordered, Index),
@@ -846,8 +843,8 @@ persist_decision(Request, Decision) ->
         sticky ->
             case maps:get(affinity_key, Decision, undefined) of
                 AffinityKey when is_binary(AffinityKey) ->
-                    true = beam_agent_store:insert(?STORE_DOMAIN, ?AFFINITY_TABLE,
-                        {AffinityKey, maps:get(backend, Decision)}),
+                    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE,
+                        {{routing_affinity, AffinityKey}, maps:get(backend, Decision)}),
                     ok;
                 _ ->
                     ok
@@ -859,7 +856,7 @@ persist_decision(Request, Decision) ->
 -spec affinity_backend(binary()) ->
     {ok, beam_agent_backend:backend()} | error.
 affinity_backend(AffinityKey) ->
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?AFFINITY_TABLE, AffinityKey) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {routing_affinity, AffinityKey}) of
         [{_, Backend}] -> {ok, Backend};
         [] -> error
     end.

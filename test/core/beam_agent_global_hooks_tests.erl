@@ -25,8 +25,7 @@ setup() ->
 
 cleanup_tables() ->
     catch ets:delete(beam_agent_global_hooks),
-    catch ets:delete(beam_agent_reload_subscribers),
-    catch ets:delete(beam_agent_reload_version),
+    catch ets:delete(beam_agent_reload),
     ok.
 
 noop_cb() -> fun(Ctx) -> {ok, Ctx} end.

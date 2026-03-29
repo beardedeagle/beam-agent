@@ -17,32 +17,30 @@
 %% Test Helpers
 %%====================================================================
 
-%% Each test needs a fresh ETS state. We delete the tables if they
-%% exist, then call ensure_tables/0 to recreate them.
+%% Each test needs a fresh ETS state. We delete the table if it
+%% exists, then call ensure_tables/0 to recreate it.
 setup() ->
     cleanup_tables(),
     ok = beam_agent_reload_bus:ensure_tables().
 
 cleanup_tables() ->
-    catch ets:delete(beam_agent_reload_subscribers),
-    catch ets:delete(beam_agent_reload_version),
+    catch ets:delete(beam_agent_reload),
     ok.
 
 %%====================================================================
 %% Table Creation Tests
 %%====================================================================
 
-ensure_tables_creates_both_tables_test() ->
+ensure_tables_creates_table_test() ->
     setup(),
-    ?assertNotEqual(undefined, ets:whereis(beam_agent_reload_subscribers)),
-    ?assertNotEqual(undefined, ets:whereis(beam_agent_reload_version)),
+    ?assertNotEqual(undefined, ets:whereis(beam_agent_reload)),
     cleanup_tables().
 
 ensure_tables_is_idempotent_test() ->
     setup(),
     %% Calling again should not crash or reset the version.
     ok = beam_agent_reload_bus:ensure_tables(),
-    ?assertNotEqual(undefined, ets:whereis(beam_agent_reload_subscribers)),
+    ?assertNotEqual(undefined, ets:whereis(beam_agent_reload)),
     cleanup_tables().
 
 ensure_tables_seeds_version_at_zero_test() ->
@@ -57,16 +55,16 @@ ensure_tables_seeds_version_at_zero_test() ->
 subscribe_adds_calling_process_test() ->
     setup(),
     ok = beam_agent_reload_bus:subscribe(),
-    Subs = ets:tab2list(beam_agent_reload_subscribers),
-    ?assert(lists:member({self()}, Subs)),
+    Subs = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    ?assert(lists:member({{subscriber, self()}}, Subs)),
     cleanup_tables().
 
 subscribe_explicit_pid_test() ->
     setup(),
     Pid = spawn(fun() -> receive stop -> ok end end),
     ok = beam_agent_reload_bus:subscribe(Pid),
-    Subs = ets:tab2list(beam_agent_reload_subscribers),
-    ?assert(lists:member({Pid}, Subs)),
+    Subs = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    ?assert(lists:member({{subscriber, Pid}}, Subs)),
     Pid ! stop,
     cleanup_tables().
 
@@ -75,8 +73,8 @@ subscribe_is_idempotent_test() ->
     ok = beam_agent_reload_bus:subscribe(),
     ok = beam_agent_reload_bus:subscribe(),
     %% set table — duplicate inserts are no-ops
-    Subs = ets:tab2list(beam_agent_reload_subscribers),
-    Count = length([S || S = {P} <- Subs, P =:= self()]),
+    Subs = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    Count = length([S || S = {{subscriber, P}} <- Subs, P =:= self()]),
     ?assertEqual(1, Count),
     cleanup_tables().
 
@@ -84,8 +82,8 @@ unsubscribe_removes_calling_process_test() ->
     setup(),
     ok = beam_agent_reload_bus:subscribe(),
     ok = beam_agent_reload_bus:unsubscribe(),
-    Subs = ets:tab2list(beam_agent_reload_subscribers),
-    ?assertNot(lists:member({self()}, Subs)),
+    Subs = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    ?assertNot(lists:member({{subscriber, self()}}, Subs)),
     cleanup_tables().
 
 unsubscribe_is_idempotent_test() ->
@@ -127,11 +125,13 @@ notify_prunes_dead_subscribers_test() ->
     Pid = spawn(fun() -> ok end),
     timer:sleep(50),  %% Ensure it's dead
     ok = beam_agent_reload_bus:subscribe(Pid),
-    ?assert(lists:member({Pid}, ets:tab2list(beam_agent_reload_subscribers))),
+    Subs0 = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    ?assert(lists:member({{subscriber, Pid}}, Subs0)),
     %% Notify should prune the dead subscriber
     ok = beam_agent_reload_bus:notify(hooks),
     timer:sleep(50),
-    ?assertNot(lists:member({Pid}, ets:tab2list(beam_agent_reload_subscribers))),
+    Subs1 = ets:match_object(beam_agent_reload, {{subscriber, '_'}}),
+    ?assertNot(lists:member({{subscriber, Pid}}, Subs1)),
     cleanup_tables().
 
 notify_sends_correct_type_test() ->

@@ -53,12 +53,12 @@ ok = beam_agent_checkpoint:rewind(<<"sess_001">>, <<"uuid_abc123">>),
 
 This module is a thin public wrapper that delegates every call to
 beam_agent_checkpoint_core. The core module owns the ETS table
-(beam_agent_checkpoints) and all implementation logic including
+(beam_agent_runtime) and all implementation logic including
 file I/O for snapshot and restore operations.
 
-The ETS table uses {SessionId, UUID} composite keys in a set table
-with public access, so any process can create and query checkpoints
-without bottlenecking.
+The ETS table uses {checkpoint, {SessionId, UUID}} composite keys in the
+unified beam_agent_runtime set table, so any process can create and query
+checkpoints without bottlenecking.
 
 ## Core concepts
 
@@ -77,9 +77,9 @@ state, including deleting files that were created after the checkpoint.
 ## Architecture deep dive
 
 Checkpoints are managed by beam_agent_checkpoint_core, the universal
-layer. All state lives in the beam_agent_checkpoints ETS table using
-{SessionId, UUID} composite keys in a public set table, so any process
-can create and query checkpoints without serialization bottlenecks.
+layer. All state lives in the unified beam_agent_runtime ETS table using
+{checkpoint, {SessionId, UUID}} composite keys, so any process can create
+and query checkpoints without serialization bottlenecks.
 
 Each checkpoint captures file content, POSIX permissions, and an
 existence flag. Rewind performs the inverse: writes content, restores
@@ -155,7 +155,7 @@ permissions (non_neg_integer or undefined).
 -doc """
 Ensure the checkpoint ETS table exists.
 
-Creates the beam_agent_checkpoints table if it does not already
+Creates the unified beam_agent_runtime table if it does not already
 exist. This function is idempotent and safe to call from any process.
 """.
 -spec ensure_tables() -> ok.

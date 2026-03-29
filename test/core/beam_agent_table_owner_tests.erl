@@ -142,24 +142,21 @@ owner_linked_to_consumer_test() ->
 
 always_protected_tables_test() ->
     cleanup(),
-    ?assert(beam_agent_table_owner:is_always_protected(beam_agent_control_callbacks)),
+    ?assert(beam_agent_table_owner:is_always_protected(beam_agent_runtime)),
     ?assert(beam_agent_table_owner:is_always_protected(beam_agent_backend_sessions)),
-    ?assert(beam_agent_table_owner:is_always_protected(beam_agent_apps)),
-    ?assert(beam_agent_table_owner:is_always_protected(beam_agent_skills)),
-    ?assert(beam_agent_table_owner:is_always_protected(beam_agent_checkpoints)),
     ?assertNot(beam_agent_table_owner:is_always_protected(some_other_table)).
 
 resolve_access_public_mode_test() ->
     cleanup(),
     ok = beam_agent_table_owner:init(#{table_access => public}),
-    ?assertEqual(public, beam_agent_table_owner:resolve_access(beam_agent_apps)),
+    ?assertEqual(public, beam_agent_table_owner:resolve_access(beam_agent_runtime)),
     ?assertEqual(public, beam_agent_table_owner:resolve_access(some_table)),
     cleanup().
 
 resolve_access_hardened_mode_test() ->
     cleanup(),
     ok = beam_agent_table_owner:init(#{table_access => hardened}),
-    ?assertEqual(protected, beam_agent_table_owner:resolve_access(beam_agent_apps)),
+    ?assertEqual(protected, beam_agent_table_owner:resolve_access(beam_agent_runtime)),
     ?assertEqual(protected, beam_agent_table_owner:resolve_access(some_table)),
     cleanup().
 
