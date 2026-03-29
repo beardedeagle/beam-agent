@@ -151,7 +151,10 @@ ok = beam_agent_hooks_core:register_global(Hook).
     %% config_change
     reload_type => atom(),
     %% task_completed
-    status => atom()
+    status => atom(),
+    %% pre_compact (budget snapshot and firing triggers)
+    budget => map(),
+    triggers => [atom()]
 }.
 
 %% Matcher for filtering which tools a hook fires on.

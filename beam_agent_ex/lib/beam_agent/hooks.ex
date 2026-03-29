@@ -161,7 +161,10 @@ defmodule BeamAgent.Hooks do
           optional(:system_info) => map(),
           optional(:reason) => term(),
           optional(:reload_type) => atom(),
-          optional(:status) => atom()
+          optional(:status) => atom(),
+          # pre_compact (budget snapshot and firing triggers)
+          optional(:budget) => map(),
+          optional(:triggers) => [atom()]
         }
 
   @typedoc """

@@ -181,13 +181,20 @@ compact_now(SessionOrThread, Opts) when is_map(Opts) ->
     StartTime = telemetry_start(compact_now, TeleMeta),
     Result = case resolve_scope(SessionOrThread, Opts) of
         {ok, Scope} ->
-            case maybe_fire_pre_compact(Scope, Opts) of
-                {deny, Reason} ->
-                    {error, {hook_denied, Reason}};
-                {ask, Reason} ->
-                    {error, {hook_ask, Reason}};
-                {ok, _} ->
-                    compact_now_for_scope(Scope, Opts)
+            case budget_estimate_for_scope(Scope, Opts) of
+                {ok, Budget} ->
+                    Triggers = maps:get(triggers, Budget, []),
+                    case maybe_fire_pre_compact(Scope, Opts,
+                            #{budget => Budget, triggers => Triggers}) of
+                        {deny, Reason} ->
+                            {error, {hook_denied, Reason}};
+                        {ask, Reason} ->
+                            {error, {hook_ask, Reason}};
+                        {ok, _} ->
+                            compact_now_for_scope(Scope, Opts, Budget)
+                    end;
+                {error, _} = Error ->
+                    Error
             end;
         {error, _} = Error ->
             Error
@@ -225,13 +232,14 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
                                 triggers => []
                             }};
                         Triggers ->
-                            case maybe_fire_pre_compact(Scope, Opts) of
+                            case maybe_fire_pre_compact(Scope, Opts,
+                                    #{budget => Budget, triggers => Triggers}) of
                                 {deny, Reason} ->
                                     {error, {hook_denied, Reason}};
                                 {ask, Reason} ->
                                     {error, {hook_ask, Reason}};
                                 {ok, _} ->
-                                    case compact_now_for_scope(Scope, Opts) of
+                                    case compact_now_for_scope(Scope, Opts, Budget) of
                                         {ok, CompactResult} ->
                                             {ok, CompactResult#{
                                                 budget_before => Budget,
@@ -258,26 +266,26 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
 %% Fire the pre_compact blocking hook before compaction.
 %% Always calls fire/3 so global hooks fire even when no per-session
 %% registry is present in Opts.
--spec maybe_fire_pre_compact(resolved_scope(), map()) ->
-    {ok, beam_agent_hooks_core:hook_context()}
-  | {deny, binary()}
-  | {ask, binary()}.
-maybe_fire_pre_compact(#{session_id := SessionId}, Opts) ->
+%%
+%% `Extra` carries caller-supplied context (budget snapshot, triggers)
+%% so hook consumers can make informed compaction decisions.  The keys
+%% `event` and `session_id` are always set, overriding any same-named
+%% entries in Extra.
+maybe_fire_pre_compact(#{session_id := SessionId}, Opts, Extra) ->
     HookReg = maps:get(sdk_hook_registry, Opts, undefined),
     beam_agent_hooks_core:fire(pre_compact,
-        #{event => pre_compact, session_id => SessionId},
+        Extra#{event => pre_compact, session_id => SessionId},
         HookReg).
 
 %%--------------------------------------------------------------------
 %% Internal
 %%--------------------------------------------------------------------
 
--spec compact_now_for_scope(resolved_scope(), map()) ->
+-spec compact_now_for_scope(resolved_scope(), map(), budget_estimate_result()) ->
     {ok, compact_now_result()} | {error, not_found}.
-compact_now_for_scope(#{session_id := SessionId} = Scope, Opts) ->
+compact_now_for_scope(#{session_id := SessionId} = Scope, Opts, BudgetBefore) ->
     case beam_agent_session_store_core:get_session(SessionId) of
         {ok, _Meta} ->
-            {ok, Budget} = budget_estimate_for_scope(Scope, Opts),
             {SummaryResult, SummaryContent} = maybe_summarize_session(SessionId, Opts),
             MemoryResult = maybe_promote_summary(Scope, SummaryContent, Opts),
             ThreadResult = maybe_compact_thread(Scope, Opts),
@@ -289,7 +297,7 @@ compact_now_for_scope(#{session_id := SessionId} = Scope, Opts) ->
                 memory => MemoryResult,
                 thread_compaction => ThreadResult,
                 budget_after => maps:get(budget_after,
-                    recompute_budget(Scope, Opts, Budget), Budget)
+                    recompute_budget(Scope, Opts, BudgetBefore), BudgetBefore)
             }};
         {error, not_found} ->
             {error, not_found}

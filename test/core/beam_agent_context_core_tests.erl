@@ -105,6 +105,127 @@ budget_triggers_fire_when_threshold_is_zero_test() ->
     ?assert(lists:member(message_count_threshold, Triggers)),
     reset().
 
+%%====================================================================
+%% z9r.11: pre_compact hook receives budget + triggers
+%%====================================================================
+
+%% compact_now fires pre_compact with budget snapshot and triggers.
+compact_now_pre_compact_hook_receives_budget_test() ->
+    reset(),
+    SessionId = <<"ctx-hook-budget-cn">>,
+    ThreadId = seed_thread(SessionId, <<"ctx-hook-budget-cn-t">>, 3),
+    Self = self(),
+    Ref = make_ref(),
+    H = beam_agent_hooks_core:hook(pre_compact,
+        fun(Ctx) ->
+            Self ! {Ref, Ctx},
+            {ok, Ctx}
+        end),
+    Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
+    {ok, _} = beam_agent_context_core:compact_now(#{
+        session_id => SessionId,
+        thread_id => ThreadId
+    }, #{sdk_hook_registry => Reg}),
+    receive
+        {Ref, Ctx} ->
+            ?assertEqual(pre_compact, maps:get(event, Ctx)),
+            ?assertEqual(SessionId, maps:get(session_id, Ctx)),
+            Budget = maps:get(budget, Ctx),
+            ?assert(is_map(Budget)),
+            ?assert(maps:is_key(estimated_token_count, Budget)),
+            ?assert(maps:is_key(session_message_count, Budget)),
+            ?assert(maps:is_key(triggers, Budget)),
+            ?assert(is_list(maps:get(triggers, Ctx)))
+    after 1000 ->
+        ?assert(false)
+    end,
+    reset().
+
+%% maybe_compact fires pre_compact with budget and matching triggers.
+maybe_compact_pre_compact_hook_receives_budget_test() ->
+    reset(),
+    SessionId = <<"ctx-hook-budget-mc">>,
+    ThreadId = seed_thread(SessionId, <<"ctx-hook-budget-mc-t">>, 3),
+    Self = self(),
+    Ref = make_ref(),
+    H = beam_agent_hooks_core:hook(pre_compact,
+        fun(Ctx) ->
+            Self ! {Ref, Ctx},
+            {ok, Ctx}
+        end),
+    Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
+    {ok, _} = beam_agent_context_core:maybe_compact(#{
+        session_id => SessionId,
+        thread_id => ThreadId
+    }, #{
+        sdk_hook_registry => Reg,
+        message_count_threshold => 1
+    }),
+    receive
+        {Ref, Ctx} ->
+            ?assertEqual(pre_compact, maps:get(event, Ctx)),
+            ?assertEqual(SessionId, maps:get(session_id, Ctx)),
+            Budget = maps:get(budget, Ctx),
+            ?assert(is_map(Budget)),
+            ?assert(maps:is_key(estimated_token_count, Budget)),
+            Triggers = maps:get(triggers, Ctx),
+            ?assert(is_list(Triggers)),
+            ?assert(lists:member(message_count_threshold, Triggers))
+    after 1000 ->
+        ?assert(false)
+    end,
+    reset().
+
+%% maybe_compact below threshold: no hook fired, no budget in context.
+maybe_compact_no_hook_when_below_threshold_test() ->
+    reset(),
+    SessionId = <<"ctx-hook-nohook">>,
+    ThreadId = seed_thread(SessionId, <<"ctx-hook-nohook-t">>, 2),
+    Self = self(),
+    Ref = make_ref(),
+    H = beam_agent_hooks_core:hook(pre_compact,
+        fun(Ctx) ->
+            Self ! {Ref, Ctx},
+            {ok, Ctx}
+        end),
+    Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
+    {ok, Result} = beam_agent_context_core:maybe_compact(#{
+        session_id => SessionId,
+        thread_id => ThreadId
+    }, #{
+        sdk_hook_registry => Reg,
+        message_count_threshold => 100,
+        visible_message_threshold => 100
+    }),
+    ?assertEqual(false, maps:get(compacted, Result)),
+    receive
+        {Ref, _} -> ?assert(false)
+    after 100 ->
+        ok
+    end,
+    reset().
+
+%% pre_compact hook can deny compaction with budget-aware logic.
+compact_now_pre_compact_hook_denies_with_budget_test() ->
+    reset(),
+    SessionId = <<"ctx-hook-deny-budget">>,
+    ThreadId = seed_thread(SessionId, <<"ctx-hook-deny-budget-t">>, 3),
+    H = beam_agent_hooks_core:hook(pre_compact,
+        fun(Ctx) ->
+            Budget = maps:get(budget, Ctx),
+            case maps:get(estimated_token_count, Budget, 0) < 1000 of
+                true -> {deny, <<"tokens too low">>};
+                false -> ok
+            end
+        end),
+    Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),
+    ?assertMatch({error, {hook_denied, <<"tokens too low">>}},
+        beam_agent_context_core:compact_now(#{
+            session_id => SessionId,
+            thread_id => ThreadId
+        }, #{sdk_hook_registry => Reg})),
+    reset().
+
 seed_thread(SessionId, ThreadId, Count) ->
     %% Ensure a session exists in the store so budget_estimate can find it
     %% even when Count is 0 (no messages to auto-vivify the session).
