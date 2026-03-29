@@ -28,6 +28,7 @@ such as MonkeyClaw.
     search/1,
     search/2,
     forget/1,
+    update/2,
     pin/1,
     unpin/1,
     expire/0,
@@ -38,6 +39,7 @@ such as MonkeyClaw.
     scope/0,
     source_ref/0,
     memory_input/0,
+    update_input/0,
     memory_filter/0,
     memory_record/0
 ]).
@@ -68,7 +70,17 @@ such as MonkeyClaw.
   | session_id_required_for_thread
   | {invalid_event, event_id | payload | run_id | session_id | tags | thread_id | timestamp}
   | {invalid_event_type, binary()}.
--type memory_operation() :: expire | forget | get | list | pin | remember | search | unpin.
+-type update_input() :: #{
+    kind => memory_kind(),
+    content => term(),
+    attributes => map(),
+    source_refs => [source_ref()],
+    ttl => ttl(),
+    pinned => boolean(),
+    salience => non_neg_integer()
+}.
+
+-type memory_operation() :: expire | forget | get | list | pin | remember | search | unpin | update.
 -type memory_sort_key() :: {integer(), 0 | 1, integer(), integer(), binary()}.
 
 -type memory_input() :: binary() | #{
@@ -244,6 +256,47 @@ forget(MemoryId) when is_binary(MemoryId) ->
             ErrorResult
     end.
 
+-doc """
+Update mutable fields of an existing memory record.
+
+Accepts a map of fields to change. Mutable fields: `kind`, `content`,
+`attributes`, `source_refs`, `ttl`, `pinned`, `salience`. Immutable fields
+(`memory_id`, `scope`, `created_at`) are rejected with
+`{error, {immutable_field, Field}}`.
+
+When `ttl` is updated, `expires_at` is automatically recalculated from the
+current time. The `updated_at` timestamp is always refreshed.
+""".
+-spec update(binary(), update_input()) ->
+    {ok, memory_record()} | {error, not_found | {immutable_field, atom()} | term()}.
+update(MemoryId, Changes) when is_binary(MemoryId), is_map(Changes) ->
+    StartTime = telemetry_start(update, #{memory_id => MemoryId}),
+    case reject_immutable_fields(Changes) of
+        ok ->
+            case validate_update_fields(Changes) of
+                ok ->
+                    case do_update(MemoryId, Changes) of
+                        {ok, Updated} ->
+                            telemetry_stop(update, StartTime,
+                                (telemetry_memory_meta(Updated))#{
+                                    changed_fields => maps:keys(Changes)}),
+                            {ok, Updated};
+                        {error, not_found} = ErrorResult ->
+                            telemetry_stop(update, StartTime,
+                                #{memory_id => MemoryId, found => false}),
+                            ErrorResult
+                    end;
+                {error, _} = Error ->
+                    telemetry_stop(update, StartTime,
+                        #{memory_id => MemoryId, found => false}),
+                    Error
+            end;
+        {error, _} = Error ->
+            telemetry_stop(update, StartTime,
+                #{memory_id => MemoryId, found => false}),
+            Error
+    end.
+
 -doc "Pin a memory to keep it visible regardless of TTL expiry.".
 -spec pin(binary()) -> ok | {error, not_found}.
 pin(MemoryId) when is_binary(MemoryId) ->
@@ -412,6 +465,89 @@ update_pinned(MemoryId, DesiredPinned, EventType) ->
             telemetry_stop(Operation, StartTime, #{memory_id => MemoryId, found => false}),
             ErrorResult
     end.
+
+-define(IMMUTABLE_FIELDS, [memory_id, scope, created_at]).
+-define(MUTABLE_FIELDS, [kind, content, attributes, source_refs, ttl, pinned, salience]).
+
+-spec reject_immutable_fields(map()) ->
+    ok | {error, {immutable_field, memory_id | scope | created_at}}.
+reject_immutable_fields(Changes) ->
+    case [F || F <- ?IMMUTABLE_FIELDS, maps:is_key(F, Changes)] of
+        [] -> ok;
+        [First | _] -> {error, {immutable_field, First}}
+    end.
+
+-spec validate_update_fields(map()) -> ok | {error, term()}.
+validate_update_fields(Changes) ->
+    validate_update_fields_iter(maps:to_list(Changes)).
+
+-spec validate_update_fields_iter([{atom(), term()}]) -> ok | {error, term()}.
+validate_update_fields_iter([]) ->
+    ok;
+validate_update_fields_iter([{kind, Value} | Rest]) ->
+    case normalize_kind(kind, Value, invalid_memory) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{content, Value} | Rest]) ->
+    case normalize_content(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{attributes, Value} | Rest]) ->
+    case normalize_attributes(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{source_refs, Value} | Rest]) ->
+    case normalize_source_refs(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{ttl, Value} | Rest]) ->
+    case normalize_ttl(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{pinned, Value} | Rest]) ->
+    case normalize_pinned(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{salience, Value} | Rest]) ->
+    case normalize_salience(Value) of
+        {ok, _} -> validate_update_fields_iter(Rest);
+        {error, _} = Error -> Error
+    end;
+validate_update_fields_iter([{Unknown, _} | _]) ->
+    {error, {invalid_memory, Unknown}}.
+
+-spec do_update(binary(), update_input()) ->
+    {ok, memory_record()} | {error, not_found}.
+do_update(MemoryId, Changes) ->
+    case beam_agent_memory_store:get_memory(MemoryId) of
+        {ok, Memory} ->
+            Now = current_time_ms(),
+            Merged = maps:merge(Memory, Changes),
+            Updated0 = Merged#{updated_at => Now},
+            Updated = case maps:is_key(ttl, Changes) of
+                true -> recalc_expires_at(Updated0, Now);
+                false -> Updated0
+            end,
+            ok = beam_agent_memory_store:put_memory(Updated),
+            {ok, _Entry} = append_memory_event(<<"memory_updated">>, Updated,
+                #{changed_fields => maps:keys(Changes)}),
+            ok = audit_memory_event(updated, Updated, #{changed_fields => maps:keys(Changes)}),
+            {ok, Updated};
+        {error, not_found} ->
+            {error, not_found}
+    end.
+
+-spec recalc_expires_at(memory_record(), integer()) -> memory_record().
+recalc_expires_at(#{ttl := infinity} = Memory, _Now) ->
+    maps:remove(expires_at, Memory);
+recalc_expires_at(#{ttl := Ttl} = Memory, Now) when is_integer(Ttl), Ttl >= 0 ->
+    Memory#{expires_at => Now + Ttl}.
 
 -spec normalize_scope_input(binary() | scope()) -> {ok, scope()} | {error, term()}.
 normalize_scope_input(SessionId) when is_binary(SessionId) ->
@@ -1158,7 +1294,8 @@ audit_memory_event(Action, Memory, ExtraDetails) ->
 memory_audit_scope(Scope, ProfileId) ->
     maybe_put(profile_id, ProfileId, maps:with([session_id, thread_id, run_id], Scope)).
 
--spec append_memory_event(<<_:64, _:_*8>>, memory_record(), #{} | #{before => integer()}) ->
+-spec append_memory_event(<<_:64, _:_*8>>, memory_record(),
+    #{before => integer(), changed_fields => [atom()]}) ->
     {ok, beam_agent_journal_core:entry()} | {error, journal_error()}.
 append_memory_event(EventType, Memory, ExtraPayload) ->
     Scope = maps:get(scope, Memory, #{}),

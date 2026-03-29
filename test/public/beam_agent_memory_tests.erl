@@ -20,6 +20,7 @@ exports_memory_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_memory, forget, 1)),
     ?assert(erlang:function_exported(beam_agent_memory, pin, 1)),
     ?assert(erlang:function_exported(beam_agent_memory, unpin, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, update, 2)),
     ?assert(erlang:function_exported(beam_agent_memory, expire, 0)),
     ?assert(erlang:function_exported(beam_agent_memory, expire, 1)).
 
@@ -39,6 +40,13 @@ public_memory_roundtrip_test() ->
     ),
     ?assertEqual(MemoryId, maps:get(memory_id, Match)),
     ok = beam_agent_memory:unpin(MemoryId),
+    {ok, Updated} = beam_agent_memory:update(MemoryId, #{
+        content => <<"updated public memory">>,
+        salience => 15
+    }),
+    ?assertEqual(MemoryId, maps:get(memory_id, Updated)),
+    ?assertEqual(<<"updated public memory">>, maps:get(content, Updated)),
+    ?assertEqual(15, maps:get(salience, Updated)),
     ok = beam_agent_memory:forget(MemoryId),
     ?assertEqual({error, not_found}, beam_agent_memory:get(MemoryId)),
     ok = beam_agent_memory:clear().
