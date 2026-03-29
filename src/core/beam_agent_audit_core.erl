@@ -129,7 +129,7 @@ list_events() ->
     list_events(#{}).
 
 -doc "List audit events with exact-match filters.".
--spec list_events(audit_filter()) -> {ok, [audit_event()]} | {error, term()}.
+-spec list_events(audit_filter()) -> {ok, [audit_event()]} | {error, {unsupported_audit_filter, atom()} | term()}.
 list_events(FilterInput) when is_map(FilterInput) ->
     TeleMeta = maps:with([event_id, session_id, thread_id, run_id, category, action,
         decision, profile_id, since, limit], FilterInput),
@@ -176,7 +176,7 @@ get_event(EventId) when is_binary(EventId) ->
 %%--------------------------------------------------------------------
 
 -spec normalize_filter(map()) ->
-    {ok, audit_filter(), beam_agent_journal_core:event_filter()} | {error, term()}.
+    {ok, audit_filter(), beam_agent_journal_core:event_filter()} | {error, {unsupported_audit_filter, atom()}}.
 normalize_filter(FilterInput) ->
     Allowed = [event_id, session_id, thread_id, run_id, category, action,
         decision, profile_id, since, limit],
@@ -252,7 +252,7 @@ validate_allowed_keys(Map, Allowed, ErrorTag) ->
     end.
 
 -spec maybe_put(profile_id | run_id | session_id | thread_id,
-    term(), audit_event_map()) -> audit_event_map().
+    undefined | binary(), audit_event_map()) -> audit_event_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->

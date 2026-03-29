@@ -194,12 +194,11 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_threads`, `beam_agent_runtime`, `beam_agent_config`,
 `beam_agent_provider`, `beam_agent_catalog`, `beam_agent_capabilities`,
 `beam_agent_command`, `beam_agent_command_validator`, `beam_agent_control`, `beam_agent_mcp`,
-`beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
-`beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
-`beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
+`beam_agent_skills`, `beam_agent_artifacts`,
+`beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
 `beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
-`beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`,
-`beam_agent_agents`, `beam_agent_plugins`, `beam_agent_slash_commands`).
+`beam_agent_checkpoint`, `beam_agent_hooks`, `beam_agent_policy`, `beam_agent_runs`,
+`beam_agent_telemetry`).
 Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
@@ -243,6 +242,9 @@ beam_agent_session_store:unrevert_session(SessionId)           -> {ok, SessionMe
 beam_agent_session_store:share_session(SessionId, Opts)        -> {ok, session_share()} | {error, not_found}
 beam_agent_session_store:unshare_session(SessionId)            -> ok | {error, not_found}
 beam_agent_session_store:summarize_session(SessionId, Opts)    -> {ok, session_summary()} | {error, not_found}
+beam_agent_session_store:export_session(SessionId)             -> {ok, exported_session()} | {error, not_found}
+beam_agent_session_store:import_session(Exported)              -> {ok, session_meta()} | {error, Reason}
+beam_agent_session_store:import_session(Exported, Opts)        -> {ok, session_meta()} | {error, Reason}
 
 %% Universal/native thread state — beam_agent_threads
 beam_agent_threads:thread_start(Session, Opts)         -> {ok, ThreadMeta} | {error, Reason}
@@ -285,9 +287,9 @@ beam_agent_journal:stream_from(Cursor, Filter)           -> {ok, [Entry]} | {err
 beam_agent_journal:get(EventId)                          -> {ok, Entry} | {error, not_found}
 beam_agent_journal:ack(ConsumerId, EventId)              -> ok | {error, not_found}
 
-%% Canonical audit -- beam_agent_audit
-beam_agent_audit:list_events(Filter)                     -> {ok, [Entry]} | {error, Reason}
-beam_agent_audit:get_event(EventId)                      -> {ok, Entry} | {error, not_found}
+%% Canonical audit (layered on journal) -- beam_agent_journal
+beam_agent_journal:list_events(Filter)                   -> {ok, [Entry]} | {error, Reason}
+beam_agent_journal:get_event(EventId)                    -> {ok, Entry} | {error, not_found}
 
 %% Long-term memory -- beam_agent_memory
 beam_agent_memory:remember(Scope, MemoryInput)           -> {ok, Memory} | {error, Reason}
@@ -301,6 +303,7 @@ beam_agent_memory:update(MemoryId, Changes)              -> {ok, Memory} | {erro
 beam_agent_memory:pin(MemoryId)                          -> ok | {error, not_found}
 beam_agent_memory:unpin(MemoryId)                        -> ok | {error, not_found}
 beam_agent_memory:expire(Filter)                         -> {ok, Count} | {error, Reason}
+beam_agent_memory:configure_persistence(StoreConfig)     -> ok | {error, Reason}
 
 %% Canonical backend routing -- beam_agent_routing
 beam_agent_routing:select_backend(RouteRequest)          -> {ok, Decision} | {error, Reason}
@@ -705,6 +708,7 @@ beam-agent/
   src/
     public/             Canonical beam_agent public modules
     core/               Shared runtime, routing, control, MCP, hooks
+    stores/             Store adapters (beam_agent_store_ets, beam_agent_store_dets)
     transports/         Reusable transport-family modules
     backends/           Internal backend implementations
   test/

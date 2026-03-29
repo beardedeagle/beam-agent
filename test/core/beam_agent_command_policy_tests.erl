@@ -6,7 +6,7 @@
 %%%   - Chain/pipeline evaluation (any deny = whole denied)
 %%%   - Opaque/subshell commands (always denied)
 %%%   - Default deny rules (rm -rf, mkfs, dd, fork bomb, etc.)
-%%%   - Match specs: program, program_args, contains, wildcard
+%%%   - Match specs: program, program_prefix, program_args, contains, wildcard
 %%%   - Default policy configuration
 %%%
 %%% All tests are pure — no processes, no ETS, no test doubles.
@@ -246,6 +246,77 @@ program_args_prefix_match_test() ->
     ?assertMatch({deny, _}, Result).
 
 %%====================================================================
+%% evaluate/2 — program_prefix match
+%%====================================================================
+
+program_prefix_matches_exact_name_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_prefix, <<"mkfs">>},
+                   reason => <<"mkfs variant blocked">>}],
+        default_string_action => allow
+    },
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"mkfs">>), Policy),
+    ?assertMatch({deny, _}, Result).
+
+program_prefix_matches_variant_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_prefix, <<"mkfs">>},
+                   reason => <<"mkfs variant blocked">>}],
+        default_string_action => allow
+    },
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"mkfs.ext4">>), Policy)),
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"mkfs.vfat">>), Policy)),
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"mkfs.xfs">>), Policy)).
+
+program_prefix_no_match_passes_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_prefix, <<"mkfs">>},
+                   reason => <<"blocked">>}],
+        default_string_action => allow
+    },
+    Result = beam_agent_command_policy:evaluate(
+        simple_cmd(<<"make">>), Policy),
+    ?assertEqual(allow, Result).
+
+program_prefix_normalizes_absolute_path_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_prefix, <<"mkfs">>},
+                   reason => <<"blocked">>}],
+        default_string_action => allow
+    },
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/sbin/mkfs.ext4">>), Policy)),
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/usr/sbin/mkfs.btrfs">>), Policy)).
+
+program_prefix_no_match_for_missing_program_test() ->
+    P = empty_policy(),
+    Policy = P#{
+        deny => [#{type => deny,
+                   match => {program_prefix, <<"mkfs">>},
+                   reason => <<"blocked">>}],
+        default_string_action => allow
+    },
+    %% A command struct without a program key should not match
+    Opaque = #{type => opaque, raw => <<"mkfs.ext4 /dev/sda1">>,
+               reason => <<"unparsed">>},
+    Result = beam_agent_command_policy:evaluate(Opaque, Policy),
+    %% Opaque commands are denied for being opaque, not for prefix match
+    ?assertMatch({deny, _}, Result).
+
+%%====================================================================
 %% Default deny rules
 %%====================================================================
 
@@ -266,6 +337,13 @@ default_denies_mkfs_test() ->
     Result = beam_agent_command_policy:evaluate(
         simple_cmd(<<"mkfs">>), Policy),
     ?assertMatch({deny, _}, Result).
+
+default_denies_mkfs_ext4_via_program_prefix_test() ->
+    Policy = beam_agent_command_policy:default_policy(),
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"mkfs.ext4">>), Policy)),
+    ?assertMatch({deny, _}, beam_agent_command_policy:evaluate(
+        simple_cmd(<<"/sbin/mkfs.btrfs">>), Policy)).
 
 default_denies_dd_test() ->
     Policy = beam_agent_command_policy:default_policy(),

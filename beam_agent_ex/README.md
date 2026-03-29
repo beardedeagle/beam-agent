@@ -32,9 +32,13 @@ The Erlang `:beam_agent` module works from Elixir, but this wrapper provides:
 | `BeamAgent.Audit` | Durable audit records for policy decisions and higher-level control actions |
 | `BeamAgent.Capabilities` | Support-level / implementation / fidelity introspection |
 | `BeamAgent.Catalog` | Shared tools/skills/plugins/agents accessors |
+| `BeamAgent.Checkpoint` | Checkpoint save/restore for rollback and recovery |
+| `BeamAgent.Command` | Command execution lifecycle — validation, audit, and dispatch |
+| `BeamAgent.CommandValidator` | Pluggable command validation behaviour |
 | `BeamAgent.Config` | Configuration read/write — individual values, batches, and external agent config import |
 | `BeamAgent.Content` | Content block / flat message conversion |
 | `BeamAgent.Context` | Context pressure reporting and caller-driven compaction |
+| `BeamAgent.Control` | Collaboration, realtime sessions, thinking budget, and feedback |
 | `BeamAgent.File` | File discovery and inspection — text search, file search, symbol search, and VCS status |
 | `BeamAgent.Hooks` | SDK lifecycle hooks (pre/post tool use, stop, etc.) |
 | `BeamAgent.Journal` | Durable append-only event journal for replay of canonical domain events |
@@ -54,6 +58,12 @@ The Erlang `:beam_agent` module works from Elixir, but this wrapper provides:
 | `BeamAgent.Telemetry` | Telemetry event helpers |
 | `BeamAgent.Threads` | Universal thread start/resume/read/archive/rollback |
 | `BeamAgent.Todo` | Todo extraction and summary helpers |
+| `BeamAgent.Agents` | Convenience facade for agent registration (delegates to Catalog) |
+| `BeamAgent.Plugins` | Convenience facade for plugin registration (delegates to Catalog) |
+| `BeamAgent.SlashCommands` | Convenience facade for slash command registration (delegates to Catalog) |
+| `BeamAgent.Credential` | Secure credential storage — cookie generation and sensitive key encryption |
+| `BeamAgent.SensitiveKeys` | Canonical sensitive key registry for credential and redaction subsystems |
+| `BeamAgent.Store` | Pluggable store adapter API (ETS default, DETS durable) |
 | `ClaudeEx` / `CodexEx` / `GeminiEx` / `OpencodeEx` / `CopilotEx` | Backend-specific wrappers |
 
 ## Quick Start

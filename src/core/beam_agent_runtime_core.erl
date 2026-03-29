@@ -238,7 +238,7 @@ This is most immediately useful for backends such as Copilot that accept a
 structured provider config in the wire protocol. For other backends the config
 is still tracked and exposed through the unified surface.
 """.
--spec set_provider_config(pid() | binary(), map()) -> ok | {error, term()}.
+-spec set_provider_config(pid() | binary(), map()) -> ok | {error, invalid_api_key | invalid_provider_config}.
 set_provider_config(Session, Config) when is_map(Config) ->
     case infer_provider_id(Config) of
         {ok, ProviderId} ->
@@ -348,7 +348,7 @@ Validate a provider configuration map.
 The validation stays conservative: it checks shape and obvious type errors
 without overfitting to a single backend's provider schema.
 """.
--spec validate_provider_config(binary() | undefined, map()) -> ok | {error, term()}.
+-spec validate_provider_config(binary() | undefined, map()) -> ok | {error, invalid_api_key | invalid_provider_config}.
 validate_provider_config(_ProviderId, Config) when not is_map(Config) ->
     {error, invalid_provider_config};
 validate_provider_config(_ProviderId, Config) ->
@@ -400,7 +400,7 @@ put_state(Session, Updates) when is_map(Updates) ->
     Key = {runtime, beam_agent_ets:session_key(Session)},
     put_state_cas(Key, Updates, 10).
 
--spec put_state_cas(pid() | binary(), map(), pos_integer()) -> ok.
+-spec put_state_cas({runtime, binary()}, map(), non_neg_integer()) -> ok.
 put_state_cas(_Key, _Updates, 0) ->
     error(put_state_cas_exhausted);
 put_state_cas(Key, Updates, Retries) ->
@@ -436,7 +436,7 @@ update_state(Session, Fun) ->
     Key = {runtime, beam_agent_ets:session_key(Session)},
     update_state_cas(Key, Fun, 10).
 
--spec update_state_cas(pid() | binary(), fun((map()) -> map()), pos_integer()) -> ok.
+-spec update_state_cas({runtime, binary()}, fun((map()) -> map()), non_neg_integer()) -> ok.
 update_state_cas(_Key, _Fun, 0) ->
     error(update_state_cas_exhausted);
 update_state_cas(Key, Fun, Retries) ->
@@ -490,7 +490,7 @@ infer_agent(Session) ->
             {error, not_set}
     end.
 
--spec maybe_session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
+-spec maybe_session_info(pid() | binary()) -> {ok, map()} | {error, {invalid_session_info, term()} | unavailable | term()}.
 maybe_session_info(Session) when is_pid(Session) ->
     try gen_statem:call(Session, session_info, 5000) of
         {ok, Info} when is_map(Info) -> {ok, Info};
@@ -533,7 +533,7 @@ infer_provider_id(Config) ->
             error
     end.
 
--spec native_provider_list(pid() | binary()) -> {ok, [map()]} | {error, term()}.
+-spec native_provider_list(pid() | binary()) -> {ok, [map()]} | {error, unsupported | term()}.
 native_provider_list(Session) when is_pid(Session) ->
     case beam_agent_backend:session_backend(Session) of
         {ok, opencode} ->
@@ -574,7 +574,7 @@ native_provider_status(Session, _ProviderId) when is_pid(Session) ->
 native_provider_status(_SessionId, _ProviderId) ->
     {error, unsupported}.
 
--spec normalize_provider_list({ok, term()} | {error, term()}) ->
+-spec normalize_provider_list({ok, list() | map()} | {error, term()}) ->
     {ok, [map()]} | {error, term()}.
 normalize_provider_list({ok, Providers}) when is_list(Providers) ->
     {ok, [normalize_provider_entry(P) || P <- Providers]};

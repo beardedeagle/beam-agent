@@ -126,4 +126,25 @@ defmodule BeamAgent.Journal do
   """
   @spec ack(binary(), binary()) :: :ok | {:error, :not_found}
   defdelegate ack(consumer_id, event_id), to: :beam_agent_journal
+
+  # --- Audit convenience API ---
+
+  @doc """
+  List all audit events, oldest first.
+  """
+  @spec list_events() :: {:ok, [:beam_agent_journal.audit_event()]}
+  defdelegate list_events(), to: :beam_agent_journal
+
+  @doc """
+  List audit events matching the given filter.
+  """
+  @spec list_events(:beam_agent_journal.audit_filter()) ::
+          {:ok, [:beam_agent_journal.audit_event()]} | {:error, term()}
+  defdelegate list_events(filter), to: :beam_agent_journal
+
+  @doc """
+  Fetch an audit event by id.
+  """
+  @spec get_event(binary()) :: {:ok, :beam_agent_journal.audit_event()} | {:error, :not_found}
+  defdelegate get_event(event_id), to: :beam_agent_journal
 end

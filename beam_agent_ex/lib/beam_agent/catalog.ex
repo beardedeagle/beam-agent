@@ -73,6 +73,19 @@ defmodule BeamAgent.Catalog do
   See also: `BeamAgent.Runtime`, `BeamAgent.Control`, `BeamAgent`.
   """
 
+  @typedoc "A registry entry stored in the global agent/plugin/slash-command table."
+  @type registry_entry() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:role) => atom(),
+          optional(:version) => binary(),
+          optional(:handler) => (map() -> {:ok, map()} | {:error, term()}),
+          optional(:config) => map()
+        }
+
   @doc """
   List all tools available to a session.
 
@@ -232,13 +245,13 @@ defmodule BeamAgent.Catalog do
   @doc """
   Fetch a single registered agent type by id.
   """
-  @spec get_registered_agent(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_registered_agent(binary()) :: {:ok, registry_entry()} | {:error, :not_found}
   defdelegate get_registered_agent(id), to: :beam_agent_catalog
 
   @doc """
   List all globally registered agent types.
   """
-  @spec registered_agents() :: [map()]
+  @spec registered_agents() :: [registry_entry()]
   defdelegate registered_agents(), to: :beam_agent_catalog
 
   @doc """
@@ -271,13 +284,13 @@ defmodule BeamAgent.Catalog do
   @doc """
   Fetch a single registered plugin by id.
   """
-  @spec get_registered_plugin(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_registered_plugin(binary()) :: {:ok, registry_entry()} | {:error, :not_found}
   defdelegate get_registered_plugin(id), to: :beam_agent_catalog
 
   @doc """
   List all globally registered plugins.
   """
-  @spec registered_plugins() :: [map()]
+  @spec registered_plugins() :: [registry_entry()]
   defdelegate registered_plugins(), to: :beam_agent_catalog
 
   @doc """
@@ -310,13 +323,13 @@ defmodule BeamAgent.Catalog do
   @doc """
   Fetch a single registered slash command by id.
   """
-  @spec get_registered_command(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_registered_command(binary()) :: {:ok, registry_entry()} | {:error, :not_found}
   defdelegate get_registered_command(id), to: :beam_agent_catalog
 
   @doc """
   List all globally registered slash commands.
   """
-  @spec registered_commands() :: [map()]
+  @spec registered_commands() :: [registry_entry()]
   defdelegate registered_commands(), to: :beam_agent_catalog
 
   @doc """
@@ -332,37 +345,39 @@ defmodule BeamAgent.Catalog do
   @doc """
   Search for text matching `pattern` in the session's working directory.
   """
-  @spec find_text(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_text(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_text(session, pattern), to: :beam_agent_catalog
 
   @doc """
   Find files matching a pattern in the session's working directory.
   """
-  @spec find_files(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_files(pid(), map()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
   defdelegate find_files(session, opts), to: :beam_agent_catalog
 
   @doc """
   Search for code symbols matching `query` in the session's project.
   """
-  @spec find_symbols(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_symbols(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_symbols(session, query), to: :beam_agent_catalog
 
   @doc """
   List files and directories at the given path.
   """
-  @spec file_list(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec file_list(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
   defdelegate file_list(session, path), to: :beam_agent_catalog
 
   @doc """
   Read the contents of a file at the given path.
   """
-  @spec file_read(pid(), binary()) :: {:ok, binary()} | {:error, :enoent | term()}
+  @spec file_read(pid(), binary()) :: {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
   defdelegate file_read(session, path), to: :beam_agent_catalog
 
   @doc """
   Get the version-control status of files in the session's project.
   """
-  @spec file_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec file_status(pid()) ::
+          {:ok, %{cwd: binary(), source: :git | :filesystem, files: [map()]}}
+          | {:error, term()}
   defdelegate file_status(session), to: :beam_agent_catalog
 
   # -------------------------------------------------------------------
@@ -372,31 +387,31 @@ defmodule BeamAgent.Catalog do
   @doc """
   Fuzzy-search for files by name in the session's project.
   """
-  @spec fuzzy_search(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec fuzzy_search(pid(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy_search(session, query), to: :beam_agent_catalog
 
   @doc """
   Fuzzy-search for files by name with options.
   """
-  @spec fuzzy_search(pid(), binary(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec fuzzy_search(pid(), binary(), map()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy_search(session, query, opts), to: :beam_agent_catalog
 
   @doc """
   Start a stateful fuzzy file search session.
   """
-  @spec search_session_start(pid(), binary(), [binary()]) :: {:ok, term()} | {:error, term()}
+  @spec search_session_start(pid(), binary(), [binary()]) :: {:ok, :beam_agent_search_core.search_session()} | {:error, term()}
   defdelegate search_session_start(session, search_session_id, roots), to: :beam_agent_catalog
 
   @doc """
   Update a search session with a new query string.
   """
-  @spec search_session_update(pid(), binary(), binary()) :: {:ok, [map()]} | {:error, :not_found}
+  @spec search_session_update(pid(), binary(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate search_session_update(session, search_session_id, query), to: :beam_agent_catalog
 
   @doc """
   Stop and clean up a fuzzy file search session.
   """
-  @spec search_session_stop(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec search_session_stop(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate search_session_stop(session, search_session_id), to: :beam_agent_catalog
 
   # -------------------------------------------------------------------

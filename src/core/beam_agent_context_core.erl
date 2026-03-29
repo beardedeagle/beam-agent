@@ -352,7 +352,7 @@ resolve_scope(#{session_id := SessionId} = Scope, Opts)
 resolve_scope(_Other, _Opts) ->
     {error, invalid_scope}.
 
--spec resolve_scope_from_parts(binary(), term()) ->
+-spec resolve_scope_from_parts(binary(), binary() | undefined) ->
     {ok, resolved_scope()} | {error, invalid_scope}.
 resolve_scope_from_parts(SessionId, ThreadId) when is_binary(ThreadId), byte_size(ThreadId) > 0 ->
     {ok, #{session_id => SessionId, thread_id => ThreadId}};
@@ -512,15 +512,11 @@ message_content(Message) ->
 
 -spec scope_memory_count(resolved_scope()) -> non_neg_integer().
 scope_memory_count(#{session_id := SessionId, thread_id := ThreadId}) ->
-    case beam_agent_memory:list(#{session_id => SessionId, thread_id => ThreadId}) of
-        {ok, Memories} -> length(Memories);
-        {error, _} -> 0
-    end;
+    {ok, Memories} = beam_agent_memory:list(#{session_id => SessionId, thread_id => ThreadId}),
+    length(Memories);
 scope_memory_count(#{session_id := SessionId}) ->
-    case beam_agent_memory:list(#{session_id => SessionId}) of
-        {ok, Memories} -> length(Memories);
-        {error, _} -> 0
-    end.
+    {ok, Memories} = beam_agent_memory:list(#{session_id => SessionId}),
+    length(Memories).
 
 -spec compaction_triggers(budget_snapshot(), map()) -> [compaction_trigger()].
 %% All Budget fields use maps:get/3 with default 0, meaning "no threshold
@@ -542,7 +538,7 @@ compaction_triggers(Budget, Opts) ->
                             maps:get(message_count_threshold, Opts, 200)),
                         []))))).
 
--spec over_threshold(non_neg_integer(), term()) -> boolean().
+-spec over_threshold(non_neg_integer(), non_neg_integer() | undefined) -> boolean().
 over_threshold(_Value, undefined) ->
     false;
 over_threshold(Value, Threshold) when is_integer(Threshold), Threshold >= 0 ->

@@ -70,6 +70,29 @@ defmodule BeamAgent.Control do
   """
 
   @doc """
+  Ensure all control ETS tables exist.
+
+  Creates the config, tasks, feedback, callbacks, and pending tables if they do
+  not already exist. Idempotent and safe to call from any process.
+
+  Returns `:ok`.
+  """
+  @spec ensure_tables() :: :ok
+  defdelegate ensure_tables(), to: :beam_agent_control
+
+  @doc """
+  Clear all control state across every session.
+
+  Deletes all objects from every control ETS table. Use this for test cleanup
+  or node-wide reset. Individual session cleanup should use `clear_config/1`,
+  `clear_feedback/1`, and `clear_session_callbacks/1` instead.
+
+  Returns `:ok`.
+  """
+  @spec clear() :: :ok
+  defdelegate clear(), to: :beam_agent_control
+
+  @doc """
   Dispatch a named control method to the appropriate handler.
 
   Supported methods:
@@ -91,12 +114,7 @@ defmodule BeamAgent.Control do
   ```
   """
   @spec dispatch(binary(), binary(), map()) ::
-          {:ok,
-           %{
-             optional(:model) => term(),
-             optional(:permission_mode) => binary() | atom(),
-             optional(:max_thinking_tokens) => pos_integer()
-           }}
+          {:ok, %{optional(:model) => atom() | binary() | map(), optional(:permission_mode) => atom() | binary()}}
           | {:error,
              :not_found
              | {:invalid_param, :max_thinking_tokens}
@@ -110,7 +128,7 @@ defmodule BeamAgent.Control do
   Returns `{:ok, value}` or `{:error, :not_set}` when the key has not been
   written.
   """
-  @spec get_config(binary(), atom()) :: {:ok, term()} | {:error, :not_set}
+  @spec get_config(binary(), atom()) :: {:ok, atom() | binary() | map() | pos_integer()} | {:error, :not_set}
   defdelegate get_config(session_id, key), to: :beam_agent_control
 
   @doc """
@@ -119,7 +137,7 @@ defmodule BeamAgent.Control do
   Stores an arbitrary term under the given atom key, scoped to the session ID.
   Overwrites any previous value for the same key.
   """
-  @spec set_config(binary(), atom(), term()) :: :ok
+  @spec set_config(binary(), atom(), atom() | binary() | map()) :: :ok
   defdelegate set_config(session_id, key, value), to: :beam_agent_control
 
   @doc """
@@ -228,19 +246,7 @@ defmodule BeamAgent.Control do
   `:stopped`), and an optional `:run_id`. Stopped tasks also carry
   `:stopped_at`.
   """
-  @spec list_tasks(binary()) ::
-          {:ok,
-           [
-             %{
-               required(:task_id) => binary(),
-               required(:session_id) => binary(),
-               required(:pid) => pid(),
-               required(:started_at) => integer(),
-               required(:status) => :running | :stopped,
-               optional(:run_id) => binary(),
-               optional(:stopped_at) => integer()
-             }
-           ]}
+  @spec list_tasks(binary()) :: {:ok, [:beam_agent_control_core.task_meta()]}
   defdelegate list_tasks(session_id), to: :beam_agent_control
 
   @doc """
@@ -263,6 +269,231 @@ defmodule BeamAgent.Control do
   """
   @spec clear_feedback(binary()) :: :ok
   defdelegate clear_feedback(session_id), to: :beam_agent_control
+
+  @doc """
+  Register callback handlers for a session.
+
+  The `opts` map may contain:
+  - `:permission_handler` — `fun(method, params, context)` returning a
+    permission result tuple
+  - `:permission_default` — `:allow` or `:deny` (default `:deny`)
+  - `:approval_handler` — `fun(method, params, context)` returning
+    `:accept`, `:accept_for_session`, `:decline`, or `:cancel`
+  - `:user_input_handler` — `fun(request, context)` returning
+    `{:ok, response}` or any term
+
+  Returns `:ok`.
+  """
+  @spec register_session_callbacks(binary(), map()) :: :ok
+  defdelegate register_session_callbacks(session_id, opts), to: :beam_agent_control
+
+  @doc """
+  Clear all callback handlers for a session.
+
+  Removes every registered callback handler stored for `session_id`. After
+  this call, the session operates as if no callbacks were ever registered; the
+  `permission_default` reverts to `:deny`.
+
+  Returns `:ok`.
+  """
+  @spec clear_session_callbacks(binary()) :: :ok
+  defdelegate clear_session_callbacks(session_id), to: :beam_agent_control
+
+  @doc """
+  Request permission through the session's callback broker.
+
+  Invokes the registered `permission_handler` (or falls back to the
+  `approval_handler` adapted to permission semantics, or the
+  `permission_default`). The handler is called safely — exceptions are caught
+  and the default is returned.
+
+  Returns a permission result:
+  - `{:allow, params}` — permission granted
+  - `{:allow, params, override_default}` — granted, with updated session default
+  - `{:deny, reason}` — permission denied
+  - `{:deny, reason, cancelled}` — denied, with cancellation flag
+  """
+  @spec request_permission(binary(), binary(), map(), map()) ::
+          :beam_agent_core.permission_result()
+  defdelegate request_permission(session_id, method, params, context),
+    to: :beam_agent_control
+
+  @doc """
+  Request an approval decision through the session's callback broker.
+
+  Invokes the registered `approval_handler` (or adapts the
+  `permission_handler` to approval semantics).
+
+  Returns `:accept`, `:accept_for_session`, `:decline`, or `:cancel`.
+  """
+  @spec request_approval(binary(), binary(), map(), map()) ::
+          :accept | :accept_for_session | :decline | :cancel
+  defdelegate request_approval(session_id, method, params, context),
+    to: :beam_agent_control
+
+  @doc """
+  Request user input through the session's callback broker.
+
+  Stores a pending request, then invokes the registered `user_input_handler`
+  if one exists. If the handler responds, the pending request is resolved
+  immediately. If no handler is registered or the handler fails, the request
+  remains pending for external resolution via `resolve_pending_request/3`.
+
+  Returns `{:ok, response}` when the handler responds, or `{:ok, pending_info}`
+  when the request is awaiting external resolution.
+  """
+  @spec request_user_input(binary(), map(), map()) :: {:ok, map()}
+  defdelegate request_user_input(session_id, request, context), to: :beam_agent_control
+
+  @doc """
+  Clear all universal collaboration state (review and realtime sessions).
+
+  Returns `:ok`.
+  """
+  @spec clear_collaboration() :: :ok
+  defdelegate clear_collaboration(), to: :beam_agent_control
+
+  @doc """
+  Start a universal realtime session for a thread (storage layer).
+
+  Use `thread_realtime_start/2` for the session-pid-based API with native
+  backend routing. This function operates directly on a `session_id` binary and
+  stores the realtime session in ETS via the universal collaboration layer.
+
+  Returns `{:ok, realtime_session}`.
+  """
+  @spec start_realtime(binary(), map()) ::
+          {:ok,
+           %{
+             required(:backend) => any(),
+             required(:event_count) => 1,
+             required(:input_summary) => %{required(:audio_chunks) => 0, required(:text_chunks) => 0},
+             required(:inputs) => [],
+             required(:mode) => any(),
+             required(:output_events) => [map(), ...],
+             required(:params) => map(),
+             required(:realtime_id) => binary(),
+             required(:session_id) => binary(),
+             required(:source) => :universal,
+             required(:started_at) => integer(),
+             required(:status) => :active,
+             required(:thread_id) => binary(),
+             required(:transport) => any(),
+             required(:transport_metadata) => map(),
+             required(:updated_at) => integer(),
+             required(:voice_enabled) => boolean()
+           }}
+  defdelegate start_realtime(session_id, params), to: :beam_agent_control
+
+  @doc """
+  Append text to an active realtime session (storage layer).
+
+  Use `thread_realtime_append_text/3` for the session-pid-based API. This
+  function operates directly on a `session_id` binary.
+
+  Returns `{:ok, result}`.
+  """
+  @spec append_realtime_text(binary(), binary(), map()) :: {:ok, map()}
+  defdelegate append_realtime_text(session_id, thread_id, params), to: :beam_agent_control
+
+  @doc """
+  Append audio to an active realtime session (storage layer).
+
+  Use `thread_realtime_append_audio/3` for the session-pid-based API. This
+  function operates directly on a `session_id` binary.
+
+  Returns `{:ok, result}`.
+  """
+  @spec append_realtime_audio(binary(), binary(), map()) :: {:ok, map()}
+  defdelegate append_realtime_audio(session_id, thread_id, params), to: :beam_agent_control
+
+  @doc """
+  Stop and tear down an active realtime session (storage layer).
+
+  Use `thread_realtime_stop/2` for the session-pid-based API. This function
+  operates directly on a `session_id` binary.
+
+  Returns `{:ok, result}`.
+  """
+  @spec stop_realtime(binary(), binary()) :: {:ok, map()}
+  defdelegate stop_realtime(session_id, thread_id), to: :beam_agent_control
+
+  @doc """
+  List canonical collaboration modes (storage layer).
+
+  Use `collaboration_mode_list/1` for the session-pid-based API with native
+  backend routing. This function operates directly on a `session_id` binary
+  and returns only the universal collaboration modes.
+
+  Returns `{:ok, %{session_id: binary(), source: :universal, modes: [map()]}}`.
+  """
+  @spec collaboration_modes(binary()) ::
+          {:ok,
+           %{
+             required(:modes) => [map(), ...],
+             required(:session_id) => binary(),
+             required(:source) => :universal
+           }}
+  defdelegate collaboration_modes(session_id), to: :beam_agent_control
+
+  @doc """
+  List universal experimental features (storage layer).
+
+  Use `experimental_feature_list/1` or `experimental_feature_list/2` for the
+  session-pid-based API with native backend routing. This function operates
+  directly on a `session_id` binary and returns only the universal feature set.
+
+  Returns `{:ok, %{session_id: binary(), source: :universal, features: [map()]}}`.
+  """
+  @spec experimental_features(binary(), map()) ::
+          {:ok,
+           %{
+             required(:features) => [map(), ...],
+             required(:session_id) => binary(),
+             required(:source) => :universal
+           }}
+  defdelegate experimental_features(session_id, opts), to: :beam_agent_control
+
+  @doc """
+  Start a universal code review session (storage layer).
+
+  Use `review_start/2` for the session-pid-based API with native backend
+  routing. This function operates directly on a `session_id` binary and stores
+  the review session in ETS via the universal collaboration layer.
+
+  `params` may include `:files`, `:diff`, `:review_type`, `:mode`, `:target`,
+  `:participants`, `:comments`, `:issues`, and `:resolutions`.
+
+  Returns `{:ok, review_session}`.
+  """
+  @spec start_review(binary(), map()) ::
+          {:ok,
+           %{
+             required(:backend) => any(),
+             required(:comments) => [map()],
+             required(:created_at) => integer(),
+             required(:issues) => [map()],
+             required(:mode) => any(),
+             required(:params) => map(),
+             required(:participants) => [map()],
+             required(:resolutions) => [map()],
+             required(:review_id) => binary(),
+             required(:review_metrics) => %{
+               required(:comment_count) => non_neg_integer(),
+               required(:issue_count) => non_neg_integer(),
+               required(:participant_count) => non_neg_integer(),
+               required(:resolution_count) => non_neg_integer()
+             },
+             required(:session_id) => binary(),
+             required(:source) => any(),
+             required(:stage) => any(),
+             required(:stage_history) => [map(), ...],
+             required(:status) => :active,
+             required(:target) => any(),
+             required(:thread_id) => binary(),
+             required(:updated_at) => integer()
+           }}
+  defdelegate start_review(session_id, params), to: :beam_agent_control
 
   @doc """
   Store a pending request from the agent.
@@ -305,18 +536,7 @@ defmodule BeamAgent.Control do
   inside request/response payloads are redacted for display-safe reads.
   """
   @spec list_pending_requests(binary()) ::
-          {:ok,
-           [
-             %{
-               required(:request_id) => binary(),
-               required(:session_id) => binary(),
-               required(:request) => map(),
-               required(:status) => :pending | :resolved,
-               optional(:response) => map(),
-               required(:created_at) => integer(),
-               optional(:resolved_at) => integer()
-             }
-           ]}
+          {:ok, [:beam_agent_control_core.pending_request()]}
   defdelegate list_pending_requests(session_id), to: :beam_agent_control
 
   # ---------------------------------------------------------------------------
@@ -380,7 +600,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec turn_interrupt(pid(), binary(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec turn_interrupt(pid() | binary(), binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate turn_interrupt(session, thread_id, turn_id), to: :beam_agent_control
 
   @doc """
@@ -397,7 +617,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_start(pid(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_start(pid() | binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_start(session, opts), to: :beam_agent_control
 
   @doc """
@@ -413,7 +633,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_audio(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_append_audio(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
@@ -429,7 +649,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_text(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_append_text(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
@@ -446,7 +666,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_stop(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_stop(pid() | binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_stop(session, thread_id), to: :beam_agent_control
 
   @doc """
@@ -463,7 +683,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec review_start(pid(), map()) :: {:ok, map()} | {:error, term()}
+  @spec review_start(pid() | binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate review_start(session, opts), to: :beam_agent_control
 
   @doc """
@@ -480,7 +700,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, modes}` or `{:error, reason}`.
   """
-  @spec collaboration_mode_list(pid()) :: {:ok, map()} | {:error, term()}
+  @spec collaboration_mode_list(pid() | binary()) :: {:ok, map()} | {:error, term()}
   defdelegate collaboration_mode_list(session), to: :beam_agent_control
 
   @doc """
@@ -494,7 +714,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, features}` or `{:error, reason}`.
   """
-  @spec experimental_feature_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec experimental_feature_list(pid() | binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate experimental_feature_list(session), to: :beam_agent_control
 
   @doc """
@@ -509,7 +729,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, features}` or `{:error, reason}`.
   """
-  @spec experimental_feature_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec experimental_feature_list(pid() | binary(), map()) :: {:ok, [map()]} | {:error, term()}
   defdelegate experimental_feature_list(session, opts), to: :beam_agent_control
 
   @doc """
@@ -523,7 +743,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, sessions}` or `{:error, reason}`.
   """
-  @spec list_server_sessions(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec list_server_sessions(pid() | binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate list_server_sessions(session), to: :beam_agent_control
 
   @doc """
@@ -538,7 +758,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, session_map}` or `{:error, :not_found}`.
   """
-  @spec get_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec get_server_session(pid() | binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate get_server_session(session, session_id), to: :beam_agent_control
 
   @doc """
@@ -553,7 +773,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec delete_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec delete_server_session(pid() | binary(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate delete_server_session(session, session_id), to: :beam_agent_control
 
   @doc """
@@ -567,7 +787,7 @@ defmodule BeamAgent.Control do
 
   - `{:ok, agents}` or `{:error, reason}`.
   """
-  @spec list_server_agents(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec list_server_agents(pid() | binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate list_server_agents(session), to: :beam_agent_control
 
   @doc """
@@ -584,6 +804,6 @@ defmodule BeamAgent.Control do
 
   - `{:ok, health_map}` or `{:error, reason}`.
   """
-  @spec server_health(pid()) :: {:ok, map()} | {:error, term()}
+  @spec server_health(pid() | binary()) :: {:ok, map()} | {:error, term()}
   defdelegate server_health(session), to: :beam_agent_control
 end

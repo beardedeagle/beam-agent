@@ -22,7 +22,8 @@ exports_memory_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_memory, unpin, 1)),
     ?assert(erlang:function_exported(beam_agent_memory, update, 2)),
     ?assert(erlang:function_exported(beam_agent_memory, expire, 0)),
-    ?assert(erlang:function_exported(beam_agent_memory, expire, 1)).
+    ?assert(erlang:function_exported(beam_agent_memory, expire, 1)),
+    ?assert(erlang:function_exported(beam_agent_memory, configure_persistence, 1)).
 
 public_memory_roundtrip_test() ->
     ok = beam_agent_memory:clear(),
@@ -49,4 +50,40 @@ public_memory_roundtrip_test() ->
     ?assertEqual(15, maps:get(salience, Updated)),
     ok = beam_agent_memory:forget(MemoryId),
     ?assertEqual({error, not_found}, beam_agent_memory:get(MemoryId)),
+    ok = beam_agent_memory:clear().
+
+%%====================================================================
+%% configure_persistence/1
+%%====================================================================
+
+configure_persistence_accepts_valid_ets_config_test() ->
+    ok = beam_agent_memory:ensure_tables(),
+    ?assertEqual(ok,
+        beam_agent_memory:configure_persistence(#{
+            adapter => beam_agent_store_ets
+        })),
+    ok = beam_agent_memory:clear().
+
+configure_persistence_rejects_invalid_adapter_test() ->
+    ok = beam_agent_memory:ensure_tables(),
+    ?assertMatch({error, {invalid_adapter, _}},
+        beam_agent_memory:configure_persistence(#{
+            adapter => totally_bogus_adapter
+        })),
+    ok = beam_agent_memory:clear().
+
+configure_persistence_memories_survive_reconfig_test() ->
+    ok = beam_agent_memory:clear(),
+    {ok, Memory} = beam_agent_memory:remember(<<"persist-test-session">>, #{
+        kind => note,
+        content => <<"survive reconfig">>,
+        salience => 10
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    %% Reconfigure to same adapter (ETS) — memories should survive
+    ok = beam_agent_memory:configure_persistence(#{
+        adapter => beam_agent_store_ets
+    }),
+    {ok, Found} = beam_agent_memory:get(MemoryId),
+    ?assertEqual(<<"survive reconfig">>, maps:get(content, Found)),
     ok = beam_agent_memory:clear().

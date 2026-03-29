@@ -58,7 +58,9 @@ extract_line(Buffer) ->
     end.
 
 -doc "Decode a single JSONL line into an Erlang map. Uses OTP 27+ json module (no external deps).".
--spec decode_line(binary()) -> {ok, map()} | {error, term()}.
+-spec decode_line(binary()) ->
+    {ok, map()} | {error, empty_line | {json_too_large, non_neg_integer()} |
+                   {not_object, term()} | {json_decode, term()}}.
 decode_line(<<>>) ->
     {error, empty_line};
 decode_line(Line) ->

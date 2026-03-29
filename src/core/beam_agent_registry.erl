@@ -196,7 +196,7 @@ Emits the appropriate reload notification for the kind.
 -spec clear(kind()) -> ok.
 clear(Kind) when is_atom(Kind) ->
     ok = ensure_table(),
-    ets:select_delete(?TABLE, [{{{Kind, '_'}, '_'}, [], [true]}]),
+    beam_agent_ets:select_delete(?TABLE, [{{{Kind, '_'}, '_'}, [], [true]}]),
     beam_agent_reload_bus:notify(reload_atom(Kind)),
     ok.
 

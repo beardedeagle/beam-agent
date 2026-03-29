@@ -50,6 +50,8 @@
 -type match_spec() ::
     %% Exact match on program name
     {program, binary()} |
+    %% Program name starts with prefix (e.g., <<"mkfs">> matches mkfs.ext4)
+    {program_prefix, binary()} |
     %% Program name + ordered subsequence of arg patterns
     {program_args, binary(), [arg_match()]} |
     %% Substring match in raw command text
@@ -119,7 +121,7 @@ default_deny_rules() ->
           match => {program, <<"mkfs">>},
           reason => <<"Filesystem creation blocked">>},
         #{type => deny,
-          match => {contains, <<"mkfs.">>},
+          match => {program_prefix, <<"mkfs">>},
           reason => <<"Filesystem creation variant blocked">>},
         #{type => deny,
           match => {program, <<"dd">>},
@@ -282,6 +284,13 @@ match_spec({program, Pattern}, #{program := Program}) ->
     Program =:= Pattern orelse
         normalize_basename(Program) =:= Pattern;
 match_spec({program, _Pattern}, _Cmd) ->
+    false;
+match_spec({program_prefix, Prefix}, #{program := Program}) ->
+    BaseName = normalize_basename(Program),
+    PrefixLen = byte_size(Prefix),
+    byte_size(BaseName) >= PrefixLen andalso
+        binary:part(BaseName, 0, PrefixLen) =:= Prefix;
+match_spec({program_prefix, _Prefix}, _Cmd) ->
     false;
 match_spec({program_args, ProgramPattern, ArgPatterns},
            #{program := Program, args := Args}) ->

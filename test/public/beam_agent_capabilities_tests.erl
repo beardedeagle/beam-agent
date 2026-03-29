@@ -193,7 +193,7 @@ register_backend_for_backend_returns_full_list_test() ->
     Caps = full_capability_set(full, universal, validated_equivalent),
     ok = beam_agent_capabilities:register_backend(test_backend, Caps),
     {ok, Projected} = beam_agent_capabilities:for_backend(test_backend),
-    ?assertEqual(23, length(Projected)),
+    ?assertEqual(24, length(Projected)),
     [First | _] = Projected,
     ?assertEqual(full, maps:get(support_level, First)),
     reset().

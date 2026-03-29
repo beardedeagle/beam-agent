@@ -295,7 +295,11 @@ Create a child orchestration record, optionally opening a child session or
 thread substrate.
 """.
 -spec spawn(parent(), spawn_opts()) ->
-    {ok, child()} | {error, term()}.
+    {ok, child()} | {error, spawn_error() | {parent_not_running, beam_agent_runs_core:run_status()} |
+        parent_not_found | {invalid_parent, parent()} |
+        {unsupported_spawn_opt, atom()} | {invalid_spawn_opt, atom()} |
+        session_required_for_thread | {invalid_session_target, session_target()} |
+        {invalid_thread_target, thread_target()}}.
 spawn(Parent, Opts) when is_map(Opts) ->
     TeleMeta = telemetry_spawn_meta(Parent, Opts),
     StartTime = telemetry_start(spawn, TeleMeta),
@@ -320,7 +324,13 @@ Delegation records the task payload and lineage immediately but does not start
 any worker loop inside BeamAgent.
 """.
 -spec delegate(parent(), term(), map()) ->
-    {ok, beam_agent_runs_core:run()} | {error, term()}.
+    {ok, beam_agent_runs_core:run()} | {error, spawn_error() |
+        {unsupported_delegate_opt, input} |
+        {parent_not_running, beam_agent_runs_core:run_status()} |
+        parent_not_found | {invalid_parent, parent()} |
+        {unsupported_spawn_opt, atom()} | {invalid_spawn_opt, atom()} |
+        session_required_for_thread | {invalid_session_target, session_target()} |
+        {invalid_thread_target, thread_target()}}.
 delegate(Parent, Task, Opts) when is_map(Opts) ->
     TeleMeta = (telemetry_spawn_meta(Parent, Opts))#{
         delegated => true,
@@ -356,7 +366,7 @@ Wait for a run to reach a terminal state by polling the canonical run store.
 """.
 -spec await(binary(), non_neg_integer()) ->
     {ok, await_result()} |
-    {error, timeout | not_found | {invalid_timeout, term()}}.
+    {error, timeout | not_found | {invalid_timeout, non_neg_integer()}}.
 await(RunId, Timeout)
   when is_binary(RunId), is_integer(Timeout), Timeout >= 0 ->
     Deadline = erlang:monotonic_time(millisecond) + Timeout,
@@ -376,7 +386,7 @@ Supported opts:
   - `include_journal` (default `true`)
   - `include_descendants` (default `false`)
 """.
--spec collect(binary(), collect_opts()) -> {ok, collect_result()} | {error, term()}.
+-spec collect(binary(), collect_opts()) -> {ok, collect_result()} | {error, not_found | collect_error()}.
 collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
     TeleMeta = (maps:with([include_steps, include_journal, include_descendants], Opts))#{
         run_id => RunId
@@ -441,7 +451,8 @@ collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
 -doc """
 Cancel a run and any active orchestrated descendants.
 """.
--spec cancel(binary(), term()) -> ok | {error, not_found | term()}.
+-spec cancel(binary(), term()) -> ok | {error, not_found |
+    {invalid_status_transition, beam_agent_runs_core:run_status(), cancelled}}.
 cancel(RunId, Reason) when is_binary(RunId) ->
     StartTime = telemetry_start(cancel, #{run_id => RunId}),
     Result = case cancel_tree(RunId, Reason, root) of
@@ -492,7 +503,7 @@ status(RunId) when is_binary(RunId) ->
     Result.
 
 -doc "List direct orchestrator children for a parent run, oldest first.".
--spec list_children(parent()) -> {ok, [child()]} | {error, term()}.
+-spec list_children(parent()) -> {ok, [child()]} | {error, parent_not_found | {invalid_parent, parent()}}.
 list_children(Parent) ->
     TeleMeta = telemetry_parent_meta(Parent),
     StartTime = telemetry_start(list_children, TeleMeta),
@@ -519,7 +530,10 @@ list_children(Parent) ->
 
 -spec spawn_child(beam_agent_runs_core:run(), relation(), term() | undefined,
     normalized_spawn_opts()) ->
-    {ok, child()} | {error, term()}.
+    {ok, child()} | {error, spawn_error() |
+        {parent_not_running, beam_agent_runs_core:run_status()} |
+        session_required_for_thread | {invalid_session_target, session_target()} |
+        {invalid_thread_target, thread_target()}}.
 spawn_child(ParentRun, Relation, Task, Opts) ->
     ensure_tables(),
     case ensure_parent_running(ParentRun) of
@@ -620,7 +634,8 @@ persist_child_run(ParentRun, Relation, Task, Opts, Ctx) ->
     end.
 
 -spec resolve_spawn_context(beam_agent_runs_core:run(), normalized_spawn_opts()) ->
-    {ok, resolved_spawn_context()} | {error, term()}.
+    {ok, resolved_spawn_context()} | {error, session_required_for_thread |
+        {invalid_session_target, session_target()}}.
 resolve_spawn_context(ParentRun, Opts) ->
     ParentSessionId = maps:get(session_id, ParentRun, undefined),
     ParentThreadId = maps:get(thread_id, ParentRun, undefined),
@@ -638,7 +653,7 @@ resolve_spawn_context(ParentRun, Opts) ->
     end.
 
 -spec resolve_session_target(normalized_session_target(), binary() | undefined) ->
-    {ok, session_resolution()} | {error, term()}.
+    {ok, session_resolution()} | {error, {invalid_session_target, session_target()}}.
 resolve_session_target(inherit, ParentSessionId) ->
     {ok, maybe_put(session_id, ParentSessionId, #{
         owns_session => false,
@@ -684,7 +699,8 @@ resolve_session_target(#{kind := routed, opts := SessionOpts, stop_session := St
 
 -spec resolve_thread_target(normalized_thread_target(), session_resolution(),
     binary() | undefined) ->
-    {ok, thread_resolution()} | {error, term()}.
+    {ok, thread_resolution()} | {error, session_required_for_thread |
+        {invalid_thread_target, thread_target()}}.
 resolve_thread_target(inherit, SessionCtx, ParentThreadId) ->
     SessionId = maps:get(session_id, SessionCtx, undefined),
     case {ParentThreadId, SessionId, maps:get(session_inherited, SessionCtx, false)} of
@@ -735,8 +751,8 @@ resolve_thread_target(#{kind := start, opts := ThreadOpts}, SessionCtx, _ParentT
     end).
 
 -spec with_thread_owner(session_resolution(),
-    fun((pid() | binary()) -> {ok, thread_resolution()} | {error, term()})) ->
-    {ok, thread_resolution()} | {error, term()}.
+    fun((pid() | binary()) -> {ok, thread_resolution()} | {error, session_required_for_thread})) ->
+    {ok, thread_resolution()} | {error, session_required_for_thread}.
 with_thread_owner(SessionCtx, Fun) ->
     case {maps:get(session_ref, SessionCtx, undefined), maps:get(session_id, SessionCtx, undefined)} of
         {SessionRef, _} when is_pid(SessionRef) ->
@@ -790,7 +806,8 @@ terminal_await_result(#{status := Status} = Run) ->
     )}.
 
 -spec cancel_tree(binary(), term(), root | {child_of, binary()}) ->
-    ok | {error, not_found | term()}.
+    ok | {error, not_found | {invalid_status_transition,
+        beam_agent_runs_core:run_status(), cancelled}}.
 cancel_tree(RunId, Reason, Origin) ->
     case beam_agent_runs:get_run(RunId) of
         {ok, Run} ->
@@ -841,7 +858,9 @@ cancel_single_run(_Run, _Reason, _Origin) ->
 %% Internal: normalization
 %%--------------------------------------------------------------------
 
--spec normalize_spawn_opts(map()) -> {ok, normalized_spawn_opts()} | {error, term()}.
+-spec normalize_spawn_opts(map()) -> {ok, normalized_spawn_opts()} | {error,
+    {unsupported_spawn_opt, atom()} | {invalid_spawn_opt, run_id | kind | metadata} |
+    {invalid_session_target, session_target()} | {invalid_thread_target, thread_target()}}.
 normalize_spawn_opts(Opts) when is_map(Opts) ->
     Allowed = [run_id, kind, input, metadata, session, thread],
     case validate_allowed_keys(Opts, Allowed, unsupported_spawn_opt) of
@@ -889,7 +908,7 @@ normalize_spawn_opts(Opts) when is_map(Opts) ->
     end.
 
 -spec normalize_session_target(term()) ->
-    {ok, normalized_session_target()} | {error, term()}.
+    {ok, normalized_session_target()} | {error, {invalid_session_target, term()}}.
 normalize_session_target(inherit) ->
     {ok, inherit};
 normalize_session_target(none) ->
@@ -968,7 +987,7 @@ normalize_collect_opts(Opts) ->
 %% Internal: parent/session helpers
 %%--------------------------------------------------------------------
 
--spec resolve_parent_run(parent()) -> {ok, beam_agent_runs_core:run()} | {error, term()}.
+-spec resolve_parent_run(parent()) -> {ok, beam_agent_runs_core:run()} | {error, parent_not_found | {invalid_parent, parent()}}.
 resolve_parent_run(ParentRunId) when is_binary(ParentRunId), byte_size(ParentRunId) > 0 ->
     case beam_agent_runs:get_run(ParentRunId) of
         {ok, Run} -> {ok, Run};
@@ -1115,20 +1134,24 @@ audit_orchestrator_event(Action, Link, Decision, Reason) ->
 
 -spec list_descendants(binary()) -> [child()].
 list_descendants(ParentRunId) ->
+    lists:reverse(list_descendants_acc(ParentRunId, [])).
+
+-spec list_descendants_acc(binary(), [child()]) -> [child()].
+list_descendants_acc(ParentRunId, Acc0) ->
     case list_children(ParentRunId) of
         {ok, Children} ->
             lists:foldl(fun(#{run := #{run_id := ChildRunId}} = Child, Acc) ->
-                Acc ++ [Child | list_descendants(ChildRunId)]
-            end, [], Children);
+                list_descendants_acc(ChildRunId, [Child | Acc])
+            end, Acc0, Children);
         {error, _} ->
-            []
+            Acc0
     end.
 
 -spec collect_journal([binary()]) -> [beam_agent_journal_core:entry()].
 collect_journal(RunIds) ->
     Entries = lists:foldl(fun(RunId, Acc) ->
         case beam_agent_journal:list(#{run_id => RunId}) of
-            {ok, RunEntries} -> Acc ++ RunEntries;
+            {ok, RunEntries} -> lists:reverse(RunEntries, Acc);
             {error, _} -> Acc
         end
     end, [], lists:usort(RunIds)),
@@ -1147,6 +1170,7 @@ child_counts(Children) ->
 
 -spec descendant_cancel_reason(binary(), term()) ->
     #{cancelled_by_parent := binary(), reason := term()}.
+%% NOTE: reason is genuinely term() here since it wraps caller-provided cancel reasons
 descendant_cancel_reason(ParentRunId, Reason) ->
     #{
         cancelled_by_parent => ParentRunId,
@@ -1304,13 +1328,15 @@ telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(orchestrator, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(orchestrator_operation(), term(), map()) -> ok.
+-spec telemetry_exception(orchestrator_operation(),
+    {error, not_found | spawn_error() | collect_error()} | not_found | spawn_error() | collect_error(),
+    map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(orchestrator, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_finish(await | collect | delegate | spawn | status, integer(),
-    {ok, map()} | {error, timeout | not_found | term()}, map()) -> ok.
+    {ok, map()} | {error, timeout | not_found | spawn_error() | collect_error()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) when is_map(Result) ->
     telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_result_meta(Result)));
 telemetry_finish(Operation, StartTime, {error, timeout}, Metadata) ->

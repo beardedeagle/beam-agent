@@ -509,6 +509,7 @@ defmodule BeamAgent do
       result = List.last(messages)
       IO.puts(result[:content])
   """
+  @spec query(pid(), binary()) :: {:ok, [message()]} | {:error, term()}
   defdelegate query(session, prompt), to: :beam_agent
 
   @doc """
@@ -553,6 +554,7 @@ defmodule BeamAgent do
         timeout: 120_000
       })
   """
+  @spec query(pid(), binary(), :beam_agent.query_opts()) :: {:ok, [message()]} | {:error, term()}
   defdelegate query(session, prompt, params), to: :beam_agent
 
   @doc """

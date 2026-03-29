@@ -211,7 +211,8 @@ handle_data(_Buffer, HState) ->
 encode_query(Prompt, Params, #hstate{opts = Opts} = HState) ->
     HookCtx = #{event => user_prompt_submit,
                 prompt => Prompt,
-                params => Params},
+                params => Params,
+                session_id => HState#hstate.session_id},
     case fire_hook(user_prompt_submit, HookCtx, HState) of
         {deny, Reason} ->
             {error, {hook_denied, Reason}};
@@ -253,7 +254,8 @@ build_session_info(#hstate{} = HState) ->
 -spec terminate_handler(_, #hstate{}) -> ok.
 terminate_handler(Reason, #hstate{} = HState) ->
     _ = fire_hook(session_end,
-                  #{event => session_end, reason => Reason},
+                  #{event => session_end, reason => Reason,
+                    session_id => HState#hstate.session_id},
                   HState),
     ok.
 

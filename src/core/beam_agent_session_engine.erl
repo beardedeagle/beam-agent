@@ -159,27 +159,27 @@ stop(Pid) ->
 
 -doc "Send a control message to the backend.".
 -spec send_control(pid(), binary(), map()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, not_supported | term()}.
 send_control(Pid, Method, Params) ->
     gen_statem:call(Pid, {send_control, Method, Params}, 10_000).
 
 -doc "Interrupt the current query.".
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, no_active_query | session_error | reconnecting}.
 interrupt(Pid) ->
     gen_statem:call(Pid, interrupt, 5_000).
 
 -doc "Return session info (handler info merged with engine metadata).".
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid()) -> {ok, map()} | {error, session_error | reconnecting}.
 session_info(Pid) ->
     gen_statem:call(Pid, session_info, 5_000).
 
 -doc "Change the model at runtime.".
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, map()} | {error, not_supported | session_error | reconnecting}.
 set_model(Pid, Model) ->
     gen_statem:call(Pid, {set_model, Model}, 5_000).
 
 -doc "Change the permission mode at runtime.".
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, map()} | {error, not_supported | session_error | reconnecting}.
 set_permission_mode(Pid, Mode) ->
     gen_statem:call(Pid, {set_permission_mode, Mode}, 5_000).
 
@@ -510,7 +510,7 @@ error(info, _Msg, _Data) ->
 %% Common call dispatch (health, session_info, set_model, etc.)
 %%====================================================================
 
--spec handle_common_call(gen_statem:from(), term(), state_name(),
+-spec handle_common_call(gen_statem:from(), atom() | tuple(), state_name(),
                          #engine{}) ->
     gen_statem:event_handler_result(state_name()).
 handle_common_call(From, interrupt, _StateName, _Data) ->
@@ -950,7 +950,7 @@ maybe_complete_on_deliver(Msg, From, Data) ->
 classify(Msg, #engine{transport_mod = TMod, transport_ref = TRef}) ->
     TMod:classify_message(Msg, TRef).
 
--spec send_transport(term(), #engine{}) -> ok | {error, term()}.
+-spec send_transport(iodata() | binary(), #engine{}) -> ok | {error, closed | term()}.
 send_transport(Data, #engine{transport_mod = TMod, transport_ref = TRef}) ->
     TMod:send(TRef, Data).
 
@@ -1393,7 +1393,7 @@ make_test_engine(Overrides) ->
     }.
 
 -doc false.
--spec test_get_handler_state(#engine{}) -> term().
+-spec test_get_handler_state(#engine{}) -> map() | undefined.
 test_get_handler_state(#engine{handler_state = V}) -> V.
 
 -doc false.

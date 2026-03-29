@@ -40,7 +40,7 @@ defmodule CopilotEx.Session do
 
       {:ok, response} = CopilotEx.Session.send_control(session, "config.get", %{})
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :copilot_session.send_control(session, method, params)
   end
@@ -52,7 +52,7 @@ defmodule CopilotEx.Session do
   consumer will receive `{:error, :interrupted}` on the next
   `receive_message` call.
   """
-  @spec interrupt(pid()) :: :ok | {:error, term()}
+  @spec interrupt(pid()) :: :ok | {:error, :no_active_query | :reconnecting | :session_error}
   def interrupt(session) do
     :copilot_session.interrupt(session)
   end
@@ -60,7 +60,7 @@ defmodule CopilotEx.Session do
   @doc """
   Query session info (adapter, session_id, model, etc.).
   """
-  @spec session_info(pid()) :: {:ok, map()} | {:error, term()}
+  @spec session_info(pid()) :: {:ok, map()} | {:error, :reconnecting | :session_error}
   def session_info(session) do
     :copilot_session.session_info(session)
   end
@@ -68,7 +68,7 @@ defmodule CopilotEx.Session do
   @doc """
   Change the model at runtime during a session.
   """
-  @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_model(session, model) do
     :copilot_session.set_model(session, model)
   end

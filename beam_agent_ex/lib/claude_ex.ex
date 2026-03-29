@@ -156,7 +156,7 @@ defmodule ClaudeEx do
           :permission_prompt_tool_name => binary(),
           :permission_suggestions => [any()],
           :prompt => binary(),
-          :reason => term(),
+          :reason => atom() | binary(),
           :session_id => binary(),
           :stop_hook_active => boolean(),
           :stop_reason => atom() | binary(),
@@ -256,7 +256,7 @@ defmodule ClaudeEx do
           optional(:is_error) => boolean(),
           optional(:subtype) => binary(),
           optional(:errors) => [binary()],
-          optional(:structured_output) => term(),
+          optional(:structured_output) => map() | binary() | nil,
           optional(:permission_denials) => list(),
           optional(:fast_mode_state) => map(),
           # User message fields
@@ -294,7 +294,7 @@ defmodule ClaudeEx do
           | {:persist_session, boolean()}
           | {:permission_mode, binary() | permission_mode()}
           | {:permission_prompt_tool_name, binary()}
-          | {:permission_handler, (binary(), map(), map() -> term())}
+          | {:permission_handler, (binary(), map(), map() -> map())}
           | {:allowed_tools, [binary()]}
           | {:disallowed_tools, [binary()]}
           | {:settings, binary()}
@@ -493,7 +493,7 @@ defmodule ClaudeEx do
 
       {:ok, _} = ClaudeEx.rewind_files(session, "msg-uuid-123")
   """
-  @spec rewind_files(session(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec rewind_files(session(), binary()) :: {:ok, map()} | {:error, term()}
   def rewind_files(session, checkpoint_uuid) do
     :claude_agent_sdk.rewind_files(session, checkpoint_uuid)
   end
@@ -505,7 +505,7 @@ defmodule ClaudeEx do
 
       {:ok, _} = ClaudeEx.stop_task(session, "task-abc")
   """
-  @spec stop_task(session(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec stop_task(session(), binary()) :: {:ok, map()} | {:error, term()}
   def stop_task(session, task_id) do
     :claude_agent_sdk.stop_task(session, task_id)
   end
@@ -520,7 +520,7 @@ defmodule ClaudeEx do
 
       {:ok, _} = ClaudeEx.set_max_thinking_tokens(session, 8192)
   """
-  @spec set_max_thinking_tokens(session(), pos_integer()) :: {:ok, term()} | {:error, term()}
+  @spec set_max_thinking_tokens(session(), pos_integer()) :: {:ok, map()} | {:error, term()}
   def set_max_thinking_tokens(session, max_tokens)
       when is_integer(max_tokens) and max_tokens > 0 do
     :claude_agent_sdk.set_max_thinking_tokens(session, max_tokens)
@@ -536,7 +536,7 @@ defmodule ClaudeEx do
 
       {:ok, status} = ClaudeEx.mcp_server_status(session)
   """
-  @spec mcp_server_status(session()) :: {:ok, term()} | {:error, term()}
+  @spec mcp_server_status(session()) :: {:ok, map()} | {:error, term()}
   def mcp_server_status(session) do
     :claude_agent_sdk.mcp_server_status(session)
   end
@@ -552,7 +552,7 @@ defmodule ClaudeEx do
       servers = %{"my_server" => %{"command" => "node", "args" => ["server.js"]}}
       {:ok, _} = ClaudeEx.set_mcp_servers(session, servers)
   """
-  @spec set_mcp_servers(session(), map()) :: {:ok, term()} | {:error, term()}
+  @spec set_mcp_servers(session(), map()) :: {:ok, map()} | {:error, term()}
   def set_mcp_servers(session, servers) when is_map(servers) do
     :claude_agent_sdk.set_mcp_servers(session, servers)
   end
@@ -564,7 +564,7 @@ defmodule ClaudeEx do
 
       {:ok, _} = ClaudeEx.reconnect_mcp_server(session, "my_server")
   """
-  @spec reconnect_mcp_server(session(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec reconnect_mcp_server(session(), binary()) :: {:ok, map()} | {:error, term()}
   def reconnect_mcp_server(session, server_name) when is_binary(server_name) do
     :claude_agent_sdk.reconnect_mcp_server(session, server_name)
   end
@@ -577,7 +577,7 @@ defmodule ClaudeEx do
       {:ok, _} = ClaudeEx.toggle_mcp_server(session, "my_server", false)
       {:ok, _} = ClaudeEx.toggle_mcp_server(session, "my_server", true)
   """
-  @spec toggle_mcp_server(session(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  @spec toggle_mcp_server(session(), binary(), boolean()) :: {:ok, map()} | {:error, term()}
   def toggle_mcp_server(session, server_name, enabled)
       when is_binary(server_name) and is_boolean(enabled) do
     :claude_agent_sdk.toggle_mcp_server(session, server_name, enabled)
@@ -594,7 +594,7 @@ defmodule ClaudeEx do
       {:ok, commands} = ClaudeEx.supported_commands(session)
       Enum.each(commands, &IO.inspect/1)
   """
-  @spec supported_commands(session()) :: {:ok, list()} | {:error, term()}
+  @spec supported_commands(session()) :: {:ok, [map()]} | {:error, term()}
   def supported_commands(session) do
     :claude_agent_sdk.supported_commands(session)
   end
@@ -606,7 +606,7 @@ defmodule ClaudeEx do
 
       {:ok, models} = ClaudeEx.supported_models(session)
   """
-  @spec supported_models(session()) :: {:ok, list()} | {:error, term()}
+  @spec supported_models(session()) :: {:ok, [map()]} | {:error, term()}
   def supported_models(session) do
     :claude_agent_sdk.supported_models(session)
   end
@@ -618,7 +618,7 @@ defmodule ClaudeEx do
 
       {:ok, agents} = ClaudeEx.supported_agents(session)
   """
-  @spec supported_agents(session()) :: {:ok, list()} | {:error, term()}
+  @spec supported_agents(session()) :: {:ok, [map()]} | {:error, term()}
   def supported_agents(session) do
     :claude_agent_sdk.supported_agents(session)
   end
@@ -634,7 +634,7 @@ defmodule ClaudeEx do
       {:ok, account} = ClaudeEx.account_info(session)
       account["email"]  # => "user@example.com"
   """
-  @spec account_info(session()) :: {:ok, map()} | {:error, term()}
+  @spec account_info(session()) :: {:ok, map()} | {:error, :reconnecting | :session_error}
   def account_info(session) do
     :claude_agent_sdk.account_info(session)
   end
@@ -1016,11 +1016,11 @@ defmodule ClaudeEx do
   """
   @spec block_to_message(content_block()) :: %{
           :type => :raw | :text | :thinking | :tool_result | :tool_use,
-          :content => term(),
-          :raw => term(),
-          :tool_input => term(),
-          :tool_name => term(),
-          :tool_use_id => term()
+          :content => binary() | nil,
+          :raw => map() | nil,
+          :tool_input => map() | nil,
+          :tool_name => binary() | nil,
+          :tool_use_id => binary() | nil
         }
   def block_to_message(block) do
     :beam_agent_content_core.block_to_message(block)
@@ -1058,7 +1058,7 @@ defmodule ClaudeEx do
       ClaudeEx.send_control(session, "setModel", %{"model" => "claude-sonnet-4-6"})
 
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :gen_statem.call(session, {:send_control, method, params}, 30_000)
   end

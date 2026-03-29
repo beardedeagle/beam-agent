@@ -83,6 +83,9 @@ State = beam_agent_mcp_dispatch:new(ServerInfo, ServerCaps, #{
 %% but currently has a single call site with a literal binary, so
 %% dialyzer infers an impractically narrow type.
 -dialyzer({nowarn_function, method_error/2}).
+%% handle_logging_set_level calls safe_provider_call whose dynamic erlang:apply/3
+%% prevents dialyzer from seeing the {ok, NewPState} return path.
+-dialyzer({nowarn_function, handle_logging_set_level/3}).
 
 %%--------------------------------------------------------------------
 %% Provider Behaviour
@@ -256,7 +259,7 @@ unrecoverable protocol or provider error is detected.
 
 In `error` state, only `ping` and `initialize` (re-init) are accepted.
 """.
--spec mark_error(term(), dispatch_state()) -> dispatch_state().
+-spec mark_error(binary() | map() | atom(), dispatch_state()) -> dispatch_state().
 mark_error(Reason, State) ->
     State#{lifecycle => error, error_info => Reason}.
 
@@ -291,7 +294,7 @@ Return the error reason stored when `mark_error/2` was called.
 
 Returns `undefined` if the dispatch is not in `error` state.
 """.
--spec error_info(dispatch_state()) -> term() | undefined.
+-spec error_info(dispatch_state()) -> binary() | map() | atom() | undefined.
 error_info(#{lifecycle := error, error_info := Reason}) -> Reason;
 error_info(_State) -> undefined.
 
@@ -681,7 +684,7 @@ dispatch_provider(Id, Method, Capability, HandlerFun, Params, State) ->
 %% Wrap any provider callback in try/catch so a crashing provider
 %% returns a JSON-RPC internal error instead of propagating the
 %% exception to the owning session process.
--spec safe_provider_call(module(), atom(), [term()], dispatch_state()) ->
+-spec safe_provider_call(module(), atom(), [map() | binary() | list()], dispatch_state()) ->
     {ok, term()} | {ok, term(), term()} | {error, integer(), binary()}.
 safe_provider_call(Provider, Function, Args, _State) ->
     try

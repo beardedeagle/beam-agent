@@ -207,7 +207,7 @@ snapshot_file(Path) when is_binary(Path) ->
               existed => false, permissions => undefined}
     end.
 
--spec restore_files([file_snapshot()]) -> ok | {error, term()}.
+-spec restore_files([file_snapshot()]) -> ok | {error, {restore_failed, binary(), file:posix()}}.
 restore_files([]) ->
     ok;
 restore_files([#{path := Path, existed := false} | Rest]) ->

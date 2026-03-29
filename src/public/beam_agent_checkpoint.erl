@@ -307,7 +307,8 @@ support the rewind_files operation natively.
 Session is the session pid.
 CheckpointUuid is the binary checkpoint identifier.
 """.
--spec rewind_files(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec rewind_files(pid(), binary()) ->
+    {ok, ok} | {error, not_found | {restore_failed, binary(), file:posix()} | term()}.
 rewind_files(Session, CheckpointUuid) ->
     beam_agent_core:native_or(Session, rewind_files, [CheckpointUuid], fun() ->
         beam_agent_checkpoint_core:rewind(Session, CheckpointUuid)

@@ -583,12 +583,12 @@ list_backends() ->
     beam_agent_backend:available_backends().
 
 -doc "Change the model at runtime.".
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, binary()} | {error, term()}.
 set_model(Session, Model) when is_pid(Session), is_binary(Model) ->
     beam_agent_routing:set_model(Session, Model).
 
 -doc "Change the permission mode at runtime.".
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, binary() | map()} | {error, term()}.
 set_permission_mode(Session, Mode) when is_pid(Session), is_binary(Mode) ->
     beam_agent_routing:set_permission_mode(Session, Mode).
 
@@ -603,7 +603,7 @@ abort(Session) when is_pid(Session) ->
     beam_agent_routing:abort(Session).
 
 -doc "Send a control message through the canonical router.".
--spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec send_control(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
 send_control(Session, Method, Params)
   when is_pid(Session), is_binary(Method), is_map(Params) ->
     beam_agent_routing:send_control(Session, Method, Params).
@@ -759,17 +759,17 @@ thread_rollback(SessionId, ThreadId, Selector)
     beam_agent_threads_core:rollback_thread(SessionId, ThreadId, Selector).
 
 -doc "List supported slash commands from session init data.".
--spec supported_commands(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_commands(pid()) -> {ok, [map()]} | {error, term()}.
 supported_commands(Session) when is_pid(Session) ->
     beam_agent_routing:supported_commands(Session).
 
 -doc "List supported models from session init data.".
--spec supported_models(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_models(pid()) -> {ok, [map()]} | {error, term()}.
 supported_models(Session) when is_pid(Session) ->
     beam_agent_routing:supported_models(Session).
 
 -doc "List supported agents from session init data.".
--spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_agents(pid()) -> {ok, [map()]} | {error, term()}.
 supported_agents(Session) when is_pid(Session) ->
     beam_agent_routing:supported_agents(Session).
 

@@ -22,12 +22,12 @@
 -type native_metadata_function() :: list_server_agents | skills_list.
 
 -doc "List tools for a live session pid or persisted session id.".
--spec list_tools(pid() | binary()) -> {ok, catalog_entries()} | {error, term()}.
+-spec list_tools(pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | not_found | term()}.
 list_tools(Session) ->
     metadata_list(Session, tools).
 
 -doc "List skills for a live session pid or persisted session id.".
--spec list_skills(pid() | binary()) -> {ok, catalog_entries()} | {error, term()}.
+-spec list_skills(pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | unsupported | not_found | term()}.
 list_skills(Session) ->
     case maybe_native_list(Session, skills_list) of
         {ok, Skills} when is_list(Skills) ->
@@ -37,17 +37,17 @@ list_skills(Session) ->
     end.
 
 -doc "List plugins for a live session pid or persisted session id.".
--spec list_plugins(pid() | binary()) -> {ok, catalog_entries()} | {error, term()}.
+-spec list_plugins(pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | not_found | term()}.
 list_plugins(Session) ->
     metadata_list(Session, plugins).
 
 -doc "List MCP servers for a live session pid or persisted session id.".
--spec list_mcp_servers(pid() | binary()) -> {ok, catalog_entries()} | {error, term()}.
+-spec list_mcp_servers(pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | not_found | term()}.
 list_mcp_servers(Session) ->
     metadata_list(Session, mcp_servers).
 
 -doc "List agents for a live session pid or persisted session id.".
--spec list_agents(pid() | binary()) -> {ok, catalog_entries()} | {error, term()}.
+-spec list_agents(pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | unsupported | not_found | term()}.
 list_agents(Session) ->
     case maybe_native_list(Session, list_server_agents) of
         {ok, Agents} when is_list(Agents) ->
@@ -57,22 +57,22 @@ list_agents(Session) ->
     end.
 
 -doc "Look up a single tool by id/name/path.".
--spec get_tool(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+-spec get_tool(pid() | binary(), binary()) -> {ok, catalog_entry()} | {error, not_found | {invalid_session_info, term()} | term()}.
 get_tool(Session, ToolId) when is_binary(ToolId) ->
     get_entry(fun list_tools/1, Session, ToolId).
 
 -doc "Look up a single skill by id/name/path.".
--spec get_skill(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+-spec get_skill(pid() | binary(), binary()) -> {ok, catalog_entry()} | {error, not_found | {invalid_session_info, term()} | term()}.
 get_skill(Session, SkillId) when is_binary(SkillId) ->
     get_entry(fun list_skills/1, Session, SkillId).
 
 -doc "Look up a single plugin by id/name/path.".
--spec get_plugin(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+-spec get_plugin(pid() | binary(), binary()) -> {ok, catalog_entry()} | {error, not_found | {invalid_session_info, term()} | term()}.
 get_plugin(Session, PluginId) when is_binary(PluginId) ->
     get_entry(fun list_plugins/1, Session, PluginId).
 
 -doc "Look up a single agent by id/name/path.".
--spec get_agent(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
+-spec get_agent(pid() | binary(), binary()) -> {ok, catalog_entry()} | {error, not_found | {invalid_session_info, term()} | term()}.
 get_agent(Session, AgentId) when is_binary(AgentId) ->
     get_entry(fun list_agents/1, Session, AgentId).
 
@@ -101,7 +101,7 @@ clear_default_agent(Session) ->
 %%--------------------------------------------------------------------
 
 -spec metadata_list(pid() | binary(), metadata_key()) ->
-    {ok, catalog_entries()} | {error, term()}.
+    {ok, catalog_entries()} | {error, {invalid_session_info, term()} | not_found | term()}.
 metadata_list(Session, Key) ->
     case session_info(Session) of
         {ok, Info} ->
@@ -111,7 +111,7 @@ metadata_list(Session, Key) ->
     end.
 
 -spec maybe_native_list(pid() | binary(), native_metadata_function()) ->
-    {ok, catalog_entries()} | {error, term()}.
+    {ok, catalog_entries()} | {error, unsupported | term()}.
 maybe_native_list(Session, Function) ->
     case beam_agent_core:native_call(Session, Function, []) of
         {ok, List} when is_list(List) ->
@@ -140,10 +140,10 @@ normalize_native_map(#{<<"items">> := Items}) when is_list(Items) ->
 normalize_native_map(_Other) ->
     {ok, []}.
 
--spec get_entry(fun((pid() | binary()) -> {ok, catalog_entries()} | {error, term()}),
+-spec get_entry(fun((pid() | binary()) -> {ok, catalog_entries()} | {error, {invalid_session_info, term()} | term()}),
                 pid() | binary(),
                 binary()) ->
-    {ok, catalog_entry()} | {error, not_found | term()}.
+    {ok, catalog_entry()} | {error, not_found | {invalid_session_info, term()} | term()}.
 get_entry(Fun, Session, EntryId) ->
     case Fun(Session) of
         {ok, Entries} ->
@@ -199,7 +199,7 @@ normalize_entry(Value) when is_binary(Value) ->
 normalize_entry(Value) ->
     #{value => Value}.
 
--spec session_info(pid() | binary()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid() | binary()) -> {ok, map()} | {error, {invalid_session_info, term()} | not_found | term()}.
 session_info(Session) when is_pid(Session) ->
     try gen_statem:call(Session, session_info, 5000) of
         {ok, Info} when is_map(Info) -> {ok, Info};

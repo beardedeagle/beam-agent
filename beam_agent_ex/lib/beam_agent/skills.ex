@@ -108,7 +108,7 @@ defmodule BeamAgent.Skills do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  @spec remote_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec remote_list(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate remote_list(session), to: :beam_agent_skills
 
   @doc """
@@ -132,7 +132,7 @@ defmodule BeamAgent.Skills do
     containing `:name`, `:description`, and `:path`.
   - `{:error, reason}` on failure.
   """
-  @spec remote_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec remote_list(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate remote_list(session, opts), to: :beam_agent_skills
 
   @doc """
@@ -186,6 +186,16 @@ defmodule BeamAgent.Skills do
 
   # --- Global Skill Registration ---
 
+  @typedoc "A globally registered skill entry."
+  @type skill_entry() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:enabled) => boolean(),
+          required(:source) => :local | :remote | :builtin,
+          optional(:description) => binary(),
+          optional(:config) => map()
+        }
+
   @doc """
   Create the global skills ETS table. Idempotent.
   """
@@ -212,19 +222,22 @@ defmodule BeamAgent.Skills do
   @doc """
   Fetch a single global skill by id.
   """
-  @spec get_global(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get_global(binary()) :: {:ok, skill_entry()} | {:error, :not_found}
   defdelegate get_global(skill_id), to: :beam_agent_skills
 
   @doc """
   List all globally registered skills.
   """
-  @spec list_global() :: [map()]
+  @spec list_global() :: [skill_entry()]
   defdelegate list_global(), to: :beam_agent_skills
+
+  @typedoc "Filter options for `list_global/1`: `:source` and/or `:enabled`."
+  @type list_opts() :: :beam_agent_skills_core.list_opts()
 
   @doc """
   List globally registered skills with optional filters.
   """
-  @spec list_global(map()) :: [map()]
+  @spec list_global(list_opts()) :: [skill_entry()]
   defdelegate list_global(opts), to: :beam_agent_skills
 
   @doc """

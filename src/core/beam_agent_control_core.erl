@@ -140,6 +140,7 @@ beam_agent_control_core:resolve_pending_request(SessionId, ReqId, Response)
 
 -dialyzer({no_underspecs, [{pending_user_input_result, 4},
                            {normalize_pending_request, 2}]}).
+-dialyzer({nowarn_function, [{journal_control_event, 3}]}).
 
 %% ETS tables.
 -define(TABLE, beam_agent_runtime).
@@ -241,7 +242,7 @@ dispatch(SessionId, Method, Params)
 %%--------------------------------------------------------------------
 
 -doc "Get a config value for a session.".
--spec get_config(binary(), atom()) -> {ok, term()} | {error, not_set}.
+-spec get_config(binary(), atom()) -> {ok, binary() | atom() | map() | pos_integer()} | {error, not_set}.
 get_config(SessionId, Key)
   when is_binary(SessionId), is_atom(Key) ->
     ensure_tables(),
@@ -251,7 +252,7 @@ get_config(SessionId, Key)
     end.
 
 -doc "Set a config value for a session.".
--spec set_config(binary(), atom(), term()) -> ok.
+-spec set_config(binary(), atom(), binary() | atom() | map() | pos_integer()) -> ok.
 set_config(SessionId, Key, Value)
   when is_binary(SessionId), is_atom(Key) ->
     ensure_tables(),
@@ -307,7 +308,11 @@ set_max_thinking_tokens(SessionId, Tokens)
 -spec get_max_thinking_tokens(binary()) ->
     {ok, pos_integer()} | {error, not_set}.
 get_max_thinking_tokens(SessionId) when is_binary(SessionId) ->
-    get_config(SessionId, max_thinking_tokens).
+    ensure_tables(),
+    case ets:lookup(?TABLE, {control_config, {SessionId, max_thinking_tokens}}) of
+        [{_, Tokens}] when is_integer(Tokens), Tokens > 0 -> {ok, Tokens};
+        _ -> {error, not_set}
+    end.
 
 %%--------------------------------------------------------------------
 %% Task Tracking
@@ -1065,7 +1070,7 @@ journal_task_event(EventType, SessionId, Task, ExtraPayload) ->
 task_journal_view(Task) ->
     maps:without([pid], Task).
 
--spec maybe_put(profile_id | run_id, term(), control_put_map()) -> control_put_map().
+-spec maybe_put(profile_id | run_id, undefined | binary(), control_put_map()) -> control_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->

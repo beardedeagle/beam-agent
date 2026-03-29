@@ -81,7 +81,7 @@ defmodule OpencodeEx do
            required(:session_id) => binary(),
            required(:stop_reason) => binary(),
            required(:stop_reason_atom) => stop_reason(),
-           required(:structured_output) => term(),
+           required(:structured_output) => map() | binary() | nil,
            required(:subtype) => binary(),
            required(:surpassed_threshold) => number(),
            required(:system_info) => map(),
@@ -160,7 +160,7 @@ defmodule OpencodeEx do
            required(:permission_prompt_tool_name) => binary(),
            required(:permission_suggestions) => [any()],
            required(:prompt) => binary(),
-           required(:reason) => term(),
+           required(:reason) => atom() | binary(),
            required(:session_id) => binary(),
            required(:stop_hook_active) => boolean(),
            required(:stop_reason) => atom() | binary(),
@@ -208,7 +208,7 @@ defmodule OpencodeEx do
            required(:tools) => [
              %{
                :description => binary(),
-               :handler => (term() -> any()),
+               :handler => (map() -> {:ok, [map()]} | {:error, binary()}),
                :input_schema => map(),
                :name => binary()
              }
@@ -413,13 +413,13 @@ defmodule OpencodeEx do
   end
 
   @doc "Initialize native OpenCode app state."
-  @spec app_init(pid()) :: {:ok, term()}
+  @spec app_init(pid()) :: {:ok, map()}
   def app_init(session) do
     :beam_agent_runtime.app_init_impl(session)
   end
 
   @doc "Write a native OpenCode log entry."
-  @spec app_log(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec app_log(pid(), map()) :: {:ok, map()} | {:error, term()}
   def app_log(session, body) do
     :opencode_client.app_log(session, body)
   end
@@ -437,7 +437,7 @@ defmodule OpencodeEx do
   end
 
   @doc "Delete a session by ID on the OpenCode server (native REST)."
-  @spec delete_server_session(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec delete_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def delete_server_session(session, id) do
     :gen_statem.call(session, {:delete_session, id}, 10_000)
   end
@@ -461,37 +461,37 @@ defmodule OpencodeEx do
   end
 
   @doc "Find text in the current workspace using native OpenCode search."
-  @spec find_text(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec find_text(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
   def find_text(session, pattern) do
     :opencode_client.find_text(session, pattern)
   end
 
   @doc "Find files in the current workspace using native OpenCode search."
-  @spec find_files(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec find_files(pid(), map()) :: {:ok, [map()]} | {:error, term()}
   def find_files(session, opts) do
     :opencode_client.find_files(session, opts)
   end
 
   @doc "Find workspace symbols using native OpenCode search."
-  @spec find_symbols(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec find_symbols(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
   def find_symbols(session, query) do
     :opencode_client.find_symbols(session, query)
   end
 
   @doc "List files in the workspace using native OpenCode file APIs."
-  @spec file_list(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec file_list(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
   def file_list(session, path) do
     :opencode_client.file_list(session, path)
   end
 
   @doc "Read a file using native OpenCode file APIs."
-  @spec file_read(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec file_read(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def file_read(session, path) do
     :opencode_client.file_read(session, path)
   end
 
   @doc "Get native OpenCode file status information."
-  @spec file_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec file_status(pid()) :: {:ok, map()} | {:error, term()}
   def file_status(session) do
     :opencode_client.file_status(session)
   end
@@ -545,53 +545,53 @@ defmodule OpencodeEx do
   end
 
   @doc "Initialize the current native OpenCode session."
-  @spec session_init(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec session_init(pid(), map()) :: {:ok, map()} | {:error, term()}
   def session_init(session, opts) do
     :opencode_client.session_init(session, opts)
   end
 
   @doc "Fetch native server-side messages for the current session."
-  @spec session_messages(pid()) :: {:ok, term()} | {:error, term()}
+  @spec session_messages(pid()) :: {:ok, [map()]} | {:error, term()}
   def session_messages(session) do
     :opencode_client.session_messages(session)
   end
 
   @doc "Fetch native server-side messages for the current session with options."
-  @spec session_messages(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec session_messages(pid(), map()) :: {:ok, [map()]} | {:error, term()}
   def session_messages(session, opts) do
     :opencode_client.session_messages(session, opts)
   end
 
   @doc "Send a prompt asynchronously using native OpenCode prompt_async."
-  @spec prompt_async(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec prompt_async(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def prompt_async(session, prompt) do
     :opencode_client.prompt_async(session, prompt)
   end
 
-  @spec prompt_async(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec prompt_async(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def prompt_async(session, prompt, opts) do
     :opencode_client.prompt_async(session, prompt, opts)
   end
 
   @doc "Run a native OpenCode shell command for the current session."
-  @spec shell_command(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec shell_command(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def shell_command(session, command) do
     :opencode_client.shell_command(session, command)
   end
 
-  @spec shell_command(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec shell_command(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def shell_command(session, command, opts) do
     :opencode_client.shell_command(session, command, opts)
   end
 
   @doc "Append prompt text to the native OpenCode TUI."
-  @spec tui_append_prompt(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec tui_append_prompt(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def tui_append_prompt(session, text) do
     :opencode_client.tui_append_prompt(session, text)
   end
 
   @doc "Open the native OpenCode help dialog."
-  @spec tui_open_help(pid()) :: {:ok, term()} | {:error, term()}
+  @spec tui_open_help(pid()) :: {:ok, map()} | {:error, term()}
   def tui_open_help(session) do
     :opencode_client.tui_open_help(session)
   end
@@ -641,11 +641,11 @@ defmodule OpencodeEx do
   @doc "Convert a single content_block into a flat message."
   @spec block_to_message(content_block()) :: %{
           :type => :raw | :text | :thinking | :tool_result | :tool_use,
-          :content => term(),
-          :raw => term(),
-          :tool_input => term(),
-          :tool_name => term(),
-          :tool_use_id => term()
+          :content => binary() | nil,
+          :raw => map() | nil,
+          :tool_input => map() | nil,
+          :tool_name => binary() | nil,
+          :tool_use_id => binary() | nil
         }
   def block_to_message(block), do: :beam_agent_content_core.block_to_message(block)
 
@@ -681,7 +681,7 @@ defmodule OpencodeEx do
           | {:ok,
              %{
                :max_thinking_tokens => pos_integer(),
-               :model => term(),
+               :model => binary(),
                :permission_mode => atom() | binary()
              }}
   def send_control(session, method, params \\ %{}) do
@@ -701,7 +701,7 @@ defmodule OpencodeEx do
   @spec mcp_server(binary(), [
           %{
             :description => binary(),
-            :handler => (map() -> {term(), term()}),
+            :handler => (map() -> {:ok, [map()]} | {:error, binary()}),
             :input_schema => map(),
             :name => binary()
           }

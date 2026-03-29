@@ -57,6 +57,10 @@ beam_agent_session_store_core:record_message(SessionId, Message),
     record_messages/2,
     get_session_messages/1,
     get_session_messages/2,
+    %% Export / Import
+    export_session/1,
+    import_session/1,
+    import_session/2,
     %% Convenience
     session_count/0,
     message_count/1,
@@ -70,7 +74,9 @@ beam_agent_session_store_core:record_message(SessionId, Message),
     list_opts/0,
     message_opts/0,
     session_share/0,
-    session_summary/0
+    session_summary/0,
+    exported_session/0,
+    import_opts/0
 ]).
 
 %%--------------------------------------------------------------------
@@ -110,6 +116,20 @@ beam_agent_session_store_core:record_message(SessionId, Message),
     generated_at := integer(),
     message_count := non_neg_integer(),
     generated_by := binary()
+}.
+
+%% Portable session snapshot for export/import.
+-type exported_session() :: #{
+    version := 1,
+    session_id := binary(),
+    metadata := session_meta(),
+    messages := [beam_agent_core:message()],
+    exported_at := integer()
+}.
+
+%% Options for import_session/2.
+-type import_opts() :: #{
+    session_id => binary()
 }.
 
 %% Options for list_sessions/1.
@@ -552,6 +572,80 @@ get_summary(SessionId) when is_binary(SessionId) ->
     end.
 
 %%--------------------------------------------------------------------
+%% Export / Import
+%%--------------------------------------------------------------------
+
+-doc """
+Export a session as a portable map.
+
+Returns the session metadata and all messages (including hidden) in a
+versioned snapshot. The result can be serialized with `term_to_binary/1`
+or converted to JSON for transport.
+""".
+-spec export_session(binary()) -> {ok, exported_session()} | {error, not_found}.
+export_session(SessionId) when is_binary(SessionId) ->
+    case get_session(SessionId) of
+        {ok, Meta} ->
+            {ok, Messages} = get_session_messages(SessionId,
+                                                  #{include_hidden => true}),
+            {ok, #{
+                version => 1,
+                session_id => SessionId,
+                metadata => Meta,
+                messages => Messages,
+                exported_at => erlang:system_time(millisecond)
+            }};
+        {error, not_found} ->
+            {error, not_found}
+    end.
+
+-doc """
+Import a session from a previously exported snapshot.
+
+Equivalent to `import_session(Exported, #{})`.
+""".
+-spec import_session(exported_session()) ->
+    {ok, session_meta()} | {error, term()}.
+import_session(Exported) ->
+    import_session(Exported, #{}).
+
+-doc """
+Import a session from a previously exported snapshot with options.
+
+Options:
+- `session_id` — override the session id (default: use the exported id)
+
+The session metadata is preserved including the original `created_at`
+timestamp. Messages are re-recorded in order, which assigns fresh
+sequence numbers and updates the message count.
+
+Returns `{error, invalid_export_format}` if the map is not a valid
+version-1 export.
+""".
+-spec import_session(exported_session(), import_opts()) ->
+    {ok, session_meta()} | {error, term()}.
+import_session(#{version := 1, session_id := OrigId,
+                 metadata := Meta, messages := Messages}, Opts)
+  when is_map(Meta), is_list(Messages) ->
+    TargetId = maps:get(session_id, Opts, OrigId),
+    %% Preserve original created_at; strip fields that register_session
+    %% will regenerate (session_id, message_count, updated_at).
+    CleanMeta = maps:without([session_id, message_count, updated_at], Meta),
+    case register_session(TargetId, CleanMeta) of
+        ok ->
+            case record_messages(TargetId, Messages) of
+                ok ->
+                    get_session(TargetId);
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
+    end;
+import_session(_, _) ->
+    {error, invalid_export_format}.
+
+%%--------------------------------------------------------------------
 %% Convenience
 %%--------------------------------------------------------------------
 
@@ -642,7 +736,7 @@ is_terminal_event(#{type := error}) ->
 is_terminal_event(_) ->
     false.
 
--spec collect_from(term(), binary(), [beam_agent_core:message()]) ->
+-spec collect_from({binary(), integer()} | '$end_of_table', binary(), [beam_agent_core:message()]) ->
     [beam_agent_core:message()].
 collect_from(Key, SessionId, Acc) ->
     case beam_agent_store:next(?STORE_DOMAIN, ?MESSAGES_TABLE, Key) of
@@ -856,7 +950,7 @@ truncate_binary(Bin, Max) when is_binary(Bin), Max > 3 ->
 truncate_binary(_Bin, _Max) ->
     <<>>.
 
--spec map_fetch(share | summary, map()) -> {ok, term()} | error.
+-spec map_fetch(share | summary, map()) -> {ok, map()} | error.
 map_fetch(Key, Map) ->
     case maps:find(Key, Map) of
         {ok, Value} -> {ok, Value};

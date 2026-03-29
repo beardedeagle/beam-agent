@@ -148,7 +148,7 @@ matches_filters(Memory, Filter) ->
             maps:get(Key, Memory, undefined) =:= Value
     end, maps:to_list(Filter)).
 
--spec scope_value(atom(), memory_record()) -> term().
+-spec scope_value(atom(), memory_record()) -> binary() | undefined.
 scope_value(Key, Memory) ->
     maps:get(Key, maps:get(scope, Memory, #{}), undefined).
 

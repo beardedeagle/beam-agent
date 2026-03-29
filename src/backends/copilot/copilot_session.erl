@@ -53,22 +53,22 @@ stop(Pid) ->
 %%====================================================================
 
 -spec send_control(pid(), binary(), map()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 send_control(Pid, Method, Params) ->
     beam_agent_session_engine:send_control(Pid, Method, Params).
 
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, 'no_active_query' | 'reconnecting' | 'session_error'}.
 interrupt(Pid) ->
     beam_agent_session_engine:interrupt(Pid).
 
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 session_info(Pid) ->
     beam_agent_session_engine:session_info(Pid).
 
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_model(Pid, Model) ->
     beam_agent_session_engine:set_model(Pid, Model).
 
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_permission_mode(Pid, Mode) ->
     beam_agent_session_engine:set_permission_mode(Pid, Mode).

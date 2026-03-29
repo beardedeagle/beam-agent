@@ -7,6 +7,7 @@
 %%%     delete_session, list_sessions/0, list_sessions/1 with filters)
 %%%   - Message storage (record_message, record_messages,
 %%%     get_session_messages/1, get_session_messages/2 with opts)
+%%%   - Export/import (export_session, import_session, import_session/2)
 %%%   - Convenience (session_count, message_count)
 %%% @end
 %%%-------------------------------------------------------------------
@@ -391,6 +392,129 @@ summarize_session_stores_summary_test() ->
     ?assertEqual(2, maps:get(message_count, Summary)),
     {ok, StoredSummary} = beam_agent_session_store_core:get_summary(SId),
     ?assertEqual(maps:get(content, Summary), maps:get(content, StoredSummary)),
+    beam_agent_session_store_core:clear().
+
+%%====================================================================
+%% export_session/1
+%%====================================================================
+
+export_session_returns_versioned_snapshot_test() ->
+    SId = <<"export-basic-session">>,
+    beam_agent_session_store_core:register_session(SId,
+        #{adapter => claude, model => <<"claude-opus-4-6">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => user, content => <<"hello">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => assistant, content => <<"world">>}),
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    ?assertEqual(1, maps:get(version, Export)),
+    ?assertEqual(SId, maps:get(session_id, Export)),
+    ?assert(is_integer(maps:get(exported_at, Export))),
+    Meta = maps:get(metadata, Export),
+    ?assertEqual(claude, maps:get(adapter, Meta)),
+    Msgs = maps:get(messages, Export),
+    ?assertEqual(2, length(Msgs)),
+    beam_agent_session_store_core:clear().
+
+export_session_includes_hidden_messages_test() ->
+    SId = <<"export-hidden-session">>,
+    beam_agent_session_store_core:register_session(SId, #{adapter => gemini}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => user, uuid => <<"eh-1">>, content => <<"one">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => assistant, uuid => <<"eh-2">>, content => <<"two">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => result, uuid => <<"eh-3">>, content => <<"three">>}),
+    %% Revert hides messages after eh-1
+    {ok, _} = beam_agent_session_store_core:revert_session(SId,
+        #{uuid => <<"eh-1">>}),
+    %% Export should still include ALL messages (hidden ones too)
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    Msgs = maps:get(messages, Export),
+    ?assertEqual(3, length(Msgs)),
+    beam_agent_session_store_core:clear().
+
+export_session_not_found_test() ->
+    beam_agent_session_store_core:ensure_tables(),
+    ?assertEqual({error, not_found},
+        beam_agent_session_store_core:export_session(<<"no-such-export-session">>)),
+    beam_agent_session_store_core:clear().
+
+%%====================================================================
+%% import_session/1 and import_session/2
+%%====================================================================
+
+import_session_roundtrip_test() ->
+    SId = <<"import-rt-session">>,
+    beam_agent_session_store_core:register_session(SId,
+        #{adapter => codex, model => <<"codex-mini">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => user, content => <<"ping">>}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => assistant, content => <<"pong">>}),
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    %% Delete original, then import into a new session id
+    beam_agent_session_store_core:delete_session(SId),
+    ?assertEqual({error, not_found}, beam_agent_session_store_core:get_session(SId)),
+    NewId = <<"import-rt-restored">>,
+    {ok, Imported} = beam_agent_session_store_core:import_session(Export,
+        #{session_id => NewId}),
+    ?assertEqual(NewId, maps:get(session_id, Imported)),
+    ?assertEqual(codex, maps:get(adapter, Imported)),
+    {ok, Msgs} = beam_agent_session_store_core:get_session_messages(NewId),
+    ?assertEqual(2, length(Msgs)),
+    [M1, M2] = Msgs,
+    ?assertEqual(<<"ping">>, maps:get(content, M1)),
+    ?assertEqual(<<"pong">>, maps:get(content, M2)),
+    beam_agent_session_store_core:clear().
+
+import_session_uses_original_id_by_default_test() ->
+    SId = <<"import-origid-session">>,
+    beam_agent_session_store_core:register_session(SId, #{adapter => claude}),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => user, content => <<"data">>}),
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    beam_agent_session_store_core:delete_session(SId),
+    {ok, Imported} = beam_agent_session_store_core:import_session(Export),
+    ?assertEqual(SId, maps:get(session_id, Imported)),
+    {ok, Msgs} = beam_agent_session_store_core:get_session_messages(SId),
+    ?assertEqual(1, length(Msgs)),
+    beam_agent_session_store_core:clear().
+
+import_session_preserves_created_at_test() ->
+    SId = <<"import-ts-session">>,
+    beam_agent_session_store_core:register_session(SId, #{adapter => opencode}),
+    {ok, OrigMeta} = beam_agent_session_store_core:get_session(SId),
+    OrigCreated = maps:get(created_at, OrigMeta),
+    beam_agent_session_store_core:record_message(SId,
+        #{type => user, content => <<"ts">>}),
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    beam_agent_session_store_core:delete_session(SId),
+    timer:sleep(5),
+    {ok, Imported} = beam_agent_session_store_core:import_session(Export),
+    ?assertEqual(OrigCreated, maps:get(created_at, Imported)),
+    beam_agent_session_store_core:clear().
+
+import_session_invalid_format_test() ->
+    beam_agent_session_store_core:ensure_tables(),
+    ?assertEqual({error, invalid_export_format},
+        beam_agent_session_store_core:import_session(#{})),
+    ?assertEqual({error, invalid_export_format},
+        beam_agent_session_store_core:import_session(#{version => 2})),
+    ?assertEqual({error, invalid_export_format},
+        beam_agent_session_store_core:import_session(not_a_map, #{})),
+    beam_agent_session_store_core:clear().
+
+import_session_empty_messages_test() ->
+    SId = <<"import-empty-session">>,
+    beam_agent_session_store_core:register_session(SId, #{adapter => copilot}),
+    {ok, Export} = beam_agent_session_store_core:export_session(SId),
+    beam_agent_session_store_core:delete_session(SId),
+    NewId = <<"import-empty-restored">>,
+    {ok, Imported} = beam_agent_session_store_core:import_session(Export,
+        #{session_id => NewId}),
+    ?assertEqual(NewId, maps:get(session_id, Imported)),
+    ?assertEqual(0, beam_agent_session_store_core:message_count(NewId)),
     beam_agent_session_store_core:clear().
 
 %%====================================================================

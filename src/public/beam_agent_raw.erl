@@ -120,7 +120,7 @@ Returns `{ok, Backend}` where `Backend` is one of `claude | codex | gemini |
 opencode | copilot`, or `{error, Reason}` if the session is not registered.
 """.
 -spec backend(pid()) ->
-    {ok, beam_agent_backend:backend()} | {error, term()}.
+    {ok, beam_agent_backend:backend()} | {error, beam_agent_backend:backend_lookup_error()}.
 backend(Session) -> beam_agent_raw_core:backend(Session).
 
 -doc """
@@ -131,7 +131,7 @@ Returns `{ok, Module}` where `Module` is the backend adapter module
 registered.
 """.
 -spec adapter_module(pid()) ->
-    {ok, module()} | {error, term()}.
+    {ok, module()} | {error, beam_agent_backend:backend_lookup_error()}.
 adapter_module(Session) -> beam_agent_raw_core:adapter_module(Session).
 
 -doc """
@@ -183,7 +183,7 @@ List all native Claude SDK sessions (no options).
 This calls the Claude adapter directly and returns the raw session list from the
 Claude SDK session store. Not available on other backends.
 """.
--spec list_native_sessions() -> {ok, term()} | {error, term()}.
+-spec list_native_sessions() -> {ok, [map()]} | {error, term()}.
 ?BACKEND0(list_native_sessions, claude).
 
 -doc """
@@ -192,7 +192,7 @@ List all native Claude SDK sessions with options.
 `Opts` is a map passed directly to the Claude adapter's `list_native_sessions/1`
 function. Consult the Claude adapter documentation for supported option keys.
 """.
--spec list_native_sessions(map()) -> {ok, term()} | {error, term()}.
+-spec list_native_sessions(map()) -> {ok, [map()]} | {error, term()}.
 ?BACKEND1(list_native_sessions, claude, Opts).
 
 -doc """
@@ -200,7 +200,7 @@ Fetch all messages for a native Claude session by session ID binary.
 
 Returns the raw message list from the Claude SDK session store.
 """.
--spec get_native_session_messages(binary()) -> {ok, term()} | {error, term()}.
+-spec get_native_session_messages(binary()) -> {ok, [map()]} | {error, term()}.
 ?BACKEND1(get_native_session_messages, claude, SessionId).
 
 -doc """
@@ -209,7 +209,7 @@ Fetch messages for a native Claude session with options.
 `Opts` is a map passed directly to the Claude adapter. Use this variant when
 you need pagination or filtering supported by the underlying Claude adapter.
 """.
--spec get_native_session_messages(binary(), map()) -> {ok, term()} | {error, term()}.
+-spec get_native_session_messages(binary(), map()) -> {ok, [map()]} | {error, term()}.
 ?BACKEND2(get_native_session_messages, claude, SessionId, Opts).
 
 -doc """
@@ -221,7 +221,7 @@ string if the session ID cannot be resolved.
 
 Use `session_destroy/2` if the session process is no longer alive.
 """.
--spec session_destroy(pid()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid()) -> {ok, map()} | {error, term()}.
 session_destroy(Session) ->
     call(Session, session_destroy, [session_identity(Session)]).
 
@@ -232,7 +232,7 @@ Use this variant when you have a known `SessionId` binary but the session
 process (`Session` pid) may or may not still be running. The pid is still
 required to route to the correct backend adapter.
 """.
--spec session_destroy(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid(), binary()) -> {ok, map()} | {error, term()}.
 ?RAW1(session_destroy, SessionId).
 
 -doc """
@@ -241,7 +241,7 @@ Probe the transport-level health of the backend server for a session.
 Delegates to the backend adapter's `server_health/1`. The return value format
 is adapter-specific.
 """.
--spec server_health(pid()) -> {ok, term()} | {error, term()}.
+-spec server_health(pid()) -> {ok, map()} | {error, term()}.
 ?RAW0(server_health).
 
 -doc """
@@ -250,7 +250,7 @@ Fetch the raw status map from the backend server for a session.
 Delegates to the backend adapter's `get_status/1`. The return value format
 is adapter-specific.
 """.
--spec get_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_status(pid()) -> {ok, map()} | {error, term()}.
 ?RAW0(get_status).
 
 -doc """
@@ -259,7 +259,7 @@ Fetch the raw authentication status from the backend server for a session.
 Delegates to the backend adapter's `get_auth_status/1`. The return value
 format is adapter-specific.
 """.
--spec get_auth_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_auth_status(pid()) -> {ok, map()} | {error, term()}.
 ?RAW0(get_auth_status).
 
 -doc """

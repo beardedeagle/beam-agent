@@ -164,7 +164,10 @@ Returns `{ok, command_result()}` on completion (regardless of exit code), or
 ```
 """.
 -spec run(binary() | string() | [binary() | string()]) ->
-    {ok, command_result()} | {error, term()}.
+    {ok, command_result()} |
+    {error, {port_exit, term()} | {port_failed, term()} |
+            {timeout, infinity | non_neg_integer()} |
+            {security, {deny, binary()} | {throttle, pos_integer()}}}.
 run(Command) -> beam_agent_command_core:run(Command).
 
 -doc """
@@ -184,7 +187,10 @@ Parameters:
 ```
 """.
 -spec run(binary() | string() | [binary() | string()], command_opts()) ->
-    {ok, command_result()} | {error, term()}.
+    {ok, command_result()} |
+    {error, {port_exit, term()} | {port_failed, term()} |
+            {timeout, infinity | non_neg_integer()} |
+            {security, {deny, binary()} | {throttle, pos_integer()}}}.
 run(Command, Opts) -> beam_agent_command_core:run(Command, Opts).
 
 %%--------------------------------------------------------------------
@@ -199,7 +205,7 @@ requires an active transport connection. Opts may include
 backend-specific initialization parameters. The universal fallback
 registers the session with the runtime core.
 """.
--spec session_init(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec session_init(pid(), map()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 session_init(Session, Opts) ->
     beam_agent_core:native_or(Session, session_init, [Opts], fun() ->
         beam_agent_runtime_core:register_session(Session, Opts),
@@ -213,7 +219,7 @@ Returns the complete message history for the session's active
 conversation. Each message is a normalized map with type, role, and
 content keys.
 """.
--spec session_messages(pid()) -> {ok, term()} | {error, term()}.
+-spec session_messages(pid()) -> {ok, [beam_agent_core:message()]} | {error, term()}.
 session_messages(Session) ->
     beam_agent_core:native_or(Session, session_messages, [], fun() ->
         beam_agent_core:get_session_messages(beam_agent_core:session_identity(Session))
@@ -226,7 +232,7 @@ Opts may include pagination keys (limit, offset) or filters
 (role, type) to narrow the returned message list. The universal
 fallback delegates to get_session_messages/2.
 """.
--spec session_messages(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec session_messages(pid(), map()) -> {ok, [beam_agent_core:message()]} | {error, term()}.
 session_messages(Session, Opts) ->
     beam_agent_core:native_or(Session, session_messages, [Opts], fun() ->
         beam_agent_core:get_session_messages(beam_agent_core:session_identity(Session), Opts)
@@ -258,7 +264,7 @@ the preferred approach for UIs and concurrent workflows. This operation
 requires a live session pid; persisted session ids return
 `{error, requires_live_session}`.
 """.
--spec prompt_async(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec prompt_async(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 prompt_async(SessionId, _Prompt, _Opts) when is_binary(SessionId) ->
     {error, requires_live_session};
 prompt_async(Session, Prompt, Opts) ->
@@ -277,7 +283,7 @@ Execute a shell command in the session's working directory.
 Convenience wrapper that calls shell_command/3 with empty options.
 See shell_command/3 for details.
 """.
--spec shell_command(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec shell_command(pid() | binary(), binary()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 shell_command(Session, Command) ->
     shell_command(Session, Command, #{}).
 
@@ -289,7 +295,7 @@ Returns a result map containing stdout, stderr, and exit_code. Opts
 may include timeout (milliseconds) and env (environment variable
 overrides). The universal fallback uses os:cmd/1 or open_port/2.
 """.
--spec shell_command(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec shell_command(pid() | binary(), binary(), map()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 shell_command(Session, Command, Opts) ->
     beam_agent_core:native_or(Session, shell_command, [Command, Opts], fun() ->
         universal_shell_command(Session, Command, Opts)
@@ -302,7 +308,7 @@ Injects Text into the terminal UI's prompt field as if the user had
 typed it. Only meaningful for backends with a native terminal
 interface. The universal fallback returns status => not_applicable.
 """.
--spec tui_append_prompt(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec tui_append_prompt(pid(), binary()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 tui_append_prompt(Session, Text) ->
     beam_agent_core:native_or(Session, tui_append_prompt, [Text], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -322,7 +328,7 @@ Parameters:
 
 Returns {ok, Result} or {error, Reason}.
 """.
--spec tui_open_help(pid()) -> {ok, term()} | {error, term()}.
+-spec tui_open_help(pid()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 tui_open_help(Session) ->
     beam_agent_core:native_or(Session, tui_open_help, [], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -338,7 +344,7 @@ config store, feedback store, callback registry, and tool registry.
 Also unregisters the session from the backend. This is a more
 thorough cleanup than stop/1, which only terminates the process.
 """.
--spec session_destroy(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid() | binary()) -> {ok, map()} | {error, term()}.
 session_destroy(Session) ->
     SessionId = beam_agent_core:session_identity(Session),
     beam_agent_core:native_or(Session, session_destroy, [SessionId], fun() ->
@@ -352,7 +358,7 @@ Same as session_destroy/1 but targets a specific SessionId, which
 may differ from the calling session's own identifier. Useful for
 cleaning up persisted sessions that are no longer needed.
 """.
--spec session_destroy(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 session_destroy(Session, SessionId) ->
     beam_agent_core:native_or(Session, session_destroy, [SessionId], fun() ->
         universal_session_destroy(Session, SessionId)
@@ -403,7 +409,7 @@ Write data to the stdin of a running command.
 Convenience wrapper that calls command_write_stdin/4 with empty options.
 See command_write_stdin/4 for details.
 """.
--spec command_write_stdin(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec command_write_stdin(pid(), binary(), binary()) -> {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 command_write_stdin(Session, ProcessId, Stdin) ->
     command_write_stdin(Session, ProcessId, Stdin, #{}).
 
@@ -417,7 +423,7 @@ status => not_supported since it cannot write to arbitrary process
 handles without native backend cooperation.
 """.
 -spec command_write_stdin(pid(), binary(), binary(), map()) ->
-    {ok, term()} | {error, term()}.
+    {ok, #{'source' := 'universal', _ => _}} | {error, term()}.
 command_write_stdin(Session, ProcessId, Stdin, Opts) ->
     beam_agent_core:native_or(Session, command_write_stdin, [ProcessId, Stdin, Opts], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -434,7 +440,7 @@ comment (freeform text), and message_id (to associate feedback with
 a specific response). The universal fallback stores the feedback in
 the control core for later retrieval.
 """.
--spec submit_feedback(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec submit_feedback(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 submit_feedback(Session, Feedback) ->
     beam_agent_core:native_or(Session, submit_feedback, [Feedback], fun() ->
         universal_submit_feedback(Session, Feedback)
@@ -448,7 +454,7 @@ that require explicit user approval. RequestId identifies the pending
 request (from the message's request_id field). Params contains the
 response payload (e.g., #{approved => true} for permissions).
 """.
--spec turn_respond(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec turn_respond(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 turn_respond(Session, RequestId, Params) ->
     beam_agent_core:native_or(Session, turn_respond, [RequestId, Params], fun() ->
         universal_turn_respond(Session, RequestId, Params)

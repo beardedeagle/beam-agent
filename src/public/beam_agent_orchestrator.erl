@@ -107,7 +107,7 @@ collect(RunId, Opts) ->
     beam_agent_orchestrator_core:collect(RunId, Opts).
 
 -doc "Cancel a run and any active orchestrated descendants.".
--spec cancel(binary(), term()) -> ok | {error, not_found | term()}.
+-spec cancel(binary(), term()) -> ok | {error, not_found}.
 cancel(RunId, Reason) ->
     beam_agent_orchestrator_core:cancel(RunId, Reason).
 

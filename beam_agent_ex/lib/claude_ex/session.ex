@@ -25,7 +25,7 @@ defmodule ClaudeEx.Session do
 
       {:ok, response} = ClaudeEx.Session.send_control(session, "ping", %{})
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :claude_agent_session.send_control(session, method, params)
   end
@@ -34,7 +34,7 @@ defmodule ClaudeEx.Session do
   Interrupt a running query. The consumer will receive
   `{:error, :interrupted}` on the next `receive_message` call.
   """
-  @spec interrupt(pid()) :: :ok | {:error, term()}
+  @spec interrupt(pid()) :: :ok | {:error, :no_active_query | :reconnecting | :session_error}
   def interrupt(session) do
     :claude_agent_session.interrupt(session)
   end
@@ -104,7 +104,7 @@ defmodule ClaudeEx.Session do
 
   Delegates to `ClaudeEx.session_info/1`. Available in all states.
   """
-  @spec session_info(pid()) :: {:ok, map()} | {:error, term()}
+  @spec session_info(pid()) :: {:ok, map()} | {:error, :reconnecting | :session_error}
   def session_info(session) do
     :claude_agent_session.session_info(session)
   end
@@ -112,7 +112,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Change the model at runtime during a session.
   """
-  @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_model(session, model) do
     :claude_agent_session.set_model(session, model)
   end
@@ -120,7 +120,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Change the permission mode at runtime.
   """
-  @spec set_permission_mode(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_permission_mode(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_permission_mode(session, mode) do
     :claude_agent_session.set_permission_mode(session, mode)
   end
@@ -128,7 +128,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Revert file changes to a checkpoint.
   """
-  @spec rewind_files(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec rewind_files(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def rewind_files(session, checkpoint_uuid) do
     :claude_agent_session.rewind_files(session, checkpoint_uuid)
   end
@@ -136,7 +136,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Stop a running agent task by task ID.
   """
-  @spec stop_task(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec stop_task(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def stop_task(session, task_id) do
     :claude_agent_session.stop_task(session, task_id)
   end
@@ -144,7 +144,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Set the maximum thinking tokens at runtime.
   """
-  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, term()} | {:error, term()}
+  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, map()} | {:error, term()}
   def set_max_thinking_tokens(session, max_tokens)
       when is_integer(max_tokens) and max_tokens > 0 do
     :claude_agent_session.set_max_thinking_tokens(session, max_tokens)
@@ -153,7 +153,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Query MCP server health and status.
   """
-  @spec mcp_server_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec mcp_server_status(pid()) :: {:ok, map()} | {:error, term()}
   def mcp_server_status(session) do
     :claude_agent_session.mcp_server_status(session)
   end
@@ -161,7 +161,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Dynamically add or replace MCP server configurations.
   """
-  @spec set_mcp_servers(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec set_mcp_servers(pid(), map()) :: {:ok, map()} | {:error, term()}
   def set_mcp_servers(session, servers) do
     :claude_agent_session.set_mcp_servers(session, servers)
   end
@@ -169,7 +169,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Reconnect a failed MCP server by name.
   """
-  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec reconnect_mcp_server(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def reconnect_mcp_server(session, server_name) do
     :claude_agent_session.reconnect_mcp_server(session, server_name)
   end
@@ -177,7 +177,7 @@ defmodule ClaudeEx.Session do
   @doc """
   Enable or disable an MCP server at runtime.
   """
-  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, term()} | {:error, term()}
+  @spec toggle_mcp_server(pid(), binary(), boolean()) :: {:ok, map()} | {:error, term()}
   def toggle_mcp_server(session, server_name, enabled) do
     :claude_agent_session.toggle_mcp_server(session, server_name, enabled)
   end

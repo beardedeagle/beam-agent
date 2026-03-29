@@ -422,7 +422,7 @@ list() ->
     list(#{}).
 
 -doc "List routine jobs with exact-match filters.".
--spec list(job_filter()) -> {ok, [job_record()]} | {error, term()}.
+-spec list(job_filter()) -> {ok, [job_record()]} | {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 list(Filter) when is_map(Filter) ->
     case normalize_job_filter(Filter) of
         {ok, Normalized} ->
@@ -437,7 +437,7 @@ due() ->
     list_due().
 
 -doc "Alias for list_due/1.".
--spec due(map()) -> {ok, [job_record()]} | {error, term()}.
+-spec due(map()) -> {ok, [job_record()]} | {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 due(Filter) ->
     list_due(Filter).
 
@@ -447,7 +447,7 @@ list_due() ->
     list_due(#{}).
 
 -doc "List jobs currently due using an explicit due filter.".
--spec list_due(map()) -> {ok, [job_record()]} | {error, term()}.
+-spec list_due(map()) -> {ok, [job_record()]} | {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
 list_due(Filter) when is_map(Filter) ->
     Now = maps:get(at, Filter, erlang:system_time(millisecond)),
     TeleMeta = telemetry_due_filter_meta(Filter, Now),
@@ -473,7 +473,7 @@ next_due_at() ->
 
 -doc "Claim a due job for runner-driven execution.".
 -spec claim_due_job(binary(), binary(), integer(), pos_integer()) ->
-    {ok, beam_agent_routines_store:claim_record()} | {error, term()}.
+    {ok, beam_agent_routines_store:claim_record()} | {error, not_found | already_claimed | stale_slot}.
 claim_due_job(JobId, RunnerId, SlotAt, ClaimTtlMs) ->
     beam_agent_routines_store:claim_job(JobId, RunnerId, SlotAt, ClaimTtlMs).
 
@@ -489,7 +489,7 @@ release_due_job(JobId, RunnerId) ->
 
 -doc "Mark a scheduled execution as started.".
 -spec scheduled_execution_started(binary(), binary(), integer(), integer()) ->
-    {ok, job_record()} | {error, term()}.
+    {ok, job_record()} | {error, not_found | stale_slot | stale_retry_state | invalid_state}.
 scheduled_execution_started(JobId, RunId, SlotAt, Now)
   when is_binary(JobId), is_binary(RunId), is_integer(SlotAt), is_integer(Now) ->
     case beam_agent_routines_store:get_job(JobId) of
@@ -517,7 +517,7 @@ scheduled_execution_started(JobId, RunId, SlotAt, Now)
 
 -doc "Mark a scheduled execution as succeeded and advance the schedule.".
 -spec scheduled_execution_succeeded(binary(), binary(), integer(), map(), integer()) ->
-    {ok, job_record()} | {error, term()}.
+    {ok, job_record()} | {error, not_found | stale_run_mismatch}.
 scheduled_execution_succeeded(JobId, RunId, SlotAt, Result, Now)
   when is_binary(JobId), is_binary(RunId), is_integer(SlotAt), is_map(Result),
        is_integer(Now) ->
@@ -549,8 +549,8 @@ scheduled_execution_succeeded(JobId, RunId, SlotAt, Result, Now)
     end.
 
 -doc "Mark a scheduled execution as failed and decide whether to retry or terminalize.".
--spec scheduled_execution_failed(binary(), binary(), integer(), term(), integer()) ->
-    {ok, retry_scheduled | exhausted | active, job_record()} | {error, term()}.
+-spec scheduled_execution_failed(binary(), binary(), integer(), term(), integer()) ->  %% Error is genuinely term(): caller-provided failure reason
+    {ok, retry_scheduled | exhausted | active, job_record()} | {error, not_found | stale_run_mismatch}.
 scheduled_execution_failed(JobId, RunId, SlotAt, Error, Now)
   when is_binary(JobId), is_binary(RunId), is_integer(SlotAt), is_integer(Now) ->
     case beam_agent_routines_store:get_job(JobId) of
@@ -599,7 +599,7 @@ scheduled_execution_failed(JobId, RunId, SlotAt, Error, Now)
 
 -doc "Record the result of a manual run_now execution without changing schedule state.".
 -spec manual_execution_succeeded(binary(), binary(), map(), integer()) ->
-    {ok, job_record()} | {error, term()}.
+    {ok, job_record()} | {error, not_found | job_busy | job_terminal}.
 manual_execution_succeeded(JobId, RunId, Result, Now)
   when is_binary(JobId), is_binary(RunId), is_map(Result), is_integer(Now) ->
     manual_execution_update(JobId, fun(Job) ->
@@ -612,8 +612,8 @@ manual_execution_succeeded(JobId, RunId, Result, Now)
     end).
 
 -doc "Record the failure of a manual run_now execution without changing schedule state.".
--spec manual_execution_failed(binary(), binary(), term(), integer()) ->
-    {ok, job_record()} | {error, term()}.
+-spec manual_execution_failed(binary(), binary(), term(), integer()) ->  %% Error is genuinely term(): caller-provided failure reason
+    {ok, job_record()} | {error, not_found | job_busy | job_terminal}.
 manual_execution_failed(JobId, RunId, Error, Now)
   when is_binary(JobId), is_binary(RunId), is_integer(Now) ->
     manual_execution_update(JobId, fun(Job) ->
@@ -630,7 +630,7 @@ manual_execution_failed(JobId, RunId, Error, Now)
 %%--------------------------------------------------------------------
 
 -spec manual_execution_update(binary(), fun((job_record()) -> job_record())) ->
-    {ok, job_record()} | {error, term()}.
+    {ok, job_record()} | {error, not_found | job_busy | job_terminal}.
 manual_execution_update(JobId, Fun) ->
     case beam_agent_routines_store:get_job(JobId) of
         {ok, Job} ->
@@ -647,7 +647,7 @@ manual_execution_update(JobId, Fun) ->
     end.
 
 -spec normalize_job_input(map(), integer()) ->
-    {ok, normalized_job_input()} | {error, term()}.
+    {ok, normalized_job_input()} | {error, routine_normalize_error() | {invalid_job, atom()}}.
 normalize_job_input(JobInput, Now) ->
     Allowed = [job_id, schedule, target, payload, routing_policy,
         retry_policy, idempotency_key, state, next_run_at, metadata],
@@ -752,7 +752,7 @@ normalize_patch(Patch) ->
     end.
 
 -spec normalize_patch_entries([{atom(), term()}], normalized_patch()) ->
-    {ok, normalized_patch()} | {error, term()}.
+    {ok, normalized_patch()} | {error, routine_error()}.
 normalize_patch_entries([], Acc) ->
     {ok, Acc};
 normalize_patch_entries([{schedule, Value} | Rest], Acc) ->
@@ -839,8 +839,8 @@ apply_patch(Job, Patch, Now) ->
     end,
     maybe_put_next_run_at(Patched1, NextRunAt).
 
--spec normalize_schedule(term(), integer()) ->
-    {ok, schedule()} | {error, term()}.
+-spec normalize_schedule(term(), integer()) ->  %% Input is genuinely term(): validates arbitrary user data
+    {ok, schedule()} | {error, {invalid_job, schedule} | {unsupported_schedule_key, atom()}}.
 normalize_schedule(#{type := once, at := At} = Schedule, _Now)
   when is_integer(At), At >= 0 ->
     Allowed = [type, at],
@@ -874,7 +874,9 @@ normalize_schedule(#{type := interval, every_ms := EveryMs} = Schedule, Now)
 normalize_schedule(_, _Now) ->
     {error, {invalid_job, schedule}}.
 
--spec normalize_target(term()) -> {ok, target()} | {error, term()}.
+-spec normalize_target(term()) -> {ok, target()} | {error, {invalid_job, atom()} |  %% Input is genuinely term(): validates arbitrary user data
+    {unsupported_target_key, atom()} | {unsupported_session_target_key, atom()} |
+    {unsupported_thread_key, atom()}}.
 normalize_target(#{type := run} = Target) ->
     Allowed = [type, scope, run_opts, outcome, result, error, cancel_reason],
     case validate_allowed_keys(Target, Allowed, unsupported_target_key) of
@@ -936,7 +938,8 @@ normalize_target(#{type := query, session := Session, prompt := Prompt} = Target
 normalize_target(_) ->
     {error, {invalid_job, target}}.
 
--spec normalize_session_target(term()) -> {ok, session_target()} | {error, term()}.
+-spec normalize_session_target(term()) -> {ok, session_target()} | {error,  %% Input is genuinely term(): validates arbitrary user data
+    {invalid_job, session} | {unsupported_session_target_key, atom()}}.
 normalize_session_target(#{kind := live, ref := Ref} = Target) when is_pid(Ref) ->
     Allowed = [kind, ref],
     case validate_allowed_keys(Target, Allowed, unsupported_session_target_key) of
@@ -979,7 +982,8 @@ normalize_thread_target(#{start := StartOpts} = Target) when is_map(StartOpts) -
 normalize_thread_target(_) ->
     {error, {invalid_job, thread}}.
 
--spec normalize_retry_policy(term()) -> {ok, retry_policy()} | {error, term()}.
+-spec normalize_retry_policy(term()) -> {ok, retry_policy()} | {error,  %% Input is genuinely term(): validates arbitrary user data
+    {invalid_job, retry_policy} | {unsupported_retry_key, atom()}}.
 normalize_retry_policy(Policy) when is_map(Policy) ->
     Allowed = [max_attempts, backoff_ms],
     case validate_allowed_keys(Policy, Allowed, unsupported_retry_key) of
@@ -1009,8 +1013,8 @@ normalize_routing_policy(Policy, _Kind) when is_map(Policy) ->
 normalize_routing_policy(_, Kind) ->
     {error, {Kind, routing_policy}}.
 
--spec normalize_idempotency_key(term(), binary() | undefined) ->
-    {ok, binary()} | {error, term()}.
+-spec normalize_idempotency_key(term(), binary() | undefined) ->  %% Input is genuinely term(): validates arbitrary user data
+    {ok, binary()} | {error, {invalid_job, job_id | value} | {invalid_patch, job_id | value}}.
 normalize_idempotency_key(undefined, MaybeJobId) when is_binary(MaybeJobId) ->
     {ok, <<<<"routine:">>/binary, MaybeJobId/binary>>};
 normalize_idempotency_key(undefined, undefined) ->
@@ -1037,7 +1041,7 @@ normalize_next_run_override(Value, _Kind) when is_integer(Value), Value >= 0 ->
 normalize_next_run_override(_Value, Kind) ->
     {error, {Kind, next_run_at}}.
 
--spec normalize_job_filter(map()) -> {ok, job_filter()} | {error, term()}.
+-spec normalize_job_filter(map()) -> {ok, job_filter()} | {error, {unsupported_filter, atom()} | {invalid_filter, limit}}.
 normalize_job_filter(Filter) ->
     Allowed = [job_id, state, schedule_type, target_type, due_before, limit],
     case validate_allowed_keys(Filter, Allowed, unsupported_filter) of
@@ -1054,7 +1058,7 @@ normalize_job_filter(Filter) ->
             Error
     end.
 
--spec normalize_due_filter(map(), integer()) -> {ok, due_filter()} | {error, term()}.
+-spec normalize_due_filter(map(), integer()) -> {ok, due_filter()} | {error, {unsupported_filter, atom()} | {invalid_filter, limit | include_claimed}}.
 normalize_due_filter(Filter, Now) ->
     Allowed = [at, limit, include_claimed],
     case validate_allowed_keys(Filter, Allowed, unsupported_filter) of
@@ -1145,7 +1149,7 @@ next_after_failure(#{type := interval, every_ms := EveryMs}, _SlotAt, Now) ->
     {active, Now + EveryMs}.
 
 -spec can_start_scheduled_execution(job_record(), binary(), integer()) ->
-    ok | {error, term()}.
+    ok | {error, stale_slot | stale_retry_state | invalid_state}.
 can_start_scheduled_execution(#{state := active} = Job, RunId, SlotAt) ->
     case {maps:get(current_run_id, Job, undefined), maps:get(current_slot_at, Job, undefined)} of
         {undefined, undefined} ->
@@ -1168,7 +1172,7 @@ can_start_scheduled_execution(#{state := retry_waiting} = Job, _RunId, SlotAt) -
 can_start_scheduled_execution(_Job, _RunId, _SlotAt) ->
     {error, invalid_state}.
 
--spec validate_current_run(job_record(), binary(), integer()) -> ok | {error, term()}.
+-spec validate_current_run(job_record(), binary(), integer()) -> ok | {error, stale_run_mismatch}.
 validate_current_run(Job, RunId, SlotAt) ->
     case {maps:get(current_run_id, Job, undefined), maps:get(current_slot_at, Job, undefined)} of
         {RunId, SlotAt} ->
@@ -1205,7 +1209,9 @@ maybe_put_terminal_timestamp(Job, _Other, _Now) ->
     maps:without([completed_at], Job).
 
 -spec append_job_event(binary(), job_record(), map()) ->
-    {ok, beam_agent_journal_core:entry()} | {error, term()}.
+    {ok, beam_agent_journal_core:entry()} | {error, already_exists |
+        session_id_required_for_thread |
+        {invalid_event, atom()} | {invalid_event_type, binary()}}.
 append_job_event(EventType, Job, PayloadExtra) ->
     Payload = maps:merge(#{
         job_id => maps:get(job_id, Job),

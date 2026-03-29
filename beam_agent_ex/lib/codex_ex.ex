@@ -69,7 +69,7 @@ defmodule CodexEx do
           optional(:session_id) => binary(),
           optional(:stop_reason) => binary(),
           optional(:stop_reason_atom) => stop_reason(),
-          optional(:structured_output) => term(),
+          optional(:structured_output) => map() | binary() | nil,
           optional(:subtype) => binary(),
           optional(:surpassed_threshold) => number(),
           optional(:system_info) => map(),
@@ -130,11 +130,11 @@ defmodule CodexEx do
   @typedoc "A flat message produced from a content block."
   @type flat_message :: %{
           required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
-          optional(:content) => term(),
-          optional(:raw) => term(),
-          optional(:tool_input) => term(),
-          optional(:tool_name) => term(),
-          optional(:tool_use_id) => term()
+          optional(:content) => binary() | nil,
+          optional(:raw) => map() | nil,
+          optional(:tool_input) => map() | nil,
+          optional(:tool_name) => binary() | nil,
+          optional(:tool_use_id) => binary() | nil
         }
 
   @typedoc "Session store entry map."
@@ -196,7 +196,7 @@ defmodule CodexEx do
           optional(:permission_prompt_tool_name) => binary(),
           optional(:permission_suggestions) => [any()],
           optional(:prompt) => binary(),
-          optional(:reason) => term(),
+          optional(:reason) => atom() | binary(),
           optional(:session_id) => binary(),
           optional(:stop_hook_active) => boolean(),
           optional(:stop_reason) => atom() | binary(),
@@ -387,7 +387,7 @@ defmodule CodexEx do
   end
 
   @doc "Archive a thread."
-  @spec thread_archive(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec thread_archive(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def thread_archive(session, thread_id) do
     :codex_app_server.thread_archive(session, thread_id)
   end
@@ -654,7 +654,7 @@ defmodule CodexEx do
   end
 
   @doc "Start a native fuzzy file search session."
-  @spec fuzzy_file_search_session_start(pid(), binary(), [term()]) ::
+  @spec fuzzy_file_search_session_start(pid(), binary(), [binary()]) ::
           {:ok, map()} | {:error, term()}
   def fuzzy_file_search_session_start(session, search_session_id, roots) do
     :codex_app_server.fuzzy_file_search_session_start(session, search_session_id, roots)
@@ -789,7 +789,7 @@ defmodule CodexEx do
   App-server sessions dispatch normally; exec sessions return
   `{:error, :not_supported}`.
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :gen_statem.call(session, {:send_control, method, params}, 30_000)
   end
@@ -801,7 +801,7 @@ defmodule CodexEx do
 
   Returns `{:error, :not_supported}` for exec sessions.
   """
-  @spec command_run(pid(), binary() | [binary()], map()) :: {:ok, term()} | {:error, term()}
+  @spec command_run(pid(), binary() | [binary()], map()) :: {:ok, map()} | {:error, term()}
   def command_run(session, command, opts \\ %{}) do
     :codex_app_server.command_run(session, command, opts)
   end
@@ -821,7 +821,7 @@ defmodule CodexEx do
   @doc """
   Submit a feedback report to the Codex server.
   """
-  @spec submit_feedback(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec submit_feedback(pid(), map()) :: {:ok, map()} | {:error, term()}
   def submit_feedback(session, feedback) when is_map(feedback) do
     :codex_app_server.submit_feedback(session, feedback)
   end
@@ -829,7 +829,7 @@ defmodule CodexEx do
   @doc """
   Respond to an agent request (approval, user input, etc.).
   """
-  @spec turn_respond(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec turn_respond(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def turn_respond(session, request_id, params) do
     :codex_app_server.turn_respond(session, request_id, params)
   end

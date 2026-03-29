@@ -221,7 +221,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, List} of command maps, each containing at minimum a
 name and description, or {error, Reason} on failure.
 """.
--spec supported_commands(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_commands(pid()) -> {ok, [map()]} | {error, _}.
 supported_commands(Session) -> beam_agent_core:supported_commands(Session).
 
 -doc """
@@ -237,7 +237,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, List} of model maps, each containing at minimum a model
 name and its capabilities, or {error, Reason} on failure.
 """.
--spec supported_models(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_models(pid()) -> {ok, [map()]} | {error, _}.
 supported_models(Session) -> beam_agent_core:supported_models(Session).
 
 -doc """
@@ -253,7 +253,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, List} of agent maps, each containing at minimum a name
 and description, or {error, Reason} on failure.
 """.
--spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
+-spec supported_agents(pid()) -> {ok, [map()]} | {error, _}.
 supported_agents(Session) -> beam_agent_core:supported_agents(Session).
 
 %%--------------------------------------------------------------------
@@ -292,7 +292,7 @@ Session is the pid of a running beam_agent session.
 
 Returns {ok, List} of model maps, or {error, Reason} on failure.
 """.
--spec model_list(pid()) -> {ok, term()} | {error, term()}.
+-spec model_list(pid()) -> {ok, list()} | {error, term()}.
 model_list(Session) ->
     beam_agent_core:native_or(Session, model_list, [], fun() -> supported_models(Session) end).
 
@@ -310,7 +310,7 @@ requirements, model family).
 Returns {ok, List} of model maps on success, or {error, Reason}
 on failure.
 """.
--spec model_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec model_list(pid(), map()) -> {ok, list()} | {error, term()}.
 model_list(Session, Opts) ->
     beam_agent_core:native_or(Session, model_list, [Opts], fun() -> supported_models(Session) end).
 
@@ -605,42 +605,42 @@ clear_registered_commands() -> beam_agent_registry:clear(slash).
 %%--------------------------------------------------------------------
 
 -doc "Search for text matching Pattern in the session's working directory.".
--spec find_text(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec find_text(pid(), binary()) -> {ok, [file_search_result()]} | {error, term()}.
 find_text(Session, Pattern) ->
     beam_agent_core:native_or(Session, find_text, [Pattern], fun() ->
         file_find_text(Pattern, session_file_opts(Session))
     end).
 
 -doc "Find files matching a pattern in the session's working directory.".
--spec find_files(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec find_files(pid(), map()) -> {ok, [file_entry()]} | {error, term()}.
 find_files(Session, Opts) ->
     beam_agent_core:native_or(Session, find_files, [Opts], fun() ->
         file_find_files(maps:merge(session_file_opts(Session), Opts))
     end).
 
 -doc "Search for code symbols matching Query in the session's project.".
--spec find_symbols(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec find_symbols(pid(), binary()) -> {ok, [file_search_result()]} | {error, term()}.
 find_symbols(Session, Query) ->
     beam_agent_core:native_or(Session, find_symbols, [Query], fun() ->
         file_find_symbols(Query, session_file_opts(Session))
     end).
 
 -doc "List files and directories at the given Path.".
--spec file_list(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec file_list(pid(), binary()) -> {ok, [file_entry()]} | {error, term()}.
 file_list(Session, Path) ->
     beam_agent_core:native_or(Session, file_list, [Path], fun() ->
         file_list_impl(Path)
     end).
 
 -doc "Read the contents of a file at the given Path.".
--spec file_read(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec file_read(pid(), binary()) -> {ok, #{path := binary(), content := binary()}} | {error, term()}.
 file_read(Session, Path) ->
     beam_agent_core:native_or(Session, file_read, [Path], fun() ->
         file_read_impl(Path)
     end).
 
 -doc "Get the version-control status of files in the session's project.".
--spec file_status(pid()) -> {ok, term()} | {error, term()}.
+-spec file_status(pid()) -> {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}} | {error, term()}.
 file_status(Session) ->
     beam_agent_core:native_or(Session, file_status, [], fun() ->
         file_status_impl(session_file_opts(Session))
@@ -651,19 +651,19 @@ file_status(Session) ->
 %%--------------------------------------------------------------------
 
 -doc "Fuzzy-search for files by name in the session's project.".
--spec fuzzy_search(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec fuzzy_search(pid(), binary()) -> {ok, [beam_agent_search_core:search_match()]} | {error, term()}.
 fuzzy_search(Session, Query) ->
     fuzzy_search(Session, Query, #{}).
 
 -doc "Fuzzy-search for files by name with options.".
--spec fuzzy_search(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec fuzzy_search(pid(), binary(), map()) -> {ok, [beam_agent_search_core:search_match()]} | {error, term()}.
 fuzzy_search(Session, Query, Opts) ->
     beam_agent_core:native_or(Session, fuzzy_file_search, [Query, Opts], fun() ->
         beam_agent_search_core:fuzzy_file_search(Query, Opts)
     end).
 
 -doc "Start a stateful fuzzy file search session.".
--spec search_session_start(pid(), binary(), [term()]) -> {ok, term()} | {error, term()}.
+-spec search_session_start(pid(), binary(), [binary()]) -> {ok, beam_agent_search_core:search_session()} | {error, term()}.
 search_session_start(Session, SearchSessionId, Roots) ->
     beam_agent_core:native_or(Session, fuzzy_file_search_session_start,
               [SearchSessionId, Roots], fun() ->
@@ -671,7 +671,7 @@ search_session_start(Session, SearchSessionId, Roots) ->
     end).
 
 -doc "Update a search session with a new query string.".
--spec search_session_update(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec search_session_update(pid(), binary(), binary()) -> {ok, [beam_agent_search_core:search_match()]} | {error, term()}.
 search_session_update(Session, SearchSessionId, Query) ->
     beam_agent_core:native_or(Session, fuzzy_file_search_session_update,
               [SearchSessionId, Query], fun() ->
@@ -679,7 +679,7 @@ search_session_update(Session, SearchSessionId, Query) ->
     end).
 
 -doc "Stop and clean up a fuzzy file search session.".
--spec search_session_stop(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec search_session_stop(pid(), binary()) -> {ok, map()} | {error, term()}.
 search_session_stop(Session, SearchSessionId) ->
     beam_agent_core:native_or(Session, fuzzy_file_search_session_stop,
               [SearchSessionId], fun() ->

@@ -276,7 +276,7 @@ adapter_module(Session) when is_pid(Session) ->
     end.
 
 -doc "Change the model at runtime.".
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, binary()} | {error, term()}.
 set_model(Session, Model) when is_pid(Session), is_binary(Model) ->
     case adapter_module(Session) of
         {ok, Module} ->
@@ -287,7 +287,7 @@ set_model(Session, Model) when is_pid(Session), is_binary(Model) ->
     end.
 
 -doc "Change the permission mode at runtime.".
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, binary() | map()} | {error, term()}.
 set_permission_mode(Session, Mode) when is_pid(Session), is_binary(Mode) ->
     case adapter_module(Session) of
         {ok, Module} ->
@@ -324,7 +324,7 @@ abort(Session) when is_pid(Session) ->
     end.
 
 -doc "Send a control message through the appropriate native or shared path.".
--spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec send_control(pid(), binary(), map()) -> {ok, map()} | {error, term()}.
 send_control(Session, Method, Params)
   when is_pid(Session), is_binary(Method), is_map(Params) ->
     case adapter_module(Session) of

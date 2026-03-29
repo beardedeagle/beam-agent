@@ -88,7 +88,12 @@ defmodule BeamAgent.Command do
   ```
   """
   @spec run(binary() | String.t() | [binary() | String.t()]) ::
-          {:ok, command_result()} | {:error, term()}
+          {:ok, command_result()}
+          | {:error,
+             {:port_exit, term()}
+             | {:port_failed, term()}
+             | {:timeout, :infinity | non_neg_integer()}
+             | {:security, {:deny, binary()} | {:throttle, pos_integer()}}}
   defdelegate run(command), to: :beam_agent_command
 
   @doc """
@@ -110,7 +115,12 @@ defmodule BeamAgent.Command do
   ```
   """
   @spec run(binary() | String.t() | [binary() | String.t()], command_opts()) ::
-          {:ok, command_result()} | {:error, term()}
+          {:ok, command_result()}
+          | {:error,
+             {:port_exit, term()}
+             | {:port_failed, term()}
+             | {:timeout, :infinity | non_neg_integer()}
+             | {:security, {:deny, binary()} | {:throttle, pos_integer()}}}
   defdelegate run(command, opts), to: :beam_agent_command
 
   # ---------------------------------------------------------------------------
@@ -132,7 +142,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_init(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec session_init(pid(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate session_init(session, opts), to: :beam_agent_command
 
   @doc """
@@ -148,7 +158,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  @spec session_messages(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec session_messages(pid()) :: {:ok, [:beam_agent_core.message()]} | {:error, term()}
   defdelegate session_messages(session), to: :beam_agent_command
 
   @doc """
@@ -166,7 +176,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, messages}` or `{:error, reason}`.
   """
-  @spec session_messages(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec session_messages(pid(), map()) :: {:ok, [:beam_agent_core.message()]} | {:error, term()}
   defdelegate session_messages(session, opts), to: :beam_agent_command
 
   @doc """
@@ -225,7 +235,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec shell_command(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  @spec shell_command(pid() | binary(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate shell_command(session, command), to: :beam_agent_command
 
   @doc """
@@ -243,7 +253,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec shell_command(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec shell_command(pid() | binary(), binary(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate shell_command(session, command, opts), to: :beam_agent_command
 
   @doc """
@@ -261,7 +271,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec tui_append_prompt(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec tui_append_prompt(pid(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate tui_append_prompt(session, text), to: :beam_agent_command
 
   @doc """
@@ -278,7 +288,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec tui_open_help(pid()) :: {:ok, term()} | {:error, term()}
+  @spec tui_open_help(pid()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate tui_open_help(session), to: :beam_agent_command
 
   @doc """
@@ -296,7 +306,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_destroy(pid()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate session_destroy(session), to: :beam_agent_command
 
   @doc """
@@ -314,7 +324,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_destroy(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate session_destroy(session, session_id), to: :beam_agent_command
 
   @doc """
@@ -331,7 +341,12 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_run(pid(), binary() | [binary()]) :: {:ok, map()} | {:error, term()}
+  @spec command_run(pid(), binary() | [binary()]) ::
+          {:ok, map()}
+          | {:error,
+             {:port_exit, term()}
+             | {:port_failed, term()}
+             | {:timeout, :infinity | non_neg_integer()}}
   defdelegate command_run(session, command), to: :beam_agent_command
 
   @doc """
@@ -350,7 +365,12 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_run(pid(), binary() | [binary()], map()) :: {:ok, map()} | {:error, term()}
+  @spec command_run(pid(), binary() | [binary()], map()) ::
+          {:ok, map()}
+          | {:error,
+             {:port_exit, term()}
+             | {:port_failed, term()}
+             | {:timeout, :infinity | non_neg_integer()}}
   defdelegate command_run(session, command, opts), to: :beam_agent_command
 
   @doc """
@@ -368,7 +388,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_write_stdin(pid(), binary(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec command_write_stdin(pid(), binary(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate command_write_stdin(session, process_id, stdin), to: :beam_agent_command
 
   @doc """
@@ -385,7 +405,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_write_stdin(pid(), binary(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec command_write_stdin(pid(), binary(), binary(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate command_write_stdin(session, process_id, stdin, opts), to: :beam_agent_command
 
   @doc """
@@ -402,7 +422,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec submit_feedback(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec submit_feedback(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate submit_feedback(session, feedback), to: :beam_agent_command
 
   @doc """
@@ -422,7 +442,7 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec turn_respond(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec turn_respond(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate turn_respond(session, request_id, params), to: :beam_agent_command
 
   @doc """

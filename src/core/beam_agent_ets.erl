@@ -62,6 +62,7 @@ beam_agent_ets:ensure_table(?TABLE, [set, named_table,
     update_counter/3,
     update_counter/4,
     select_replace/2,
+    select_delete/2,
     match_delete/2,
 
     %% Read operations (always direct — no proxy needed)
@@ -185,6 +186,15 @@ select_replace(Table, MatchSpec) ->
         false -> ets:select_replace(Table, MatchSpec);
         true  -> beam_agent_table_owner:write_proxy_sync(
                      select_replace, Table, MatchSpec)
+    end.
+
+-doc "Delete all records matching a match spec. Proxied in hardened mode.".
+-spec select_delete(atom(), ets:match_spec()) -> non_neg_integer().
+select_delete(Table, MatchSpec) ->
+    case needs_proxy(Table) of
+        false -> ets:select_delete(Table, MatchSpec);
+        true  -> beam_agent_table_owner:write_proxy_sync(
+                     select_delete, Table, MatchSpec)
     end.
 
 -doc "Delete all records matching a pattern. Proxied in hardened mode.".

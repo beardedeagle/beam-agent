@@ -294,9 +294,8 @@ Examples:
 ```
 """.
 -spec dispatch(binary(), binary(), map()) ->
-    {ok, #{model => term(),
-           permission_mode => binary() | atom(),
-           max_thinking_tokens => pos_integer()}}
+    {ok, #{model => atom() | binary() | map(),
+           permission_mode => atom() | binary()}}
   | {error, not_found
            | {invalid_param, max_thinking_tokens}
            | {missing_param, max_thinking_tokens | model | permission_mode | task_id}
@@ -313,7 +312,7 @@ Get a configuration value for a session.
 Looks up a single key from the session's config store. Returns
 {error, not_set} when the key has not been written.
 """.
--spec get_config(binary(), atom()) -> {ok, term()} | {error, not_set}.
+-spec get_config(binary(), atom()) -> {ok, atom() | binary() | map() | pos_integer()} | {error, not_set}.
 get_config(SessionId, Key) -> beam_agent_control_core:get_config(SessionId, Key).
 
 -doc """
@@ -322,7 +321,7 @@ Set a configuration value for a session.
 Stores an arbitrary term under the given atom key, scoped to the
 session ID. Overwrites any previous value for the same key.
 """.
--spec set_config(binary(), atom(), term()) -> ok.
+-spec set_config(binary(), atom(), atom() | binary() | map()) -> ok.
 set_config(SessionId, Key, Value) -> beam_agent_control_core:set_config(SessionId, Key, Value).
 
 -doc """
@@ -601,7 +600,7 @@ ok = beam_agent_control:register_session_callbacks(SessionId, #{
 ```
 """.
 -spec request_user_input(binary(), map(), map()) ->
-    {ok, term()}.
+    {ok, map()}.
 request_user_input(SessionId, Request, Context) ->
     beam_agent_control_core:request_user_input(SessionId, Request, Context).
 

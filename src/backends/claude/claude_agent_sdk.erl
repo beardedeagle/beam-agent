@@ -157,24 +157,24 @@ query(Session, Prompt, Params) ->
         {error, _} = Err ->
             Err
     end.
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 session_info(Session) ->
     claude_agent_session:session_info(Session).
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_model(Session, Model) ->
     claude_agent_session:set_model(Session, Model).
 -spec set_permission_mode(pid(), binary()) ->
-                             {ok, term()} | {error, term()}.
+                             {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_permission_mode(Session, Mode) ->
     claude_agent_session:set_permission_mode(Session, Mode).
--spec rewind_files(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec rewind_files(pid(), binary()) -> {ok, map()} | {error, term()}.
 rewind_files(Session, CheckpointUuid) ->
     claude_agent_session:rewind_files(Session, CheckpointUuid).
--spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec stop_task(pid(), binary()) -> {ok, map()} | {error, term()}.
 stop_task(Session, TaskId) ->
     claude_agent_session:stop_task(Session, TaskId).
 -spec set_max_thinking_tokens(pid(), pos_integer()) ->
-                                 {ok, term()} | {error, term()}.
+                                 {ok, map()} | {error, term()}.
 set_max_thinking_tokens(Session, MaxTokens) ->
     claude_agent_session:set_max_thinking_tokens(Session, MaxTokens).
 -spec interrupt(pid()) -> ok | {error, term()}.
@@ -183,18 +183,18 @@ interrupt(Session) ->
 -spec abort(pid()) -> ok | {error, term()}.
 abort(Session) ->
     interrupt(Session).
--spec mcp_server_status(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_server_status(pid()) -> {ok, map()} | {error, term()}.
 mcp_server_status(Session) ->
     claude_agent_session:mcp_server_status(Session).
--spec set_mcp_servers(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec set_mcp_servers(pid(), map()) -> {ok, map()} | {error, term()}.
 set_mcp_servers(Session, Servers) ->
     claude_agent_session:set_mcp_servers(Session, Servers).
 -spec reconnect_mcp_server(pid(), binary()) ->
-                              {ok, term()} | {error, term()}.
+                              {ok, map()} | {error, term()}.
 reconnect_mcp_server(Session, ServerName) ->
     claude_agent_session:reconnect_mcp_server(Session, ServerName).
 -spec toggle_mcp_server(pid(), binary(), boolean()) ->
-                           {ok, term()} | {error, term()}.
+                           {ok, map()} | {error, term()}.
 toggle_mcp_server(Session, ServerName, Enabled) ->
     claude_agent_session:toggle_mcp_server(Session, ServerName, Enabled).
 -spec mcp_tool(binary(), binary(), map(), beam_agent_tool_registry:tool_handler()) ->
@@ -426,7 +426,7 @@ receive_event(_Session, Ref, Timeout) ->
 -spec event_unsubscribe(pid(), reference()) -> ok | {error, bad_ref}.
 event_unsubscribe(Session, Ref) ->
     beam_agent_events:unsubscribe(get_session_id(Session), Ref).
--spec list_commands(pid()) -> {ok, list()} | {error, term()}.
+-spec list_commands(pid()) -> {ok, [any()]} | {error, 'reconnecting' | 'session_error'}.
 list_commands(Session) ->
     supported_commands(Session).
 -spec skills_list(pid()) -> {ok, [map()]} | {error, term()}.
@@ -446,13 +446,13 @@ skills_remote_list(Session, _Opts) ->
         {error, _} = Error ->
             Error
     end.
--spec model_list(pid()) -> {ok, list()} | {error, term()}.
+-spec model_list(pid()) -> {ok, [any()]} | {error, 'reconnecting' | 'session_error'}.
 model_list(Session) ->
     supported_models(Session).
 -spec model_list(pid(), map()) -> {ok, list()} | {error, term()}.
 model_list(Session, _Opts) ->
     model_list(Session).
--spec get_status(pid()) -> {ok, adapter_status()} | {error, term()}.
+-spec get_status(pid()) -> {ok, adapter_status()} | {error, 'reconnecting' | 'session_error'}.
 get_status(Session) ->
     case session_info(Session) of
         {ok, Info} ->
@@ -463,7 +463,7 @@ get_status(Session) ->
 -spec get_last_session_id(pid()) -> {ok, binary()}.
 get_last_session_id(Session) ->
     {ok, get_session_id(Session)}.
--spec account_rate_limits(pid()) -> {ok, map()} | {error, term()}.
+-spec account_rate_limits(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 account_rate_limits(Session) ->
     account_info(Session).
 -spec list_server_sessions(pid()) ->
@@ -612,10 +612,10 @@ experimental_feature_list(Session) ->
 experimental_feature_list(Session, Opts) when is_map(Opts) ->
     {ok, Result} = beam_agent_control:experimental_features(get_session_id(Session), Opts),
     {ok, with_adapter_source(Result)}.
--spec mcp_status(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_status(pid()) -> {ok, map()} | {error, term()}.
 mcp_status(Session) ->
     mcp_server_status(Session).
--spec mcp_server_status_list(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_server_status_list(pid()) -> {ok, map()} | {error, term()}.
 mcp_server_status_list(Session) ->
     mcp_server_status(Session).
 -spec with_adapter_source(#{health => active_query | connecting | error | initializing | ready | unknown, _ => _}) -> adapter_status().
@@ -728,7 +728,7 @@ get_session_id(Session) ->
                          init_response_key(),
                          system_info_key(),
                          init_default()) ->
-                            {ok, term()} | {error, term()}.
+                            {ok, _} | {error, 'reconnecting' | 'session_error'}.
 extract_init_field(Session, IRKey, SIKey, Default) ->
     case session_info(Session) of
         {ok, Info} ->

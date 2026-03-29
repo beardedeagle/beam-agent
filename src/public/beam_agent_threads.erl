@@ -608,7 +608,7 @@ Parameters:
 
 Returns {ok, ThreadList} or {error, Reason}.
 """.
--spec thread_list(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec thread_list(pid() | binary(), map()) -> {ok, [map()]} | {error, term()}.
 thread_list(Session, Opts) ->
     beam_agent_core:native_or(Session, thread_list, [Opts],
         fun() -> thread_list(Session) end).
@@ -730,7 +730,7 @@ Parameters:
 Returns {ok, ResultMap} with thread_id and unsubscribed fields, or
 {error, not_found}.
 """.
--spec thread_unsubscribe(pid() | binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec thread_unsubscribe(pid() | binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_unsubscribe(Session, ThreadId) ->
     beam_agent_core:native_or(Session, thread_unsubscribe, [ThreadId], fun() ->
         universal_thread_unsubscribe(Session, ThreadId)
@@ -746,7 +746,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, not_found}.
 """.
--spec thread_name_set(pid() | binary(), binary(), binary()) -> {ok, term()} | {error, term()}.
+-spec thread_name_set(pid() | binary(), binary(), binary()) -> {ok, map()} | {error, term()}.
 thread_name_set(Session, ThreadId, Name) ->
     beam_agent_core:native_or(Session, thread_name_set, [ThreadId, Name], fun() ->
         universal_thread_name_set(Session, ThreadId, Name)
@@ -763,7 +763,7 @@ Parameters:
 
 Returns {ok, ResultMap} or {error, not_found}.
 """.
--spec thread_metadata_update(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec thread_metadata_update(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 thread_metadata_update(Session, ThreadId, MetadataPatch) ->
     beam_agent_core:native_or(Session, thread_metadata_update, [ThreadId, MetadataPatch], fun() ->
         universal_thread_metadata_update(Session, ThreadId, MetadataPatch)

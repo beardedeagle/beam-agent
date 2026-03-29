@@ -43,6 +43,17 @@ defmodule BeamAgent.Plugins do
   See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Agents`.
   """
 
+  @typedoc "A plugin definition stored in the global registry."
+  @type plugin_def() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:version) => binary(),
+          optional(:config) => map()
+        }
+
   @doc """
   Create the global registry ETS table. Idempotent.
   """
@@ -69,13 +80,13 @@ defmodule BeamAgent.Plugins do
   @doc """
   Fetch a single plugin by id.
   """
-  @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get(binary()) :: {:ok, plugin_def()} | {:error, :not_found}
   defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_plugin
 
   @doc """
   List all registered plugins.
   """
-  @spec list() :: [map()]
+  @spec list() :: [plugin_def()]
   defdelegate list(), to: :beam_agent_catalog, as: :registered_plugins
 
   @doc """

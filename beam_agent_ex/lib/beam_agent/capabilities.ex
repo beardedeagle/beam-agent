@@ -20,11 +20,11 @@ defmodule BeamAgent.Capabilities do
   - `:implementation` — `:direct_backend | :universal | :direct_backend_and_universal`
   - `:fidelity` — `:exact | :validated_equivalent`
 
-  All 23 capabilities are at `:full` support level across all 5 backends. The
+  All 24 capabilities are at `:full` support level across all 5 backends. The
   `:implementation` field records whether the route is a direct backend call, a
   BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
 
-  ## The 23 capabilities
+  ## The 24 capabilities
 
   ```
   session_lifecycle       session_info            runtime_model_switch
@@ -34,7 +34,7 @@ defmodule BeamAgent.Capabilities do
   checkpointing           thinking_budget         task_stop
   command_execution       approval_callbacks      user_input_callbacks
   realtime_review         config_management       provider_management
-  attachments             event_streaming
+  attachments             event_streaming         memory
   ```
 
   ## Quick example
@@ -69,7 +69,7 @@ defmodule BeamAgent.Capabilities do
   `:mcp_management`, `:hooks`, `:checkpointing`, `:thinking_budget`,
   `:task_stop`, `:command_execution`, `:approval_callbacks`,
   `:user_input_callbacks`, `:realtime_review`, `:config_management`,
-  `:provider_management`, `:attachments`, `:event_streaming`.
+  `:provider_management`, `:attachments`, `:event_streaming`, `:memory`.
   """
   @type capability() :: atom()
 
@@ -147,7 +147,7 @@ defmodule BeamAgent.Capabilities do
   defdelegate backends(), to: :beam_agent_capabilities
 
   @doc """
-  Return the flat list of all 23 capability atom identifiers.
+  Return the flat list of all 24 capability atom identifiers.
 
   Useful for iterating over capabilities without loading the full matrix. The
   order matches the order of entries in `all/0`.
@@ -236,7 +236,7 @@ defmodule BeamAgent.Capabilities do
   @doc """
   Check whether a capability is supported for a given backend.
 
-  A convenience wrapper around `status/2`. Because all 23 capabilities are at
+  A convenience wrapper around `status/2`. Because all 24 capabilities are at
   `:full` support level for all 5 backends, this returns `{:ok, true}` for every
   valid capability/backend combination. It exists to make guard-style checks
   readable and to surface `{:error, ...}` for typos.
@@ -337,4 +337,60 @@ defmodule BeamAgent.Capabilities do
              | {:session_backend_lookup_failed, term()}
              | {:unknown_backend, term()}}
   defdelegate capabilities(value), to: :beam_agent_capabilities
+
+  @doc """
+  Ensure the capability registry ETS tables exist. Idempotent.
+  """
+  @spec ensure_tables() :: :ok
+  defdelegate ensure_tables(), to: :beam_agent_capabilities
+
+  @doc """
+  Reset the registry to built-in defaults.
+
+  Removes all custom backends and capability overrides, then re-seeds
+  the registry from the compiled-in default matrix.
+  """
+  @spec reset() :: :ok
+  defdelegate reset(), to: :beam_agent_capabilities
+
+  @doc """
+  Register a new backend with a full capability map.
+
+  `caps` is a map from capability atom to `support_info()` map. All 24
+  capability atoms must be present.
+
+  ## Example
+
+      caps = for id <- BeamAgent.Capabilities.capability_ids(), into: %{} do
+        {id, %{support_level: :full, implementation: :universal, fidelity: :exact}}
+      end
+      :ok = BeamAgent.Capabilities.register_backend(:my_backend, caps)
+  """
+  @spec register_backend(atom(), %{capability() => support_info()}) :: :ok
+  defdelegate register_backend(backend, caps), to: :beam_agent_capabilities
+
+  @doc """
+  Override a single capability entry for a backend.
+
+  If the backend does not exist, it is created with only this entry.
+
+  ## Example
+
+      :ok = BeamAgent.Capabilities.register_capability(:claude, :hooks, %{
+        support_level: :partial,
+        implementation: :universal,
+        fidelity: :validated_equivalent
+      })
+  """
+  @spec register_capability(atom(), capability(), support_info()) :: :ok
+  defdelegate register_capability(backend, capability, info), to: :beam_agent_capabilities
+
+  @doc """
+  Remove a custom backend from the registry.
+
+  Removes all capability entries for the given backend. Safe to call for
+  non-existent backends (no-op).
+  """
+  @spec unregister_backend(atom()) :: :ok
+  defdelegate unregister_backend(backend), to: :beam_agent_capabilities
 end

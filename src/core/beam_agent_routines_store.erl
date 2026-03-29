@@ -85,7 +85,7 @@ clear() ->
     ok.
 
 -doc "Insert or overwrite a routine job, updating due indexes as needed.".
--spec put_job(#{job_id := binary(), _ => term()}) -> ok.
+-spec put_job(#{job_id := binary(), _ => _}) -> ok.
 put_job(#{job_id := JobId} = Job) when is_binary(JobId) ->
     ensure_tables(),
     case get_job(JobId) of
@@ -219,7 +219,7 @@ claim_job_retry(JobId, RunnerId, SlotAt, ClaimTtlMs) ->
             end
     end.
 
--spec collect_due_jobs(term(), integer(), boolean(), infinity | pos_integer(),
+-spec collect_due_jobs('$end_of_table' | {integer(), binary()}, integer(), boolean(), infinity | pos_integer(),
     [job_record()]) -> [job_record()].
 collect_due_jobs('$end_of_table', _At, _IncludeClaimed, _Limit, Acc) ->
     Acc;
@@ -302,15 +302,15 @@ decrement_limit(infinity, _Matched) ->
 decrement_limit(Limit, 1) when is_integer(Limit), Limit > 0 ->
     Limit - 1.
 
--spec schedule_type(job_record()) -> term().
+-spec schedule_type(job_record()) -> atom() | binary() | undefined.
 schedule_type(Job) ->
     maps:get(type, maps:get(schedule, Job, #{}), undefined).
 
--spec target_type(job_record()) -> term().
+-spec target_type(job_record()) -> atom() | binary() | undefined.
 target_type(Job) ->
     maps:get(type, maps:get(target, Job, #{}), undefined).
 
--spec index_due(#{job_id := term(), _ => term()}) -> ok.
+-spec index_due(#{job_id := binary(), _ => _}) -> ok.
 index_due(Job) ->
     case due_key(Job) of
         undefined ->

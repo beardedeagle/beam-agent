@@ -127,7 +127,7 @@ events into the BeamAgent journal.
   | #{
         candidates := [beam_agent_backend:backend()],
         decision := allow | deny,
-        fallback_chain := [term()],
+        fallback_chain := [beam_agent_backend:backend()],
         atom() => term()
     }.
 
@@ -172,7 +172,11 @@ Supported request keys:
 """.
 -spec select_backend(route_request()) ->
     {ok, route_decision()} |
-    {error, term()}.
+    no_backend_error() |
+    {error, {policy_denied, binary()} | {invalid_policy, term()} |
+            {invalid_route_request, atom()} | {invalid_fallback_policy, term()} |
+            {invalid_affinity_key, term()} | {unknown_backend, term()} |
+            {unknown_capability, term()} | {invalid_health_status, term()}}.
 select_backend(RouteRequest) when is_map(RouteRequest) ->
     ensure_tables(),
     TeleMeta = telemetry_request_meta(RouteRequest),
@@ -598,7 +602,7 @@ with_fallback_policy(available, Fun) -> Fun(available);
 with_fallback_policy(Value, _Fun) -> {error, {invalid_fallback_policy, Value}}.
 
 -spec with_optional_backend(term(), fun((beam_agent_backend:backend() | undefined) -> Result)) ->
-    Result | {error, term()}.
+    Result | {error, {unknown_backend, term()}}.
 with_optional_backend(undefined, Fun) -> Fun(undefined);
 with_optional_backend(auto, Fun) -> Fun(undefined);
 with_optional_backend(<<"auto">>, Fun) -> Fun(undefined);
@@ -626,7 +630,7 @@ with_backend_list(Key, Request, Fun) ->
     end.
 
 -spec normalize_backend_list([term()], [beam_agent_backend:backend()]) ->
-    {ok, [beam_agent_backend:backend()]} | {error, term()}.
+    {ok, [beam_agent_backend:backend()]} | {error, {unknown_backend, term()}}.
 normalize_backend_list([], Acc) ->
     {ok, lists:reverse(Acc)};
 normalize_backend_list([Value | Rest], Acc) ->
@@ -642,7 +646,7 @@ normalize_backend_list([Value | Rest], Acc) ->
     end.
 
 -spec with_capabilities(term(), fun(([beam_agent_capabilities:capability()]) -> Result)) ->
-    Result | {error, term()}.
+    Result | {error, {invalid_route_request, capabilities} | {unknown_capability, term()}}.
 with_capabilities(Caps, Fun) when is_list(Caps) ->
     case normalize_capabilities(Caps, []) of
         {ok, Normalized} -> Fun(Normalized);
@@ -652,7 +656,7 @@ with_capabilities(_, _Fun) ->
     {error, {invalid_route_request, capabilities}}.
 
 -spec normalize_capabilities([term()], [beam_agent_capabilities:capability()]) ->
-    {ok, [beam_agent_capabilities:capability()]} | {error, term()}.
+    {ok, [beam_agent_capabilities:capability()]} | {error, {unknown_capability, term()}}.
 normalize_capabilities([], Acc) ->
     {ok, lists:reverse(Acc)};
 normalize_capabilities([Capability | Rest], Acc) when is_atom(Capability) ->
@@ -676,7 +680,7 @@ with_affinity(Value, Fun) when is_binary(Value), byte_size(Value) > 0 -> Fun(Val
 with_affinity(Value, _Fun) -> {error, {invalid_affinity_key, Value}}.
 
 -spec with_health(term(), fun((#{beam_agent_backend:backend() => health_status()}) -> Result)) ->
-    Result | {error, term()}.
+    Result | {error, {invalid_route_request, {health, term()}} | {unknown_backend, term()} | {invalid_health_status, term()}}.
 with_health(Health, Fun) when is_map(Health) ->
     case normalize_health(maps:to_list(Health), #{}) of
         {ok, Normalized} -> Fun(Normalized);
@@ -686,7 +690,7 @@ with_health(Value, _Fun) ->
     {error, {invalid_route_request, {health, Value}}}.
 
 -spec normalize_health([{term(), term()}], #{beam_agent_backend:backend() => health_status()}) ->
-    {ok, #{beam_agent_backend:backend() => health_status()}} | {error, term()}.
+    {ok, #{beam_agent_backend:backend() => health_status()}} | {error, {unknown_backend, term()} | {invalid_health_status, term()}}.
 normalize_health([], Acc) ->
     {ok, Acc};
 normalize_health([{BackendLike, Status} | Rest], Acc) ->
@@ -879,7 +883,7 @@ journal_request(Request) ->
         capabilities, policy, affinity_key, last_backend, fallback_policy],
         Request).
 
--spec base_request(pid() | binary() | map()) -> {ok, route_request()} | {error, term()}.
+-spec base_request(pid() | binary() | map()) -> {ok, route_request()} | {error, {invalid_route_request, {routing, term()}}}.
 base_request(Opts) when is_map(Opts) ->
     case maps:get(routing, Opts, #{}) of
         Routing when is_map(Routing) ->
@@ -915,7 +919,7 @@ base_request_from_opts(Opts, Routing) ->
             {ok, Routing#{backend => Backend, policy => explicit}}
     end.
 
--spec maybe_put(routing_optional_key(), term(), routing_put_map()) -> routing_put_map().
+-spec maybe_put(routing_optional_key(), undefined | binary() | term(), routing_put_map()) -> routing_put_map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
@@ -930,7 +934,7 @@ telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(routing, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(routing_operation(), {error, {atom(), term()}}, map()) -> ok.
+-spec telemetry_exception(routing_operation(), {error, {_, _}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(routing, Operation, Reason,
         compact_telemetry(Metadata)).

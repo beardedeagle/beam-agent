@@ -33,6 +33,8 @@ defmodule BeamAgentEx.MixProject do
 
   defp deps do
     [
+      # NOTE: Path dep used during development. Change to {:beam_agent, "~> X.Y"}
+      # before publishing to Hex. The Erlang package must be published first.
       {:beam_agent, path: ".."},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false}
@@ -61,6 +63,7 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.Catalog,
           BeamAgent.Checkpoint,
           BeamAgent.Command,
+          BeamAgent.CommandValidator,
           BeamAgent.Content,
           BeamAgent.Control,
           BeamAgent.File,

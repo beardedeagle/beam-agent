@@ -119,7 +119,7 @@ defmodule CopilotEx do
           required(:session_id) => binary(),
           required(:stop_reason) => binary(),
           required(:stop_reason_atom) => stop_reason(),
-          required(:structured_output) => term(),
+          required(:structured_output) => map() | binary() | nil,
           required(:subtype) => binary(),
           required(:surpassed_threshold) => number(),
           required(:system_info) => map(),
@@ -148,11 +148,11 @@ defmodule CopilotEx do
 
   @type flat_message :: %{
           required(:type) => :raw | :text | :thinking | :tool_result | :tool_use,
-          required(:content) => term(),
-          required(:raw) => term(),
-          required(:tool_input) => term(),
-          required(:tool_name) => term(),
-          required(:tool_use_id) => term()
+          required(:content) => binary() | nil,
+          required(:raw) => map() | nil,
+          required(:tool_input) => map() | nil,
+          required(:tool_name) => binary() | nil,
+          required(:tool_use_id) => binary() | nil
         }
 
   @type query_opts :: %{
@@ -201,7 +201,7 @@ defmodule CopilotEx do
           required(:permission_prompt_tool_name) => binary(),
           required(:permission_suggestions) => [any()],
           required(:prompt) => binary(),
-          required(:reason) => term(),
+          required(:reason) => atom() | binary(),
           required(:session_id) => binary(),
           required(:stop_hook_active) => boolean(),
           required(:stop_reason) => atom() | binary(),
@@ -307,7 +307,7 @@ defmodule CopilotEx do
           required(:tools) => [
             %{
               required(:description) => binary(),
-              required(:handler) => (term() -> any()),
+              required(:handler) => (map() -> {:ok, [map()]} | {:error, binary()}),
               required(:input_schema) => map(),
               required(:name) => binary()
             }
@@ -496,21 +496,21 @@ defmodule CopilotEx do
 
       {:ok, result} = CopilotEx.send_command(session, "config.get", %{})
   """
-  @spec send_command(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_command(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_command(session, method, params \\ %{}) do
     :copilot_client.send_command(session, method, params)
   end
 
   @doc "Get native Copilot CLI status information."
-  @spec get_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec get_status(pid()) :: {:ok, map()} | {:error, term()}
   def get_status(session), do: :copilot_client.get_status(session)
 
   @doc "Get native Copilot authentication status."
-  @spec get_auth_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec get_auth_status(pid()) :: {:ok, map()} | {:error, term()}
   def get_auth_status(session), do: :copilot_client.get_auth_status(session)
 
   @doc "List native Copilot models with metadata."
-  @spec model_list(pid()) :: {:ok, term()} | {:error, term()}
+  @spec model_list(pid()) :: {:ok, map()} | {:error, term()}
   def model_list(session), do: :copilot_client.model_list(session)
 
   @doc "Get the last native Copilot session id."
@@ -531,23 +531,23 @@ defmodule CopilotEx do
     do: :copilot_client.get_server_session(session, session_id)
 
   @doc "Delete a native Copilot session by id."
-  @spec delete_server_session(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec delete_server_session(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def delete_server_session(session, session_id),
     do: :copilot_client.delete_server_session(session, session_id)
 
   @doc "Fetch native Copilot events/messages for the current session."
-  @spec session_get_messages(pid()) :: {:ok, term()} | {:error, term()}
+  @spec session_get_messages(pid()) :: {:ok, map()} | {:error, term()}
   def session_get_messages(session), do: :copilot_client.session_get_messages(session)
 
-  @spec session_get_messages(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec session_get_messages(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def session_get_messages(session, session_id),
     do: :copilot_client.session_get_messages(session, session_id)
 
   @doc "Destroy the current native Copilot session."
-  @spec session_destroy(pid()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid()) :: {:ok, map()} | {:error, term()}
   def session_destroy(session), do: :copilot_client.session_destroy(session)
 
-  @spec session_destroy(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid(), binary()) :: {:ok, map()} | {:error, term()}
   def session_destroy(session, session_id),
     do: :copilot_client.session_destroy(session, session_id)
 
@@ -681,7 +681,7 @@ defmodule CopilotEx do
           [
             %{
               required(:description) => binary(),
-              required(:handler) => (map() -> {term(), term()}),
+              required(:handler) => (map() -> {:ok, [map()]} | {:error, binary()}),
               required(:input_schema) => map(),
               required(:name) => binary()
             }
@@ -899,19 +899,19 @@ defmodule CopilotEx do
   # ── Universal: Init Response Accessors ───────────────────────────
 
   @doc "List available slash commands."
-  @spec supported_commands(pid()) :: {:ok, list()} | {:error, term()}
+  @spec supported_commands(pid()) :: {:ok, [map()]} | {:error, term()}
   def supported_commands(session), do: :copilot_client.supported_commands(session)
 
   @doc "List available models."
-  @spec supported_models(pid()) :: {:ok, list()} | {:error, term()}
+  @spec supported_models(pid()) :: {:ok, [map()]} | {:error, term()}
   def supported_models(session), do: :copilot_client.supported_models(session)
 
   @doc "List available agents."
-  @spec supported_agents(pid()) :: {:ok, list()} | {:error, term()}
+  @spec supported_agents(pid()) :: {:ok, [map()]} | {:error, term()}
   def supported_agents(session), do: :copilot_client.supported_agents(session)
 
   @doc "Get account information."
-  @spec account_info(pid()) :: {:ok, map()} | {:error, term()}
+  @spec account_info(pid()) :: {:ok, map()} | {:error, :reconnecting | :session_error}
   def account_info(session), do: :copilot_client.account_info(session)
 
   # ── Universal: Session Control (beam_agent_core) ──────────────────────
@@ -963,7 +963,7 @@ defmodule CopilotEx do
   end
 
   @doc "Send a raw control message. Delegates to native Copilot implementation."
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params) do
     :copilot_client.send_control(session, method, params)
   end

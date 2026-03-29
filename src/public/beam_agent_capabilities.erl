@@ -14,7 +14,7 @@ Every capability/backend pair is described across three orthogonal dimensions:
   - `implementation` — `direct_backend | universal | direct_backend_and_universal`
   - `fidelity` — `exact | validated_equivalent`
 
-All 23 built-in capabilities are at `full` support level across all 5 built-in
+All 24 built-in capabilities are at `full` support level across all 5 built-in
 backends. The `implementation` field records whether the route is a direct backend
 call, a BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
 
@@ -26,7 +26,7 @@ via `register_backend/2`, and individual capability entries can be
 overridden via `register_capability/3`.
 
 ```erlang
-%% Register a new backend with all 23 capabilities:
+%% Register a new backend with all 24 capabilities:
 ok = beam_agent_capabilities:register_backend(my_backend, #{
     session_lifecycle => #{support_level => full,
                            implementation => direct_backend,
@@ -42,7 +42,7 @@ ok = beam_agent_capabilities:register_capability(gemini, checkpointing, #{
 }).
 ```
 
-## The 23 capabilities
+## The 24 capabilities
 
 ```
 session_lifecycle       session_info            runtime_model_switch
@@ -52,7 +52,7 @@ in_process_mcp          mcp_management          hooks
 checkpointing           thinking_budget         task_stop
 command_execution       approval_callbacks      user_input_callbacks
 realtime_review         config_management       provider_management
-attachments             event_streaming
+attachments             event_streaming         memory
 ```
 
 ## Quick start
@@ -130,7 +130,8 @@ Entries are ETS-backed runtime data seeded from compiled-in defaults.
   | config_management
   | provider_management
   | attachments
-  | event_streaming.
+  | event_streaming
+  | memory.
 
 -type support_level() :: missing | partial | baseline | full.
 -type implementation() :: direct_backend | universal | direct_backend_and_universal.
@@ -499,7 +500,8 @@ capability_definitions() ->
      {config_management, <<"Config management">>},
      {provider_management, <<"Provider and runtime management">>},
      {attachments, <<"Attachments in query and send (512 KB default size limit, configurable)">>},
-     {event_streaming, <<"Backend event streaming">>}].
+     {event_streaming, <<"Backend event streaming">>},
+     {memory, <<"Agent memory persistence">>}].
 
 %%--------------------------------------------------------------------
 %% Internal: Built-in Default Seeding
@@ -674,7 +676,9 @@ default_matrix() ->
             opencode => support(full, direct_backend, exact),
             copilot => support(full, universal, exact,
                 #{notes => <<"Universal event bus streams canonical session and control events for Copilot sessions.">>})
-        })
+        }),
+        cap(memory,
+            all_backends(full, universal, exact))
     ].
 
 %%--------------------------------------------------------------------

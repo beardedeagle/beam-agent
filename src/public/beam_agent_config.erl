@@ -197,64 +197,64 @@ read(Session, Opts) ->
     end).
 
 -doc "Update the session configuration with a partial patch.".
--spec update(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec update(pid() | binary(), map()) -> {ok, config_view()} | {error, term()}.
 update(Session, Body) ->
     beam_agent_core:native_or(Session, config_update, [Body], fun() ->
         config_update(Session, Body)
     end).
 
 -doc "List the providers available in the session configuration.".
--spec providers(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec providers(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 providers(Session) ->
     beam_agent_core:native_or(Session, config_providers, [], fun() ->
         beam_agent_runtime:list_providers(Session)
     end).
 
 -doc "Write a single configuration value at the given key path.".
--spec value_write(pid() | binary(), binary(), term()) -> {ok, term()} | {error, term()}.
+-spec value_write(pid() | binary(), binary(), term()) -> {ok, map()} | {error, term()}.
 value_write(Session, KeyPath, Value) ->
     value_write(Session, KeyPath, Value, #{}).
 
 -doc "Write a single configuration value with options.".
--spec value_write(pid() | binary(), binary(), term(), map()) -> {ok, term()} | {error, term()}.
+-spec value_write(pid() | binary(), binary(), term(), map()) -> {ok, map()} | {error, term()}.
 value_write(Session, KeyPath, Value, Opts) ->
     beam_agent_core:native_or(Session, config_value_write, [KeyPath, Value, Opts], fun() ->
         config_value_write(Session, KeyPath, Value, Opts)
     end).
 
 -doc "Write multiple configuration values in a single batch.".
--spec batch_write(pid() | binary(), [map()]) -> {ok, term()} | {error, term()}.
+-spec batch_write(pid() | binary(), [map()]) -> {ok, map()} | {error, term()}.
 batch_write(Session, Edits) ->
     batch_write(Session, Edits, #{}).
 
 -doc "Write multiple configuration values in a batch with options.".
--spec batch_write(pid() | binary(), [map()], map()) -> {ok, term()} | {error, term()}.
+-spec batch_write(pid() | binary(), [map()], map()) -> {ok, map()} | {error, term()}.
 batch_write(Session, Edits, Opts) ->
     beam_agent_core:native_or(Session, config_batch_write, [Edits, Opts], fun() ->
         config_batch_write(Session, Edits, Opts)
     end).
 
 -doc "Read the configuration requirements for a session.".
--spec requirements_read(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec requirements_read(pid() | binary()) -> {ok, map()} | {error, term()}.
 requirements_read(Session) ->
     beam_agent_core:native_or(Session, config_requirements_read, [], fun() ->
         config_requirements_read(Session)
     end).
 
 -doc "Detect external agent configuration files in the project.".
--spec external_agent_detect(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec external_agent_detect(pid() | binary()) -> {ok, map()} | {error, term()}.
 external_agent_detect(Session) ->
     external_agent_detect(Session, #{}).
 
 -doc "Detect external agent configuration files with options.".
--spec external_agent_detect(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec external_agent_detect(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
 external_agent_detect(Session, Opts) ->
     beam_agent_core:native_or(Session, external_agent_config_detect, [Opts], fun() ->
         external_agent_config_detect(Session, Opts)
     end).
 
 -doc "Import an external agent configuration into the session.".
--spec external_agent_import(pid() | binary(), map()) -> {ok, term()} | {error, term()}.
+-spec external_agent_import(pid() | binary(), map()) -> {ok, config_view()} | {error, term()}.
 external_agent_import(Session, Opts) ->
     beam_agent_core:native_or(Session, external_agent_config_import, [Opts], fun() ->
         external_agent_config_import(Session, Opts)

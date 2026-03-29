@@ -43,6 +43,18 @@ defmodule BeamAgent.Agents do
   See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Plugins`.
   """
 
+  @typedoc "An agent type definition stored in the global registry."
+  @type agent_def() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:role) => atom(),
+          optional(:version) => binary(),
+          optional(:config) => map()
+        }
+
   @doc """
   Create the global registry ETS table. Idempotent.
   """
@@ -69,13 +81,13 @@ defmodule BeamAgent.Agents do
   @doc """
   Fetch a single agent type by id.
   """
-  @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get(binary()) :: {:ok, agent_def()} | {:error, :not_found}
   defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_agent
 
   @doc """
   List all registered agent types.
   """
-  @spec list() :: [map()]
+  @spec list() :: [agent_def()]
   defdelegate list(), to: :beam_agent_catalog, as: :registered_agents
 
   @doc """

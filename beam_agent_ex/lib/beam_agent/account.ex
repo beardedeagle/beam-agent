@@ -85,7 +85,7 @@ defmodule BeamAgent.Account do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec login(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec login(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate login(session, opts), to: :beam_agent_runtime, as: :account_login
 
   @doc """
@@ -103,7 +103,7 @@ defmodule BeamAgent.Account do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec cancel(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec cancel(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate cancel(session, opts), to: :beam_agent_runtime, as: :account_cancel
 
   @doc """
@@ -117,7 +117,7 @@ defmodule BeamAgent.Account do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec logout(pid()) :: {:ok, term()} | {:error, term()}
+  @spec logout(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate logout(session), to: :beam_agent_runtime, as: :account_logout
 
   @doc """
@@ -134,6 +134,6 @@ defmodule BeamAgent.Account do
 
   - `{:ok, rate_limit_info}` or `{:error, reason}`.
   """
-  @spec rate_limits(pid()) :: {:ok, term()} | {:error, term()}
+  @spec rate_limits(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate rate_limits(session), to: :beam_agent_runtime, as: :account_rate_limits
 end

@@ -63,7 +63,7 @@ defmodule BeamAgent.Apps do
     and `:status` (atom such as `:active` or `:archived`).
   - `{:error, reason}` on failure.
   """
-  @spec list(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec list(pid()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
   defdelegate list(session), to: :beam_agent_runtime, as: :apps_list
 
   @doc """
@@ -87,7 +87,7 @@ defmodule BeamAgent.Apps do
     and `:status` (atom).
   - `{:error, reason}` on failure.
   """
-  @spec list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec list(pid(), map()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
   defdelegate list(session, opts), to: :beam_agent_runtime, as: :apps_list
 
   @doc """
@@ -109,7 +109,7 @@ defmodule BeamAgent.Apps do
     and `:config` (map of project-level configuration).
   - `{:error, reason}` on failure.
   """
-  @spec info(pid()) :: {:ok, map()} | {:error, term()}
+  @spec info(pid()) :: {:ok, :beam_agent_runtime.app_entry()} | {:error, :no_app | term()}
   defdelegate info(session), to: :beam_agent_runtime, as: :app_info
 
   @doc """
@@ -130,7 +130,7 @@ defmodule BeamAgent.Apps do
   - `{:ok, result_map}` with the initialized project context.
   - `{:error, reason}` on failure.
   """
-  @spec init(pid()) :: {:ok, map()} | {:error, term()}
+  @spec init(pid()) :: {:ok, :beam_agent_runtime.app_entry()} | {:error, term()}
   defdelegate init(session), to: :beam_agent_runtime, as: :app_init
 
   @doc """
@@ -173,10 +173,9 @@ defmodule BeamAgent.Apps do
 
   ## Returns
 
-  - `{:ok, modes}` where `modes` is a list of mode maps, each describing
-    a named configuration preset with its settings.
+  - `{:ok, modes}` where `modes` is a list of mode name binaries.
   - `{:error, reason}` on failure.
   """
-  @spec modes(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec modes(pid()) :: {:ok, [binary()]} | {:error, term()}
   defdelegate modes(session), to: :beam_agent_runtime, as: :app_modes
 end

@@ -43,6 +43,17 @@ defmodule BeamAgent.SlashCommands do
   See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Skills`.
   """
 
+  @typedoc "A slash command definition stored in the global registry."
+  @type command_def() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:handler) => (map() -> {:ok, map()} | {:error, term()}),
+          optional(:config) => map()
+        }
+
   @doc """
   Create the global registry ETS table. Idempotent.
   """
@@ -69,13 +80,13 @@ defmodule BeamAgent.SlashCommands do
   @doc """
   Fetch a single slash command by id.
   """
-  @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
+  @spec get(binary()) :: {:ok, command_def()} | {:error, :not_found}
   defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_command
 
   @doc """
   List all registered slash commands.
   """
-  @spec list() :: [map()]
+  @spec list() :: [command_def()]
   defdelegate list(), to: :beam_agent_catalog, as: :registered_commands
 
   @doc """

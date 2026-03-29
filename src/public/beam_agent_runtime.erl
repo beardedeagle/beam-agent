@@ -472,7 +472,7 @@ Parameters:
 
 Returns {ok, Model} on success or {error, Reason}.
 """.
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, binary()} | {error, not_supported | term()}.
 set_model(Session, Model) -> beam_agent_core:set_model(Session, Model).
 
 -doc """
@@ -486,7 +486,7 @@ Parameters:
 
 Returns {ok, Mode} on success or {error, Reason}.
 """.
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, binary() | map()} | {error, not_supported | term()}.
 set_permission_mode(Session, Mode) -> beam_agent_core:set_permission_mode(Session, Mode).
 
 -doc """
@@ -503,7 +503,7 @@ Parameters:
 Returns ok if the interrupt was sent, or {error, not_supported} if the
 backend does not support interrupts, or {error, Reason} on failure.
 """.
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, no_active_query | not_supported | term()}.
 interrupt(Session) -> beam_agent_core:interrupt(Session).
 
 -doc """
@@ -517,7 +517,7 @@ Parameters:
 
 Returns ok or {error, Reason}.
 """.
--spec abort(pid()) -> ok | {error, term()}.
+-spec abort(pid()) -> ok | {error, not_supported | term()}.
 abort(Session) -> beam_agent_core:abort(Session).
 
 -doc """
@@ -536,7 +536,7 @@ Parameters:
 Returns {ok, Result} on success or {error, not_supported} if the
 backend does not handle this method, or {error, Reason} on failure.
 """.
--spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec send_control(pid(), binary(), map()) -> {ok, map()} | {error, not_supported | term()}.
 send_control(Session, Method, Params) ->
     beam_agent_core:send_control(Session, Method, Params).
 
@@ -561,7 +561,7 @@ Returns {ok, Map} on success, where Map includes keys such as
 status, backend, health, and session_id. Returns {error, Reason}
 if the session is unreachable.
 """.
--spec get_status(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_status(pid() | binary()) -> {ok, map()} | {error, term()}.
 get_status(Session) ->
     beam_agent_core:native_or(Session, get_status, [], fun() ->
         universal_get_status(Session)
@@ -583,7 +583,7 @@ Returns {ok, Map} on success, where Map includes whether the session
 is authenticated, the authentication method, and token expiration if
 applicable. Returns {error, Reason} on failure.
 """.
--spec get_auth_status(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_auth_status(pid() | binary()) -> {ok, map()} | {error, term()}.
 get_auth_status(Session) ->
     beam_agent_core:native_or(Session, get_auth_status, [], fun() ->
         universal_get_auth_status(Session)
@@ -604,7 +604,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, SessionId} where SessionId is typically a binary string,
 or {error, Reason} if the identifier cannot be determined.
 """.
--spec get_last_session_id(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_last_session_id(pid() | binary()) -> {ok, binary()} | {error, term()}.
 get_last_session_id(Session) ->
     beam_agent_core:native_or(Session, get_last_session_id, [], fun() ->
         {ok, beam_agent_core:session_identity(Session)}
@@ -621,7 +621,7 @@ Initiates sandbox configuration for backends that run in a Windows
 environment. On non-Windows platforms the universal fallback returns
 status => not_applicable with the current platform architecture.
 """.
--spec windows_sandbox_setup_start(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec windows_sandbox_setup_start(pid(), map()) -> {ok, map()} | {error, term()}.
 windows_sandbox_setup_start(Session, Opts) ->
     beam_agent_core:native_or(Session, windows_sandbox_setup_start, [Opts], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -638,7 +638,7 @@ internal chain-of-thought before producing a visible response. Higher
 values allow deeper reasoning at the cost of latency and token usage.
 The universal fallback persists this as a configuration value.
 """.
--spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, term()} | {error, term()}.
+-spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, map()} | {error, term()}.
 set_max_thinking_tokens(Session, MaxTokens) ->
     beam_agent_core:native_or(Session, set_max_thinking_tokens, [MaxTokens], fun() ->
         _ = beam_agent_config:config_value_write(
@@ -655,7 +655,7 @@ TaskId identifies the specific task (query or sub-agent invocation)
 to cancel. The universal fallback calls interrupt/1 on the session
 process.
 """.
--spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec stop_task(pid(), binary()) -> {ok, map()} | {error, term()}.
 stop_task(Session, TaskId) ->
     beam_agent_core:native_or(Session, stop_task, [TaskId], fun() ->
         _ = beam_agent_core:interrupt(Session),
@@ -665,31 +665,36 @@ stop_task(Session, TaskId) ->
 
 %%--------------------------------------------------------------------
 %% Account Management
+%%
+%% These fallbacks delegate to beam_agent_account_core rather than
+%% inlining the logic (as app management functions below do) because
+%% account_core is a multi-caller module also used by
+%% beam_agent_session_engine for session cleanup.
 %%--------------------------------------------------------------------
 
 -doc "Initiate an account login flow.".
--spec account_login(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec account_login(pid(), map()) -> {ok, map()} | {error, term()}.
 account_login(Session, Params) ->
     beam_agent_core:native_or(Session, account_login, [Params], fun() ->
         beam_agent_account_core:account_login(Session, Params)
     end).
 
 -doc "Cancel an in-progress account login flow.".
--spec account_cancel(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec account_cancel(pid(), map()) -> {ok, map()} | {error, term()}.
 account_cancel(Session, Params) ->
     beam_agent_core:native_or(Session, account_login_cancel, [Params], fun() ->
         beam_agent_account_core:account_login_cancel(Session, Params)
     end).
 
 -doc "Log out of the current account.".
--spec account_logout(pid()) -> {ok, term()} | {error, term()}.
+-spec account_logout(pid()) -> {ok, map()} | {error, term()}.
 account_logout(Session) ->
     beam_agent_core:native_or(Session, account_logout, [], fun() ->
         beam_agent_account_core:account_logout(Session)
     end).
 
 -doc "Get rate limit information for the current account.".
--spec account_rate_limits(pid()) -> {ok, term()} | {error, term()}.
+-spec account_rate_limits(pid()) -> {ok, map()} | {error, term()}.
 account_rate_limits(Session) ->
     beam_agent_core:native_or(Session, account_rate_limits, [], fun() ->
         account_info(Session)
@@ -707,35 +712,35 @@ account_info(Session) ->
 %%--------------------------------------------------------------------
 
 -doc "List apps and projects registered for a session.".
--spec apps_list(pid()) -> {ok, term()} | {error, term()}.
+-spec apps_list(pid()) -> {ok, [app_entry()]} | {error, term()}.
 apps_list(Session) ->
     beam_agent_core:native_or(Session, apps_list, [], fun() ->
         apps_list_impl(Session)
     end).
 
 -doc "List apps and projects with optional filter criteria.".
--spec apps_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec apps_list(pid(), map()) -> {ok, [app_entry()]} | {error, term()}.
 apps_list(Session, Opts) ->
     beam_agent_core:native_or(Session, apps_list, [Opts], fun() ->
         apps_list_impl(Session, Opts)
     end).
 
 -doc "Return information about the current app or project context.".
--spec app_info(pid()) -> {ok, term()} | {error, term()}.
+-spec app_info(pid()) -> {ok, app_entry()} | {error, no_app | term()}.
 app_info(Session) ->
     beam_agent_core:native_or(Session, app_info, [], fun() ->
         app_info_impl(Session)
     end).
 
 -doc "Initialize the app and project context for a session.".
--spec app_init(pid()) -> {ok, term()} | {error, term()}.
+-spec app_init(pid()) -> {ok, app_entry()} | {error, term()}.
 app_init(Session) ->
     beam_agent_core:native_or(Session, app_init, [], fun() ->
         app_init_impl(Session)
     end).
 
 -doc "Append a log entry to the session's app log.".
--spec app_log(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec app_log(pid(), map()) -> {ok, map()} | {error, term()}.
 app_log(Session, Body) ->
     beam_agent_core:native_or(Session, app_log, [Body], fun() ->
         _ = app_log_impl(Session, Body),
@@ -743,7 +748,7 @@ app_log(Session, Body) ->
     end).
 
 -doc "List available app modes for a session.".
--spec app_modes(pid()) -> {ok, term()} | {error, term()}.
+-spec app_modes(pid()) -> {ok, [binary()]} | {error, term()}.
 app_modes(Session) ->
     beam_agent_core:native_or(Session, app_modes, [], fun() ->
         app_modes_impl(Session)

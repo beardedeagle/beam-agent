@@ -1324,7 +1324,7 @@ Validate a tool definition map.
 Returns `ok` if the tool has required fields (`name`, `inputSchema`),
 or `{error, Reason}` describing what is missing or invalid.
 """.
--spec validate_tool(map()) -> ok | {error, term()}.
+-spec validate_tool(map()) -> ok | {error, {missing_field, inputSchema | name} | {missing_fields, [name | inputSchema]}}.
 validate_tool(#{name := Name, inputSchema := Schema})
   when is_binary(Name), is_map(Schema) ->
     ok;
@@ -1341,7 +1341,7 @@ Validate a resource definition map.
 Returns `ok` if the resource has required fields (`uri`, `name`),
 or `{error, Reason}`.
 """.
--spec validate_resource(map()) -> ok | {error, term()}.
+-spec validate_resource(map()) -> ok | {error, {missing_field, name | uri} | {missing_fields, [uri | name]}}.
 validate_resource(#{uri := Uri, name := Name})
   when is_binary(Uri), is_binary(Name) ->
     ok;
@@ -1358,7 +1358,7 @@ Validate a prompt definition map.
 Returns `ok` if the prompt has the required `name` field,
 or `{error, Reason}`.
 """.
--spec validate_prompt(map()) -> ok | {error, term()}.
+-spec validate_prompt(map()) -> ok | {error, {missing_field, name}}.
 validate_prompt(#{name := Name}) when is_binary(Name) ->
     ok;
 validate_prompt(_) ->

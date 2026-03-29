@@ -54,19 +54,8 @@ defmodule BeamAgent.Audit do
   defdelegate list_events(), to: :beam_agent_journal
 
   @spec list_events(audit_filter()) ::
-          {:ok, [listed_audit_event()]}
-          | {:error,
-             {:invalid_filter,
-              :event_id
-              | :event_type
-              | :limit
-              | :run_id
-              | :session_id
-              | :since
-              | :tag
-              | :thread_id}
-             | {:unsupported_audit_filter, atom()}
-             | {:unsupported_audit_scope_key, atom()}}
+          {:ok, [:beam_agent_journal.audit_event()]}
+          | {:error, term()}
   defdelegate list_events(filter), to: :beam_agent_journal
 
   @spec get_event(binary()) :: {:ok, audit_event()} | {:error, :not_found}

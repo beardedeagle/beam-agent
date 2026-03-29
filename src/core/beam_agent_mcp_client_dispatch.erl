@@ -319,7 +319,7 @@ Accepts any current lifecycle state. Stores `Reason` for later retrieval
 via `error_info/1`. The owning process should call this when an
 unrecoverable error is detected (e.g. auth failure, protocol mismatch).
 """.
--spec mark_error(term(), client_state()) -> client_state().
+-spec mark_error(binary() | map() | atom(), client_state()) -> client_state().
 mark_error(Reason, State) ->
     State#{lifecycle => error, error_info => Reason}.
 
@@ -333,7 +333,7 @@ Stores `Reason` for later retrieval via `error_info/1`.
 Raises `{invalid_disconnect, Lifecycle}` if called from `uninitialized`,
 `error`, or `shutting_down`.
 """.
--spec mark_disconnected(term(), client_state()) -> client_state().
+-spec mark_disconnected(binary() | map() | atom(), client_state()) -> client_state().
 mark_disconnected(Reason, #{lifecycle := ready} = State) ->
     State#{lifecycle => disconnected, error_info => Reason};
 mark_disconnected(Reason, #{lifecycle := initializing} = State) ->
@@ -378,7 +378,7 @@ was called.
 
 Returns `undefined` if the client is not in `error` or `disconnected` state.
 """.
--spec error_info(client_state()) -> term() | undefined.
+-spec error_info(client_state()) -> binary() | map() | atom() | undefined.
 error_info(#{error_info := Reason, lifecycle := Lifecycle})
   when Lifecycle =:= error; Lifecycle =:= disconnected -> Reason;
 error_info(_State) -> undefined.
@@ -769,7 +769,7 @@ max_pending(#{max_pending := Max}) -> Max.
 %% Internal: Response Handling
 %%--------------------------------------------------------------------
 
--spec handle_response(beam_agent_mcp_protocol:request_id(), term(),
+-spec handle_response(beam_agent_mcp_protocol:request_id(), map(),
                       client_state()) -> client_result().
 handle_response(Id, Result, #{pending := Pending} = State) ->
     case maps:take(Id, Pending) of

@@ -69,7 +69,7 @@ defmodule BeamAgent.File do
         IO.puts("\#{m.path}:\#{m.line}: \#{m.content}")
       end
   """
-  @spec find_text(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_text(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_text(session, pattern), to: :beam_agent_catalog
 
   @doc """
@@ -92,7 +92,7 @@ defmodule BeamAgent.File do
       {:ok, files} = BeamAgent.File.find_files(session, %{pattern: "*.erl"})
       for f <- files, do: IO.puts(f.path)
   """
-  @spec find_files(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_files(pid(), map()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
   defdelegate find_files(session, opts), to: :beam_agent_catalog
 
   @doc """
@@ -111,7 +111,7 @@ defmodule BeamAgent.File do
 
   - `{:ok, symbols}` or `{:error, reason}`.
   """
-  @spec find_symbols(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec find_symbols(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_symbols(session, query), to: :beam_agent_catalog
 
   @doc """
@@ -131,14 +131,14 @@ defmodule BeamAgent.File do
 
   - `{:ok, entries}` or `{:error, reason}`.
   """
-  @spec list(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  @spec list(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
   defdelegate list(session, path), to: :beam_agent_catalog, as: :file_list
 
   @doc """
   Read the contents of a file at the given path.
 
-  Returns the file content as a binary. `path` is resolved relative to
-  the session's working directory when it is not absolute.
+  Returns a map with `:path` and `:content` keys. `path` is resolved
+  relative to the session's working directory when it is not absolute.
 
   ## Parameters
 
@@ -147,9 +147,9 @@ defmodule BeamAgent.File do
 
   ## Returns
 
-  - `{:ok, content}` or `{:error, :enoent}` if the file does not exist.
+  - `{:ok, %{path: path, content: content}}` or `{:error, :enoent}` if the file does not exist.
   """
-  @spec read(pid(), binary()) :: {:ok, binary()} | {:error, :enoent | term()}
+  @spec read(pid(), binary()) :: {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
   defdelegate read(session, path), to: :beam_agent_catalog, as: :file_read
 
   @doc """
@@ -164,8 +164,10 @@ defmodule BeamAgent.File do
 
   ## Returns
 
-  - `{:ok, status}` or `{:error, reason}`.
+  - `{:ok, %{cwd: cwd, source: source, files: files}}` or `{:error, reason}`.
   """
-  @spec status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec status(pid()) ::
+          {:ok, %{cwd: binary(), source: :git | :filesystem, files: [map()]}}
+          | {:error, term()}
   defdelegate status(session), to: :beam_agent_catalog, as: :file_status
 end

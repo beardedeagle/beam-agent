@@ -77,7 +77,7 @@ Crashes with `function_clause` for unrecognised signal atoms (fail-fast).
 ok = beam_agent_os_signal:send_signal(sigint, OsPid)
 ```
 """.
--spec send_signal(signal(), pos_integer()) -> ok | {error, term()}.
+-spec send_signal(signal(), pos_integer()) -> ok | {error, kill_not_found | {invalid_pid, term()} | {signal_failed, non_neg_integer()} | {port_error, term()}}.
 send_signal(Signal, OsPid) when is_integer(OsPid), OsPid > 0 ->
     SigFlag = signal_flag(Signal),
     PidStr = integer_to_list(OsPid),

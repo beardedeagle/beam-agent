@@ -30,8 +30,11 @@ defmodule BeamAgent.SensitiveKeys do
   Delegates to `:beam_agent_redaction` (Erlang).
   """
 
+  @typedoc "A sensitive key triple as defined in `:beam_agent_redaction`: `{name, category, handling}`."
+  @type key_entry() :: :beam_agent_redaction.key_entry()
+
   @doc "Return the canonical list of sensitive key triples."
-  @spec all() :: [{atom(), atom(), atom()}]
+  @spec all() :: [key_entry(), ...]
   defdelegate all(), to: :beam_agent_redaction
 
   @doc """

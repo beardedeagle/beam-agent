@@ -527,7 +527,7 @@ Parameters:
 
 Returns {ok, ok} on success or {error, bad_ref} if the reference is invalid.
 """.
--spec event_unsubscribe(pid() | binary(), reference()) -> {ok, term()} | {error, term()}.
+-spec event_unsubscribe(pid() | binary(), reference()) -> {ok, ok} | {error, bad_ref | term()}.
 event_unsubscribe(Session, Ref) ->
     beam_agent_core:native_or(Session, event_unsubscribe, [Ref], fun() ->
         beam_agent_events:unsubscribe(beam_agent_core:session_identity(Session), Ref)
@@ -589,7 +589,7 @@ Sends a model-change request through the session engine to the backend
 handler. Returns `{ok, Model}` on success or `{error, Reason}` if the
 backend does not support runtime model switching.
 """.
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, binary()} | {error, term()}.
 set_model(Session, Model) -> beam_agent_core:set_model(Session, Model).
 
 -doc """
@@ -599,7 +599,7 @@ Sends a permission-mode-change request through the session engine to the
 backend handler. Returns `{ok, Mode}` on success or `{error, Reason}` if
 the backend does not support runtime permission mode changes.
 """.
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, binary() | map()} | {error, term()}.
 set_permission_mode(Session, Mode) ->
     beam_agent_core:set_permission_mode(Session, Mode).
 
