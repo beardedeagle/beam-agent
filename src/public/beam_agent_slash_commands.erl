@@ -2,9 +2,10 @@
 -moduledoc """
 Public API for global slash command management.
 
-This module delegates to `beam_agent_slash_registry` for all operations.
-Slash commands are registered globally and shared across all sessions.
-Mutations notify the reload bus so live sessions react without restart.
+This module delegates to `beam_agent_registry` (kind = `slash`) for all
+operations. Slash commands are registered globally and shared across all
+sessions. Mutations notify the reload bus so live sessions react without
+restart.
 
 This module is a pure delegation layer — it holds no state, no processes,
 and no side effects.
@@ -19,27 +20,27 @@ and no side effects.
     clear/0
 ]).
 
--doc "Create the global slash commands ETS table. Idempotent.".
+-doc "Create the registry ETS table. Idempotent.".
 -spec ensure_table() -> ok.
-ensure_table() -> beam_agent_slash_registry:ensure_table().
+ensure_table() -> beam_agent_registry:ensure_table().
 
 -doc "Register a slash command globally.".
 -spec register(binary(), map()) -> ok.
-register(Id, Opts) -> beam_agent_slash_registry:register(Id, Opts).
+register(Id, Opts) -> beam_agent_registry:register(slash, Id, Opts).
 
 -doc "Unregister a slash command by id. Idempotent.".
 -spec unregister(binary()) -> ok.
-unregister(Id) -> beam_agent_slash_registry:unregister(Id).
+unregister(Id) -> beam_agent_registry:unregister(slash, Id).
 
 -doc "Fetch a single slash command by id.".
 -spec get(binary()) ->
-    {ok, beam_agent_slash_registry:command_def()} | {error, not_found}.
-get(Id) -> beam_agent_slash_registry:get(Id).
+    {ok, beam_agent_registry:command_def()} | {error, not_found}.
+get(Id) -> beam_agent_registry:get(slash, Id).
 
 -doc "List all registered slash commands.".
--spec list() -> [beam_agent_slash_registry:command_def()].
-list() -> beam_agent_slash_registry:list().
+-spec list() -> [beam_agent_registry:command_def()].
+list() -> beam_agent_registry:list(slash).
 
 -doc "Remove all registered slash commands.".
 -spec clear() -> ok.
-clear() -> beam_agent_slash_registry:clear().
+clear() -> beam_agent_registry:clear(slash).

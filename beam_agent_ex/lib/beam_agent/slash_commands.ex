@@ -37,8 +37,8 @@ defmodule BeamAgent.SlashCommands do
   This module is a thin Elixir facade that `defdelegate`s every call to the
   Erlang `:beam_agent_slash_commands` module. Zero business logic, zero state,
   zero processes live here -- the Erlang module owns the implementation. The
-  underlying command data is stored in ETS tables managed by
-  `:beam_agent_slash_registry`.
+  underlying command data is stored in the unified ETS table managed by
+  `:beam_agent_registry`.
 
   See also: `BeamAgent`, `BeamAgent.Skills`, `BeamAgent.Plugins`.
   """

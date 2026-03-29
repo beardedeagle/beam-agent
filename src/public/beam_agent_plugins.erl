@@ -2,9 +2,9 @@
 -moduledoc """
 Public API for global plugin management.
 
-This module delegates to `beam_agent_plugin_registry` for all operations.
-Plugins are registered globally and shared across all sessions. Mutations
-notify the reload bus so live sessions react without restart.
+This module delegates to `beam_agent_registry` (kind = `plugin`) for all
+operations. Plugins are registered globally and shared across all sessions.
+Mutations notify the reload bus so live sessions react without restart.
 
 This module is a pure delegation layer — it holds no state, no processes,
 and no side effects.
@@ -19,27 +19,27 @@ and no side effects.
     clear/0
 ]).
 
--doc "Create the global plugins ETS table. Idempotent.".
+-doc "Create the registry ETS table. Idempotent.".
 -spec ensure_table() -> ok.
-ensure_table() -> beam_agent_plugin_registry:ensure_table().
+ensure_table() -> beam_agent_registry:ensure_table().
 
 -doc "Register a plugin globally.".
 -spec register(binary(), map()) -> ok.
-register(Id, Opts) -> beam_agent_plugin_registry:register(Id, Opts).
+register(Id, Opts) -> beam_agent_registry:register(plugin, Id, Opts).
 
 -doc "Unregister a plugin by id. Idempotent.".
 -spec unregister(binary()) -> ok.
-unregister(Id) -> beam_agent_plugin_registry:unregister(Id).
+unregister(Id) -> beam_agent_registry:unregister(plugin, Id).
 
 -doc "Fetch a single plugin by id.".
 -spec get(binary()) ->
-    {ok, beam_agent_plugin_registry:plugin_def()} | {error, not_found}.
-get(Id) -> beam_agent_plugin_registry:get(Id).
+    {ok, beam_agent_registry:plugin_def()} | {error, not_found}.
+get(Id) -> beam_agent_registry:get(plugin, Id).
 
 -doc "List all registered plugins.".
--spec list() -> [beam_agent_plugin_registry:plugin_def()].
-list() -> beam_agent_plugin_registry:list().
+-spec list() -> [beam_agent_registry:plugin_def()].
+list() -> beam_agent_registry:list(plugin).
 
 -doc "Remove all registered plugins.".
 -spec clear() -> ok.
-clear() -> beam_agent_plugin_registry:clear().
+clear() -> beam_agent_registry:clear(plugin).

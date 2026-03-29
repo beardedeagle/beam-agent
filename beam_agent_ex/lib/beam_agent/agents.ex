@@ -37,8 +37,8 @@ defmodule BeamAgent.Agents do
   This module is a thin Elixir facade that `defdelegate`s every call to the
   Erlang `:beam_agent_agents` module. Zero business logic, zero state, zero
   processes live here -- the Erlang module owns the implementation. The
-  underlying agent type data is stored in ETS tables managed by
-  `:beam_agent_agent_registry`.
+  underlying agent type data is stored in the unified ETS table managed by
+  `:beam_agent_registry`.
 
   See also: `BeamAgent`, `BeamAgent.Skills`, `BeamAgent.Plugins`.
   """
