@@ -2,6 +2,10 @@
 -moduledoc """
 Symmetric encryption for sensitive credential fields.
 
+The set of keys requiring encryption is defined centrally in
+`beam_agent_sensitive_keys' — this module encrypts all keys with
+`encrypt_and_redact' handling via `credential_match_keys/0'.
+
 Uses AES-256-GCM with a per-node key derived from the BEAM node cookie
 via HKDF-SHA256 (RFC 5869). HKDF-Extract produces a pseudorandom key
 from the cookie and a fixed salt, then HKDF-Expand stretches it to the
@@ -63,15 +67,6 @@ prevent accidental exposure in logs, crash dumps, and admin UIs.
 -define(KDF_SALT, <<"beam_agent_credential_v1">>).
 -define(KDF_INFO, <<"aes-256-gcm-key">>).
 
--define(SENSITIVE_KEYS, [api_key, <<"apiKey">>, <<"api_key">>,
-                         token, <<"token">>,
-                         access_token, <<"accessToken">>, <<"access_token">>,
-                         refresh_token, <<"refreshToken">>, <<"refresh_token">>,
-                         client_secret, <<"clientSecret">>, <<"client_secret">>,
-                         secret, <<"secret">>,
-                         password, <<"password">>,
-                         private_key, <<"privateKey">>, <<"private_key">>,
-                         github_token, <<"githubToken">>, <<"github_token">>]).
 
 %%--------------------------------------------------------------------
 %% Public API
@@ -274,7 +269,7 @@ do_derive(Cookie) ->
 
 -spec is_sensitive(term()) -> boolean().
 is_sensitive(Key) ->
-    lists:member(Key, ?SENSITIVE_KEYS).
+    lists:member(Key, beam_agent_sensitive_keys:credential_match_keys()).
 
 -spec encrypt_map(map(), binary()) -> map().
 encrypt_map(Map, Key) when is_map(Map), is_binary(Key) ->

@@ -66,26 +66,8 @@ redact_term(Value, _Path) ->
 
 -spec is_sensitive_key_path([binary(), ...]) -> boolean().
 is_sensitive_key_path([Current | Ancestors]) ->
-    lists:member(Current, [
-        <<"accesstoken">>,
-        <<"apikey">>,
-        <<"authorization">>,
-        <<"authorizationcode">>,
-        <<"bearertoken">>,
-        <<"clientsecret">>,
-        <<"codeverifier">>,
-        <<"credentialkey">>,
-        <<"githubtoken">>,
-        <<"idtoken">>,
-        <<"oauthtoken">>,
-        <<"password">>,
-        <<"personaltoken">>,
-        <<"privatekey">>,
-        <<"refreshtoken">>,
-        <<"secret">>,
-        <<"sessiontoken">>,
-        <<"token">>
-    ]) orelse
+    lists:member(Current, beam_agent_sensitive_keys:redaction_match_keys()) orelse
+        %% Context-dependent: "code" is sensitive only under oauthcallback.
         (Current =:= <<"code">> andalso lists:member(<<"oauthcallback">>, Ancestors)).
 
 -spec canonical_key(term()) -> binary().
