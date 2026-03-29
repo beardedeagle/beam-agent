@@ -56,7 +56,7 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
     files := [file_snapshot()]
 }.
 
--define(CHECKPOINTS_TABLE, beam_agent_checkpoints).
+-define(TABLE, beam_agent_runtime).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -65,14 +65,13 @@ ok = beam_agent_checkpoint_core:rewind(SessionId, UUID)
 -doc "Ensure the checkpoints ETS table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?CHECKPOINTS_TABLE, [set, named_table,
-        {read_concurrency, true}]).
+    beam_agent_runtime:app_ensure_tables().
 
 -doc "Clear all checkpoint data.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?CHECKPOINTS_TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{checkpoint, '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -97,8 +96,8 @@ snapshot(SessionId, UUID, FilePaths)
         created_at => Now,
         files => Files
     },
-    Key = {SessionId, UUID},
-    beam_agent_ets:insert(?CHECKPOINTS_TABLE, {Key, Checkpoint}),
+    Key = {checkpoint, {SessionId, UUID}},
+    beam_agent_ets:insert(?TABLE, {Key, Checkpoint}),
     {ok, Checkpoint}.
 
 -doc """
@@ -112,8 +111,8 @@ exist at checkpoint time.
 rewind(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
     ensure_tables(),
-    Key = {SessionId, UUID},
-    case ets:lookup(?CHECKPOINTS_TABLE, Key) of
+    Key = {checkpoint, {SessionId, UUID}},
+    case ets:lookup(?TABLE, Key) of
         [{_, #{files := Files}}] ->
             restore_files(Files);
         [] ->
@@ -125,11 +124,11 @@ rewind(SessionId, UUID)
 list_checkpoints(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
     Checkpoints = ets:foldl(fun
-        ({{SId, _}, CP}, Acc) when SId =:= SessionId ->
+        ({{checkpoint, {SId, _}}, CP}, Acc) when SId =:= SessionId ->
             [CP | Acc];
         (_, Acc) ->
             Acc
-    end, [], ?CHECKPOINTS_TABLE),
+    end, [], ?TABLE),
     Sorted = lists:sort(fun(A, B) ->
         maps:get(created_at, A, 0) >= maps:get(created_at, B, 0)
     end, Checkpoints),
@@ -141,8 +140,8 @@ list_checkpoints(SessionId) when is_binary(SessionId) ->
 get_checkpoint(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
     ensure_tables(),
-    Key = {SessionId, UUID},
-    case ets:lookup(?CHECKPOINTS_TABLE, Key) of
+    Key = {checkpoint, {SessionId, UUID}},
+    case ets:lookup(?TABLE, Key) of
         [{_, CP}] -> {ok, CP};
         [] -> {error, not_found}
     end.
@@ -152,8 +151,8 @@ get_checkpoint(SessionId, UUID)
 delete_checkpoint(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
     ensure_tables(),
-    Key = {SessionId, UUID},
-    beam_agent_ets:delete(?CHECKPOINTS_TABLE, Key),
+    Key = {checkpoint, {SessionId, UUID}},
+    beam_agent_ets:delete(?TABLE, Key),
     ok.
 
 %%--------------------------------------------------------------------
@@ -208,7 +207,7 @@ snapshot_file(Path) when is_binary(Path) ->
               existed => false, permissions => undefined}
     end.
 
--spec restore_files([file_snapshot()]) -> ok | {error, term()}.
+-spec restore_files([file_snapshot()]) -> ok | {error, {restore_failed, binary(), file:posix()}}.
 restore_files([]) ->
     ok;
 restore_files([#{path := Path, existed := false} | Rest]) ->

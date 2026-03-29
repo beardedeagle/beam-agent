@@ -34,20 +34,31 @@ defmodule BeamAgent.SlashCommands do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_slash_commands` module. Zero business logic, zero state,
-  zero processes live here -- the Erlang module owns the implementation. The
-  underlying command data is stored in ETS tables managed by
-  `:beam_agent_slash_registry`.
+  This module is a thin Elixir facade that delegates every call to the
+  `:beam_agent_catalog` Erlang module's global registry functions. Zero
+  business logic, zero state, zero processes live here -- the Erlang module
+  owns the implementation. The underlying command data is stored in the
+  unified ETS table managed by `:beam_agent_registry`.
 
-  See also: `BeamAgent`, `BeamAgent.Skills`, `BeamAgent.Plugins`.
+  See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Skills`.
   """
+
+  @typedoc "A slash command definition stored in the global registry."
+  @type command_def() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:handler) => (map() -> {:ok, map()} | {:error, term()}),
+          optional(:config) => map()
+        }
 
   @doc """
-  Create the global slash commands ETS table. Idempotent.
+  Create the global registry ETS table. Idempotent.
   """
   @spec ensure_table() :: :ok
-  defdelegate ensure_table(), to: :beam_agent_slash_commands
+  defdelegate ensure_table(), to: :beam_agent_catalog, as: :ensure_registry
 
   @doc """
   Register a slash command globally (shared across all sessions).
@@ -58,29 +69,29 @@ defmodule BeamAgent.SlashCommands do
   - `opts` -- map of command options (`:name`, `:description`, `:handler`, `:enabled`, `:config`).
   """
   @spec register(binary(), map()) :: :ok
-  defdelegate register(id, opts), to: :beam_agent_slash_commands
+  defdelegate register(id, opts), to: :beam_agent_catalog, as: :register_command
 
   @doc """
   Unregister a slash command by id. Idempotent.
   """
   @spec unregister(binary()) :: :ok
-  defdelegate unregister(id), to: :beam_agent_slash_commands
+  defdelegate unregister(id), to: :beam_agent_catalog, as: :unregister_command
 
   @doc """
   Fetch a single slash command by id.
   """
-  @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
-  defdelegate get(id), to: :beam_agent_slash_commands
+  @spec get(binary()) :: {:ok, command_def()} | {:error, :not_found}
+  defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_command
 
   @doc """
   List all registered slash commands.
   """
-  @spec list() :: [map()]
-  defdelegate list(), to: :beam_agent_slash_commands
+  @spec list() :: [command_def()]
+  defdelegate list(), to: :beam_agent_catalog, as: :registered_commands
 
   @doc """
   Remove all registered slash commands.
   """
   @spec clear() :: :ok
-  defdelegate clear(), to: :beam_agent_slash_commands
+  defdelegate clear(), to: :beam_agent_catalog, as: :clear_registered_commands
 end

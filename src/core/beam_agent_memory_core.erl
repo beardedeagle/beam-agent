@@ -41,7 +41,13 @@ such as MonkeyClaw.
     memory_input/0,
     update_input/0,
     memory_filter/0,
-    memory_record/0
+    memory_record/0,
+    scope_error/0,
+    memory_field/0,
+    memory_input_error/0,
+    memory_update_error/0,
+    memory_filter_error/0,
+    memory_operation/0
 ]).
 
 -type scope() :: beam_agent_memory_store:scope().
@@ -55,6 +61,24 @@ such as MonkeyClaw.
         pinned | run_id | session_id | since | source_ref_id |
         source_ref_type | thread_id}
   | {invalid_scope, memory_id | run_id | session_id | source_ref_id | thread_id}.
+-type scope_error() ::
+    invalid_scope
+  | inconsistent_scope
+  | inconsistent_run_scope
+  | inconsistent_artifact_scope
+  | run_not_found
+  | artifact_not_found
+  | session_id_required_for_thread
+  | {invalid_scope, memory_id | run_id | session_id | source_ref_id | thread_id}.
+-type memory_field() :: attributes | content | kind | memory_id | pinned | salience | source_refs | ttl.
+-type memory_input_error() ::
+    {invalid_memory, memory_field()}
+  | {policy_denied, binary()}
+  | scope_error().
+-type memory_update_error() ::
+    not_found
+  | {immutable_field, memory_id | scope | created_at}
+  | {invalid_memory, memory_field()}.
 -type normalized_memory_input() :: #{
     kind := memory_kind(),
     content := term(),
@@ -125,7 +149,7 @@ clear() ->
 
 -doc "Remember content with embedded or explicit kind on a scope.".
 -spec remember(binary() | scope(), memory_input()) ->
-    {ok, memory_record()} | {error, term()}.
+    {ok, memory_record()} | {error, memory_input_error()}.
 remember(ScopeInput, MemoryInput) ->
     TeleMeta = maps:merge(telemetry_scope_meta(ScopeInput),
         telemetry_memory_request_meta(MemoryInput)),
@@ -141,7 +165,7 @@ remember(ScopeInput, MemoryInput) ->
 
 -doc "Remember content with an explicit kind on a scope.".
 -spec remember(binary() | scope(), memory_kind(), memory_input()) ->
-    {ok, memory_record()} | {error, term()}.
+    {ok, memory_record()} | {error, memory_input_error()}.
 remember(ScopeInput, Kind, MemoryInput) when is_atom(Kind); is_binary(Kind) ->
     TeleMeta = maps:merge(telemetry_scope_meta(ScopeInput),
         (telemetry_memory_request_meta(MemoryInput))#{requested_kind => Kind}),
@@ -179,7 +203,7 @@ list() ->
     list(#{}).
 
 -doc "List memories with exact-match filters and optional visibility controls.".
--spec list(memory_filter()) -> {ok, [memory_record()]} | {error, term()}.
+-spec list(memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
 list(FilterInput) when is_map(FilterInput) ->
     TeleMeta = telemetry_filter_meta(FilterInput),
     StartTime = telemetry_start(list, TeleMeta),
@@ -192,13 +216,13 @@ list(FilterInput) when is_map(FilterInput) ->
                     Result
             end;
         {error, _} = Error ->
-            telemetry_exception(list, Error, TeleMeta),
+            telemetry_finish(list, StartTime, Error, TeleMeta),
             Error
     end.
 
 -doc "Recall memories for a scope using lexical search.".
 -spec recall(binary() | scope(), binary()) ->
-    {ok, [memory_record()]} | {error, term()}.
+    {ok, [memory_record()]} | {error, scope_error() | memory_filter_error()}.
 recall(ScopeInput, Query) when is_binary(Query) ->
     case normalize_scope_filter(ScopeInput) of
         {ok, ScopeFilter} ->
@@ -208,13 +232,12 @@ recall(ScopeInput, Query) when is_binary(Query) ->
     end.
 
 -doc "Search memories across all scopes.".
--spec search(binary()) -> {ok, [memory_record()]} | {error, term()}.
+-spec search(binary()) -> {ok, [memory_record()]}.
 search(Query) when is_binary(Query) ->
     search(Query, #{}).
 
 -doc "Search memories with a lexical query plus exact-match filters.".
--spec search(binary(), memory_filter()) ->
-    {ok, [memory_record()]} | {error, term()}.
+-spec search(binary(), memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
 search(Query, FilterInput) when is_binary(Query), is_map(FilterInput) ->
     TeleMeta = (telemetry_filter_meta(FilterInput))#{
         query_length => byte_size(Query),
@@ -230,7 +253,7 @@ search(Query, FilterInput) when is_binary(Query), is_map(FilterInput) ->
                     Result
             end;
         {error, _} = Error ->
-            telemetry_exception(search, Error, TeleMeta),
+            telemetry_finish(search, StartTime, Error, TeleMeta),
             Error
     end.
 
@@ -268,7 +291,7 @@ When `ttl` is updated, `expires_at` is automatically recalculated from the
 current time. The `updated_at` timestamp is always refreshed.
 """.
 -spec update(binary(), update_input()) ->
-    {ok, memory_record()} | {error, not_found | {immutable_field, atom()} | term()}.
+    {ok, memory_record()} | {error, memory_update_error()}.
 update(MemoryId, Changes) when is_binary(MemoryId), is_map(Changes) ->
     StartTime = telemetry_start(update, #{memory_id => MemoryId}),
     case reject_immutable_fields(Changes) of
@@ -313,12 +336,11 @@ expire() ->
     expire(#{}).
 
 -doc "Expire currently expired, unpinned memories matching a filter.".
--spec expire(memory_filter()) ->
-    {ok, non_neg_integer()} | {error, memory_filter_error()}.
+-spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, memory_filter_error()}.
 expire(FilterInput) when is_map(FilterInput) ->
     TeleMeta = telemetry_filter_meta(FilterInput),
     StartTime = telemetry_start(expire, TeleMeta),
-    Result = case normalize_filter(FilterInput) of
+    case normalize_filter(FilterInput) of
         {ok, Normalized} ->
             Now = maps:get(before, Normalized, current_time_ms()),
             BaseFilter = maps:remove(before, maps:remove(limit, Normalized)),
@@ -332,17 +354,12 @@ expire(FilterInput) when is_map(FilterInput) ->
                 }),
                 ok = audit_memory_event(expired, Memory, #{before => Now})
             end, Expirable),
-            {ok, length(Expirable)};
-        {error, _} = Error ->
-            Error
-    end,
-    case Result of
-        {ok, Count} ->
-            telemetry_stop(expire, StartTime, TeleMeta#{expired_count => Count}),
+            Result = {ok, length(Expirable)},
+            telemetry_stop(expire, StartTime, TeleMeta#{expired_count => length(Expirable)}),
             Result;
-        {error, _} = ErrorResult ->
-            telemetry_exception(expire, ErrorResult, TeleMeta),
-            ErrorResult
+        {error, _} = Error ->
+            telemetry_finish(expire, StartTime, Error, TeleMeta),
+            Error
     end.
 
 %%--------------------------------------------------------------------
@@ -350,7 +367,7 @@ expire(FilterInput) when is_map(FilterInput) ->
 %%--------------------------------------------------------------------
 
 -spec remember_normalized(binary() | scope(), scope(), normalized_memory_input()) ->
-    {ok, memory_record()} | {error, term()}.
+    {ok, memory_record()} | {error, memory_input_error()}.
 remember_normalized(ScopeInput, EmbeddedScope, Input) ->
     case normalize_scope_input(ScopeInput) of
         {ok, ExplicitScope} ->
@@ -476,11 +493,11 @@ reject_immutable_fields(Changes) ->
         [First | _] -> {error, {immutable_field, First}}
     end.
 
--spec validate_update_fields(map()) -> ok | {error, term()}.
+-spec validate_update_fields(map()) -> ok | {error, {invalid_memory, memory_field()}}.
 validate_update_fields(Changes) ->
     validate_update_fields_iter(maps:to_list(Changes)).
 
--spec validate_update_fields_iter([{atom(), term()}]) -> ok | {error, term()}.
+-spec validate_update_fields_iter([{atom(), term()}]) -> ok | {error, {invalid_memory, memory_field()}}.
 validate_update_fields_iter([]) ->
     ok;
 validate_update_fields_iter([{kind, Value} | Rest]) ->
@@ -548,7 +565,7 @@ recalc_expires_at(#{ttl := infinity} = Memory, _Now) ->
 recalc_expires_at(#{ttl := Ttl} = Memory, Now) when is_integer(Ttl), Ttl >= 0 ->
     Memory#{expires_at => Now + Ttl}.
 
--spec normalize_scope_input(binary() | scope()) -> {ok, scope()} | {error, term()}.
+-spec normalize_scope_input(binary() | scope()) -> {ok, scope()} | {error, scope_error()}.
 normalize_scope_input(SessionId) when is_binary(SessionId) ->
     {ok, #{session_id => SessionId}};
 normalize_scope_input(Scope) when is_map(Scope) ->
@@ -578,7 +595,7 @@ normalize_scope_input(Scope) when is_map(Scope) ->
 normalize_scope_input(_) ->
     {error, invalid_scope}.
 
--spec normalize_scope_filter(binary() | scope()) -> {ok, memory_filter()} | {error, term()}.
+-spec normalize_scope_filter(binary() | scope()) -> {ok, memory_filter()} | {error, scope_error()}.
 normalize_scope_filter(ScopeInput) ->
     case normalize_scope_input(ScopeInput) of
         {ok, Scope} ->
@@ -588,7 +605,7 @@ normalize_scope_filter(ScopeInput) ->
     end.
 
 -spec normalize_memory_input(memory_kind() | undefined, memory_input()) ->
-    {ok, map(), scope()} | {error, term()}.
+    {ok, map(), scope()} | {error, memory_input_error()}.
 normalize_memory_input(KindOverride, Input) when is_binary(Input) ->
     normalize_memory_input(KindOverride, #{content => Input});
 normalize_memory_input(KindOverride, Input) when is_map(Input) ->
@@ -603,7 +620,7 @@ normalize_memory_input(KindOverride, Input) when is_map(Input) ->
     end.
 
 -spec do_normalize_memory_input(memory_kind() | undefined, map(), scope()) ->
-    {ok, normalized_memory_input(), scope()} | {error, term()}.
+    {ok, normalized_memory_input(), scope()} | {error, {invalid_memory, memory_field()}}.
 do_normalize_memory_input(KindOverride, Input, EmbeddedScope) ->
     case normalize_memory_id(maps:get(memory_id, Input, undefined)) of
         {ok, MemoryId} ->
@@ -694,7 +711,7 @@ normalize_attributes(Attributes) when is_map(Attributes) ->
 normalize_attributes(_Other) ->
     {error, {invalid_memory, attributes}}.
 
--spec normalize_source_refs(term()) -> {ok, [source_ref()]} | {error, term()}.
+-spec normalize_source_refs(term()) -> {ok, [source_ref()]} | {error, {invalid_memory, source_refs}}.
 normalize_source_refs(SourceRefs) when is_list(SourceRefs) ->
     lists:foldl(fun
         (_Ref, {error, _} = Error) ->
@@ -708,7 +725,7 @@ normalize_source_refs(SourceRefs) when is_list(SourceRefs) ->
 normalize_source_refs(_Other) ->
     {error, {invalid_memory, source_refs}}.
 
--spec normalize_source_ref(term()) -> {ok, source_ref()} | {error, term()}.
+-spec normalize_source_ref(term()) -> {ok, source_ref()} | {error, {invalid_memory, source_refs}}.
 normalize_source_ref(#{type := Type, id := Id} = Ref)
   when is_binary(Id), byte_size(Id) > 0 ->
     case normalize_ref_type(Type) of
@@ -750,14 +767,14 @@ normalize_salience(Salience) when is_integer(Salience), Salience >= 0 ->
 normalize_salience(_Other) ->
     {error, {invalid_memory, salience}}.
 
--spec validate_scope(scope()) -> {ok, scope()} | {error, term()}.
+-spec validate_scope(scope()) -> {ok, scope()} | {error, session_id_required_for_thread}.
 validate_scope(#{thread_id := _ThreadId} = Scope)
   when not is_map_key(session_id, Scope) ->
     {error, session_id_required_for_thread};
 validate_scope(Scope) ->
     {ok, Scope}.
 
--spec merge_scopes(scope(), scope()) -> {ok, scope()} | {error, term()}.
+-spec merge_scopes(scope(), scope()) -> {ok, scope()} | {error, inconsistent_scope | session_id_required_for_thread}.
 merge_scopes(Left, Right) ->
     SessionId = choose_scope(maps:get(session_id, Left, undefined),
         maps:get(session_id, Right, undefined)),
@@ -780,7 +797,7 @@ merge_scopes(Left, Right) ->
             {error, inconsistent_scope}
     end.
 
--spec resolve_scope(scope(), [source_ref()]) -> {ok, scope()} | {error, term()}.
+-spec resolve_scope(scope(), [source_ref()]) -> {ok, scope()} | {error, scope_error()}.
 resolve_scope(Scope, SourceRefs) ->
     case resolve_run_scope(Scope) of
         {ok, Scope1} ->
@@ -794,7 +811,7 @@ resolve_scope(Scope, SourceRefs) ->
             Error
     end.
 
--spec resolve_run_scope(scope()) -> {ok, scope()} | {error, term()}.
+-spec resolve_run_scope(scope()) -> {ok, scope()} | {error, run_not_found | inconsistent_run_scope | session_id_required_for_thread}.
 resolve_run_scope(#{run_id := RunId} = Scope) ->
     case beam_agent_runs_core:get_run(RunId) of
         {ok, Run} ->
@@ -809,7 +826,7 @@ resolve_run_scope(#{run_id := RunId} = Scope) ->
 resolve_run_scope(Scope) ->
     validate_scope(Scope).
 
--spec resolve_source_ref_scope(scope(), source_ref()) -> {ok, scope()} | {error, term()}.
+-spec resolve_source_ref_scope(scope(), source_ref()) -> {ok, scope()} | {error, scope_error()}.
 resolve_source_ref_scope(Scope, #{type := Type, id := RefId}) ->
     case Type of
         session ->
@@ -832,7 +849,7 @@ resolve_source_ref_scope(Scope, #{type := Type, id := RefId}) ->
             {ok, Scope}
     end.
 
--spec resolve_artifact_scope(scope(), binary()) -> {ok, scope()} | {error, term()}.
+-spec resolve_artifact_scope(scope(), binary()) -> {ok, scope()} | {error, artifact_not_found | inconsistent_artifact_scope | session_id_required_for_thread}.
 resolve_artifact_scope(Scope, ArtifactId) ->
     case beam_agent_artifacts_core:get(ArtifactId) of
         {ok, Artifact} ->
@@ -847,7 +864,7 @@ resolve_artifact_scope(Scope, ArtifactId) ->
             {error, artifact_not_found}
     end.
 
--spec normalize_filter(memory_filter()) -> {ok, memory_filter()} | {error, term()}.
+-spec normalize_filter(memory_filter()) -> {ok, memory_filter()} | {error, memory_filter_error()}.
 normalize_filter(Filter) ->
     case normalize_optional_binary_value(memory_id, maps:get(memory_id, Filter, undefined),
              invalid_filter) of
@@ -983,7 +1000,7 @@ normalize_filter(Filter) ->
             Error
     end.
 
--spec validate_filter_scope(memory_filter()) -> {ok, memory_filter()} | {error, term()}.
+-spec validate_filter_scope(memory_filter()) -> {ok, memory_filter()} | {error, {invalid_filter, thread_id}}.
 validate_filter_scope(#{thread_id := _ThreadId} = Filter)
   when not is_map_key(session_id, Filter) ->
     {error, {invalid_filter, thread_id}};
@@ -1336,13 +1353,15 @@ telemetry_stop(Operation, StartTime, Metadata) ->
     beam_agent_telemetry_core:span_stop(memory, Operation, StartTime,
         compact_telemetry(Metadata)).
 
--spec telemetry_exception(expire | list | remember | search, term(), map()) -> ok.
+-spec telemetry_exception(remember | list | search | expire,
+    memory_filter_error() | memory_input_error(),
+    map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
     beam_agent_telemetry_core:span_exception(memory, Operation, Reason,
         compact_telemetry(Metadata)).
 
--spec telemetry_finish(atom(), integer(),
-    {ok, memory_record()} | {error, term()}, map()) -> ok.
+-spec telemetry_finish(memory_operation(), integer(),
+    {ok, memory_record()} | {error, memory_filter_error() | memory_input_error()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Memory}, Metadata) ->
     telemetry_stop(Operation, StartTime, maps:merge(Metadata, telemetry_memory_meta(Memory)));
 telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
@@ -1376,13 +1395,13 @@ telemetry_memory_meta(Memory) ->
 compact_telemetry(Metadata) ->
     maps:filter(fun(_Key, Value) -> Value =/= undefined end, Metadata).
 
--spec consistent_scope(term(), term()) -> boolean().
+-spec consistent_scope(binary() | undefined, binary() | undefined) -> boolean().
 consistent_scope(undefined, _Value) -> true;
 consistent_scope(_Value, undefined) -> true;
 consistent_scope(Value, Value) -> true;
 consistent_scope(_Left, _Right) -> false.
 
--spec choose_scope(term(), term()) -> term().
+-spec choose_scope(binary() | undefined, binary() | undefined) -> binary() | undefined.
 choose_scope(undefined, Value) -> Value;
 choose_scope(Value, _Fallback) -> Value.
 

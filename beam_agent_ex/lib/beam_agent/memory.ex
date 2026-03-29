@@ -99,6 +99,40 @@ defmodule BeamAgent.Memory do
   @spec clear() :: :ok
   defdelegate clear(), to: :beam_agent_memory
 
+  @typedoc """
+  Store configuration for `configure_persistence/1`.
+
+  Keys:
+
+    * `:adapter` — the adapter module (e.g. `:beam_agent_store_dets`)
+    * `:options` — adapter-specific options map (optional)
+  """
+  @type store_config() :: %{
+          required(:adapter) => module(),
+          optional(:options) => map()
+        }
+
+  @doc """
+  Configure a persistence adapter for the memory domain.
+
+  By default memories live in ETS and vanish on VM restart. Call this
+  to switch to a durable adapter such as `:beam_agent_store_dets`.
+
+  ## Example
+
+      BeamAgent.Memory.configure_persistence(%{
+        adapter: :beam_agent_store_dets,
+        options: %{data_dir: "/tmp/beam_agent"}
+      })
+
+  When using DETS, call
+  `:beam_agent_store_dets.close_table(:beam_agent_memory_records)` during
+  application shutdown to flush pending writes.
+  """
+  @spec configure_persistence(store_config()) ::
+          :ok | {:error, :invalid_options | {:invalid_adapter, atom()}}
+  defdelegate configure_persistence(config), to: :beam_agent_memory
+
   @doc """
   Remember content with embedded or explicit kind on a scope.
   """
@@ -139,7 +173,7 @@ defmodule BeamAgent.Memory do
   @doc """
   Search memories across all scopes.
   """
-  @spec search(binary()) :: {:ok, [memory_record()]} | {:error, term()}
+  @spec search(binary()) :: {:ok, [memory_record()]}
   defdelegate search(query), to: :beam_agent_memory
 
   @doc """

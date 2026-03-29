@@ -117,20 +117,20 @@ without changing BeamAgent's execution core.
         rule_count := non_neg_integer()
     }.
 
--define(PROFILES_TABLE, beam_agent_policy_profiles).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(STORE_DOMAIN, policy).
 
--doc "Ensure the policy profile table exists. Idempotent.".
+-doc "Ensure the shared domains table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?PROFILES_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all policy profiles. Intended for tests and resets.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?PROFILES_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{policy, '_'}, '_'}),
     ok.
 
 -doc "Insert or overwrite a policy profile.".
@@ -142,8 +142,8 @@ put_profile(ProfileId, ProfileInput)
     StartTime = telemetry_start(put_profile, TeleMeta),
     Result = case normalize_profile(ProfileId, ProfileInput) of
         {ok, Profile} ->
-            true = beam_agent_store:insert(?STORE_DOMAIN, ?PROFILES_TABLE,
-                {ProfileId, Profile}),
+            true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE,
+                {{policy, ProfileId}, Profile}),
             ok;
         {error, _} = Error ->
             Error
@@ -162,7 +162,7 @@ put_profile(ProfileId, ProfileInput)
 get_profile(ProfileId) when is_binary(ProfileId) ->
     ensure_tables(),
     StartTime = telemetry_start(get_profile, #{profile_id => ProfileId}),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?PROFILES_TABLE, ProfileId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {policy, ProfileId}) of
         [{_, Profile}] when is_map(Profile) ->
             telemetry_stop(get_profile, StartTime, #{
                 profile_id => ProfileId,
@@ -181,9 +181,11 @@ list_profiles() ->
     ensure_tables(),
     StartTime = telemetry_start(list_profiles, #{}),
     Profiles = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({_, Profile}, Acc) when is_map(Profile) ->
-            [Profile | Acc]
-    end, [], ?PROFILES_TABLE),
+        ({{policy, _}, Profile}, Acc) when is_map(Profile) ->
+            [Profile | Acc];
+        (_, Acc) ->
+            Acc
+    end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_profiles/2, Profiles),
     telemetry_stop(list_profiles, StartTime, #{result_count => length(Sorted)}),
     {ok, Sorted}.

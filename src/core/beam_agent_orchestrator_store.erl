@@ -47,14 +47,14 @@ collection behavior. Those concerns belong in `beam_agent_orchestrator_core`.
     stop_session => boolean()
 }.
 
--define(LINKS_TABLE, beam_agent_orchestrator_links).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(CHILDREN_TABLE, beam_agent_orchestrator_children).
 -define(STORE_DOMAIN, orchestrator).
 
 -doc "Ensure the orchestrator ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?LINKS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set, named_table,
         {read_concurrency, true}]),
     beam_agent_store:ensure_table(?STORE_DOMAIN, ?CHILDREN_TABLE, [bag, named_table,
         {read_concurrency, true}]),
@@ -64,7 +64,7 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?LINKS_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{orch_link, '_'}, '_'}),
     beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?CHILDREN_TABLE),
     ok.
 
@@ -79,7 +79,8 @@ put_link(#{child_run_id := ChildRunId, parent_run_id := ParentRunId} = Link)
         {error, not_found} ->
             ok
     end,
-    true = beam_agent_store:insert(?STORE_DOMAIN, ?LINKS_TABLE, {ChildRunId, Link}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE,
+        {{orch_link, ChildRunId}, Link}),
     true = beam_agent_store:insert(?STORE_DOMAIN, ?CHILDREN_TABLE,
         {ParentRunId, ChildRunId}),
     ok.
@@ -88,7 +89,7 @@ put_link(#{child_run_id := ChildRunId, parent_run_id := ParentRunId} = Link)
 -spec get_link(binary()) -> {ok, link_record()} | {error, not_found}.
 get_link(ChildRunId) when is_binary(ChildRunId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?LINKS_TABLE, ChildRunId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {orch_link, ChildRunId}) of
         [{_, Link}] when is_map(Link) ->
             {ok, Link};
         [] ->
@@ -102,7 +103,8 @@ delete_link(ChildRunId) when is_binary(ChildRunId) ->
     case get_link(ChildRunId) of
         {ok, Link} ->
             maybe_delete_parent_index(Link),
-            _ = beam_agent_store:delete(?STORE_DOMAIN, ?LINKS_TABLE, ChildRunId),
+            _ = beam_agent_store:delete(?STORE_DOMAIN, ?DOMAINS_TABLE,
+                {orch_link, ChildRunId}),
             ok;
         {error, not_found} ->
             {error, not_found}

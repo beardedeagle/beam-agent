@@ -61,7 +61,7 @@ Every backend consists of exactly four module layers:
 | Layer | Module naming | Purpose |
 |-------|--------------|---------|
 | **Session handler** | `*_session_handler.erl` | Implements `beam_agent_session_handler` callbacks |
-| **Session wrapper** | `*_session.erl` | Thin wrapper implementing `beam_agent_behaviour` |
+| **Session wrapper** | `*_session.erl` | Thin wrapper implementing `beam_agent_adapter_session` |
 | **Adapter (client)** | `*_client.erl` or `*_sdk.erl` | High-level facade with backend-specific features |
 | **Protocol helpers** | `*_protocol.erl`, `*_frame.erl` | Wire format encoding/decoding |
 
@@ -84,12 +84,12 @@ BeamAgent stack down to a backend CLI process and back:
               +---------------------+
                          |
               +---------------------+
-              | beam_agent_behaviour|   Callback contract
+              | beam_agent_adapter_session|   Callback contract
               +---------------------+
                          |
          +-------------------------------+
          |  *_session.erl               |   e.g., copilot_session
-         |  (beam_agent_behaviour impl) |   Thin delegation layer
+         |  (beam_agent_adapter_session impl) |   Thin delegation layer
          +-------------------------------+
                          |
          +-------------------------------+
@@ -140,7 +140,7 @@ to launch the transport and `TransportModule:classify_message/2` on every
 incoming Erlang message to determine if the message belongs to this
 transport.
 
-**`beam_agent_behaviour`** (`src/core/beam_agent_behaviour.erl`)
+**`beam_agent_adapter_session`** (`src/core/beam_agent_adapter_session.erl`)
 is the top-level behaviour that the session wrapper module implements.
 It provides the unified API contract (`start_link`, `send_query`,
 `receive_message`, `health`, `stop`) that consumers program against.
@@ -1163,9 +1163,9 @@ First, create `src/backends/myagent/myagent_session.erl`:
 
 ```erlang
 -module(myagent_session).
--behaviour(beam_agent_behaviour).
+-behaviour(beam_agent_adapter_session).
 
-%% beam_agent_behaviour callbacks
+%% beam_agent_adapter_session callbacks
 -export([start_link/1, send_query/4, receive_message/3, health/1, stop/1]).
 
 %% Extended session API
@@ -2050,7 +2050,7 @@ Use this checklist to verify your backend is complete before merging.
 
 #### Session and Adapter Modules
 
-- [ ] `myagent_session.erl` implements `beam_agent_behaviour` and delegates to the engine
+- [ ] `myagent_session.erl` implements `beam_agent_adapter_session` and delegates to the engine
 - [ ] `myagent_client.erl` exposes `start_session/1`, `query/2`, `query/3`, `session_info/1`
 - [ ] `myagent_client.erl` delegates universal capabilities to core modules
 
@@ -2097,7 +2097,10 @@ Use this checklist to verify your backend is complete before merging.
 |------|---------|
 | `src/core/beam_agent_session_handler.erl` | Handler behaviour definition |
 | `src/core/beam_agent_session_engine.erl` | gen_statem engine (do not modify) |
-| `src/core/beam_agent_behaviour.erl` | Top-level behaviour contract |
+| `src/core/beam_agent_adapter.erl` | Base adapter behaviour (all backends) |
+| `src/core/beam_agent_adapter_session.erl` | Session sub-behaviour (agentic backends) |
+| `src/core/beam_agent_adapter_api.erl` | API sub-behaviour (stateless inference backends) |
+| `src/core/beam_agent_adapter_tools.erl` | Tools sub-behaviour (tool-capable backends) |
 | `src/core/beam_agent_backend.erl` | Backend registry |
 | `src/public/beam_agent_capabilities.erl` | Capability registry |
 | `src/public/beam_agent.erl` | Public API with native_or routing |

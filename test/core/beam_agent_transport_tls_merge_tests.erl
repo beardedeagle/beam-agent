@@ -1,7 +1,7 @@
 %%%-------------------------------------------------------------------
 %%% @doc EUnit tests for beam_agent_transport_utils TLS option merging.
 %%%-------------------------------------------------------------------
--module(beam_agent_transport_utils_tests).
+-module(beam_agent_transport_tls_merge_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 

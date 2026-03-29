@@ -33,7 +33,7 @@
 }.
 
 %% ETS table name.
--define(TABLE, beam_agent_accounts).
+-define(TABLE, beam_agent_runtime).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -46,14 +46,13 @@ the global configuration.
 """.
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?TABLE, [set, named_table,
-        {read_concurrency, true}]).
+    beam_agent_runtime:app_ensure_tables().
 
 -doc "Delete all account data from the ETS table.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?TABLE),
+    beam_agent_ets:match_delete(?TABLE, {{account, '_'}, '_'}),
     ok.
 
 -doc "Delete auth state for a single session. Safe to call when no entry exists.".
@@ -61,7 +60,7 @@ clear() ->
 clear_session(Session) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
-    beam_agent_ets:delete(?TABLE, Key),
+    beam_agent_ets:delete(?TABLE, {account, Key}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -192,7 +191,7 @@ account_info(Session) ->
 -spec get_auth_state(pid() | binary()) -> auth_state().
 get_auth_state(Session) ->
     Key = beam_agent_ets:session_key(Session),
-    case ets:lookup(?TABLE, Key) of
+    case ets:lookup(?TABLE, {account, Key}) of
         [{_, State}] ->
             State;
         [] ->
@@ -205,5 +204,5 @@ get_auth_state(Session) ->
 -spec put_auth_state(pid() | binary(), auth_state()) -> ok.
 put_auth_state(Session, State) ->
     Key = beam_agent_ets:session_key(Session),
-    beam_agent_ets:insert(?TABLE, {Key, State}),
+    beam_agent_ets:insert(?TABLE, {{account, Key}, State}),
     ok.

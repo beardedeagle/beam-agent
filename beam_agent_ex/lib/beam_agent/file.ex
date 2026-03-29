@@ -36,12 +36,13 @@ defmodule BeamAgent.File do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_file` module. Zero business logic, zero state, zero
-  processes live here -- the Erlang module owns the implementation. The
-  underlying file operations are provided by `:beam_agent_file_core`.
+  This module is a thin Elixir facade that delegates every call to the
+  `:beam_agent_catalog` Erlang module's file operations. Zero business logic,
+  zero state, zero processes live here -- the Erlang module owns the
+  implementation with `native_or` routing and universal fallbacks via
+  `:beam_agent_catalog`.
 
-  See also: `BeamAgent`, `BeamAgent.Search`, `BeamAgent.Config`.
+  See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Search`.
   """
 
   @doc """
@@ -68,8 +69,9 @@ defmodule BeamAgent.File do
         IO.puts("\#{m.path}:\#{m.line}: \#{m.content}")
       end
   """
-  @spec find_text(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate find_text(session, pattern), to: :beam_agent_file
+  @spec find_text(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  defdelegate find_text(session, pattern), to: :beam_agent_catalog
 
   @doc """
   Find files matching a pattern in the session's working directory.
@@ -91,8 +93,8 @@ defmodule BeamAgent.File do
       {:ok, files} = BeamAgent.File.find_files(session, %{pattern: "*.erl"})
       for f <- files, do: IO.puts(f.path)
   """
-  @spec find_files(pid(), map()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate find_files(session, opts), to: :beam_agent_file
+  @spec find_files(pid(), map()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
+  defdelegate find_files(session, opts), to: :beam_agent_catalog
 
   @doc """
   Search for code symbols matching `query` in the session's project.
@@ -110,8 +112,9 @@ defmodule BeamAgent.File do
 
   - `{:ok, symbols}` or `{:error, reason}`.
   """
-  @spec find_symbols(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate find_symbols(session, query), to: :beam_agent_file
+  @spec find_symbols(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  defdelegate find_symbols(session, query), to: :beam_agent_catalog
 
   @doc """
   List files and directories at the given path.
@@ -130,14 +133,14 @@ defmodule BeamAgent.File do
 
   - `{:ok, entries}` or `{:error, reason}`.
   """
-  @spec list(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate list(session, path), to: :beam_agent_file
+  @spec list(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
+  defdelegate list(session, path), to: :beam_agent_catalog, as: :file_list
 
   @doc """
   Read the contents of a file at the given path.
 
-  Returns the file content as a binary. `path` is resolved relative to
-  the session's working directory when it is not absolute.
+  Returns a map with `:path` and `:content` keys. `path` is resolved
+  relative to the session's working directory when it is not absolute.
 
   ## Parameters
 
@@ -146,10 +149,11 @@ defmodule BeamAgent.File do
 
   ## Returns
 
-  - `{:ok, content}` or `{:error, :enoent}` if the file does not exist.
+  - `{:ok, %{path: path, content: content}}` or `{:error, :enoent}` if the file does not exist.
   """
-  @spec read(pid(), binary()) :: {:ok, binary()} | {:error, :enoent | term()}
-  defdelegate read(session, path), to: :beam_agent_file
+  @spec read(pid(), binary()) ::
+          {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
+  defdelegate read(session, path), to: :beam_agent_catalog, as: :file_read
 
   @doc """
   Get the version-control status of files in the session's project.
@@ -163,8 +167,10 @@ defmodule BeamAgent.File do
 
   ## Returns
 
-  - `{:ok, status}` or `{:error, reason}`.
+  - `{:ok, %{cwd: cwd, source: source, files: files}}` or `{:error, reason}`.
   """
-  @spec status(pid()) :: {:ok, term()} | {:error, term()}
-  defdelegate status(session), to: :beam_agent_file
+  @spec status(pid()) ::
+          {:ok, %{cwd: binary(), source: :git | :filesystem, files: [map()]}}
+          | {:error, term()}
+  defdelegate status(session), to: :beam_agent_catalog, as: :file_status
 end

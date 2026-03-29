@@ -166,7 +166,7 @@ capability_specs() ->
                      {beam_agent_mcp, server_reload, 1}],
             proof_files => [
                 "test/public/beam_agent_tests.erl",
-                "test/core/beam_agent_behaviour_tests.erl"
+                "test/core/beam_agent_adapter_session_tests.erl"
             ]
         },
         #{
@@ -326,6 +326,24 @@ capability_specs() ->
                 "test/backends/codex/codex_realtime_session_tests.erl",
                 "test/backends/opencode/opencode_session_tests.erl",
                 "test/backends/gemini/gemini_cli_session_tests.erl"
+            ]
+        },
+        #{
+            id => memory,
+            apis => [{beam_agent_memory, remember, 2},
+                     {beam_agent_memory, remember, 3},
+                     {beam_agent_memory, get, 1},
+                     {beam_agent_memory, list, 0},
+                     {beam_agent_memory, list, 1},
+                     {beam_agent_memory, recall, 2},
+                     {beam_agent_memory, search, 1},
+                     {beam_agent_memory, search, 2},
+                     {beam_agent_memory, forget, 1},
+                     {beam_agent_memory, update, 2},
+                     {beam_agent_memory, configure_persistence, 1}],
+            proof_files => [
+                "test/public/beam_agent_memory_tests.erl",
+                "test/core/beam_agent_memory_core_tests.erl"
             ]
         }
     ].

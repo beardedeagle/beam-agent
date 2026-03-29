@@ -89,6 +89,24 @@ defmodule BeamAgent.Checkpoint do
         }
 
   @doc """
+  Ensure the checkpoint ETS table exists.
+
+  Idempotent. Must be called before any checkpoint operation when the table
+  has not been initialized via `BeamAgent.init/0` or `BeamAgent.init/1`.
+  """
+  @spec ensure_tables() :: :ok
+  defdelegate ensure_tables(), to: :beam_agent_checkpoint
+
+  @doc """
+  Clear all checkpoint data from the ETS table.
+
+  Removes every checkpoint across all sessions. Useful for test cleanup or
+  node-wide reset.
+  """
+  @spec clear() :: :ok
+  defdelegate clear(), to: :beam_agent_checkpoint
+
+  @doc """
   Snapshot a list of file paths for later rewind.
 
   Reads each file's content and POSIX permissions at the current moment. Files
@@ -200,6 +218,8 @@ defmodule BeamAgent.Checkpoint do
 
   - `{:ok, result}` or `{:error, :not_found}`.
   """
-  @spec rewind_files(pid(), binary()) :: {:ok, term()} | {:error, :not_found | term()}
+  @spec rewind_files(pid(), binary()) ::
+          {:ok, :ok}
+          | {:error, :not_found | {:restore_failed, binary(), atom()} | term()}
   defdelegate rewind_files(session, checkpoint_uuid), to: :beam_agent_checkpoint
 end

@@ -66,34 +66,35 @@ validation. Those concerns live in `beam_agent_memory_core`.
     since => integer()
 }.
 
--define(MEMORY_TABLE, beam_agent_memory_records).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(STORE_DOMAIN, memory).
 
--doc "Ensure the memory ETS table exists. Idempotent.".
+-doc "Ensure the shared domains table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?MEMORY_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set, named_table,
         {read_concurrency, true}]).
 
 -doc "Clear all memory records.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?MEMORY_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{memory, '_'}, '_'}),
     ok.
 
 -doc "Insert or overwrite a memory record.".
 -spec put_memory(memory_record()) -> ok.
 put_memory(#{memory_id := MemoryId} = Memory) when is_binary(MemoryId) ->
     ensure_tables(),
-    true = beam_agent_store:insert(?STORE_DOMAIN, ?MEMORY_TABLE, {MemoryId, Memory}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE,
+        {{memory, MemoryId}, Memory}),
     ok.
 
 -doc "Fetch a memory record by id.".
 -spec get_memory(binary()) -> {ok, memory_record()} | {error, not_found}.
 get_memory(MemoryId) when is_binary(MemoryId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?MEMORY_TABLE, MemoryId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {memory, MemoryId}) of
         [{_, Memory}] -> {ok, Memory};
         [] -> {error, not_found}
     end.
@@ -102,9 +103,9 @@ get_memory(MemoryId) when is_binary(MemoryId) ->
 -spec delete_memory(binary()) -> ok | {error, not_found}.
 delete_memory(MemoryId) when is_binary(MemoryId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?MEMORY_TABLE, MemoryId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {memory, MemoryId}) of
         [{_, _Memory}] ->
-            beam_agent_store:delete(?STORE_DOMAIN, ?MEMORY_TABLE, MemoryId),
+            beam_agent_store:delete(?STORE_DOMAIN, ?DOMAINS_TABLE, {memory, MemoryId}),
             ok;
         [] ->
             {error, not_found}
@@ -115,12 +116,14 @@ delete_memory(MemoryId) when is_binary(MemoryId) ->
 list_memories(Filter) when is_map(Filter) ->
     ensure_tables(),
     Memories = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({_, Memory}, Acc) ->
+        ({{memory, _}, Memory}, Acc) ->
             case matches_filters(Memory, Filter) of
                 true -> [Memory | Acc];
                 false -> Acc
-            end
-    end, [], ?MEMORY_TABLE),
+            end;
+        (_, Acc) ->
+            Acc
+    end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_memories/2, Memories),
     {ok, apply_limit(Sorted, Filter)}.
 
@@ -145,7 +148,7 @@ matches_filters(Memory, Filter) ->
             maps:get(Key, Memory, undefined) =:= Value
     end, maps:to_list(Filter)).
 
--spec scope_value(atom(), memory_record()) -> term().
+-spec scope_value(atom(), memory_record()) -> binary() | undefined.
 scope_value(Key, Memory) ->
     maps:get(Key, maps:get(scope, Memory, #{}), undefined).
 

@@ -37,10 +37,10 @@ defmodule BeamAgent.Apps do
   ## Architecture deep dive
 
   This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_apps` module. Zero business logic, zero state, zero
+  Erlang `:beam_agent_runtime` module. Zero business logic, zero state, zero
   processes live here -- the Erlang module owns the implementation. The
   underlying app data is stored in ETS tables managed by
-  `:beam_agent_app_core`.
+  `:beam_agent_runtime`.
 
   See also: `BeamAgent`, `BeamAgent.Config`, `BeamAgent.Runtime`.
   """
@@ -63,8 +63,8 @@ defmodule BeamAgent.Apps do
     and `:status` (atom such as `:active` or `:archived`).
   - `{:error, reason}` on failure.
   """
-  @spec list(pid()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate list(session), to: :beam_agent_apps
+  @spec list(pid()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
+  defdelegate list(session), to: :beam_agent_runtime, as: :apps_list
 
   @doc """
   List apps and projects for the session with filter options.
@@ -87,8 +87,8 @@ defmodule BeamAgent.Apps do
     and `:status` (atom).
   - `{:error, reason}` on failure.
   """
-  @spec list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate list(session, opts), to: :beam_agent_apps
+  @spec list(pid(), map()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
+  defdelegate list(session, opts), to: :beam_agent_runtime, as: :apps_list
 
   @doc """
   Get information about the current app or project context for a session.
@@ -109,8 +109,8 @@ defmodule BeamAgent.Apps do
     and `:config` (map of project-level configuration).
   - `{:error, reason}` on failure.
   """
-  @spec info(pid()) :: {:ok, map()} | {:error, term()}
-  defdelegate info(session), to: :beam_agent_apps
+  @spec info(pid()) :: {:ok, :beam_agent_runtime.app_entry()} | {:error, :no_app | term()}
+  defdelegate info(session), to: :beam_agent_runtime, as: :app_info
 
   @doc """
   Initialize the app/project context by scanning the working directory.
@@ -130,8 +130,8 @@ defmodule BeamAgent.Apps do
   - `{:ok, result_map}` with the initialized project context.
   - `{:error, reason}` on failure.
   """
-  @spec init(pid()) :: {:ok, map()} | {:error, term()}
-  defdelegate init(session), to: :beam_agent_apps
+  @spec init(pid()) :: {:ok, :beam_agent_runtime.app_entry()} | {:error, term()}
+  defdelegate init(session), to: :beam_agent_runtime, as: :app_init
 
   @doc """
   Append a log entry to the session's app log.
@@ -156,7 +156,7 @@ defmodule BeamAgent.Apps do
   - `{:error, reason}` on failure.
   """
   @spec log(pid(), map()) :: {:ok, map()} | {:error, term()}
-  defdelegate log(session, body), to: :beam_agent_apps
+  defdelegate log(session, body), to: :beam_agent_runtime, as: :app_log
 
   @doc """
   List available app modes for the session.
@@ -173,10 +173,9 @@ defmodule BeamAgent.Apps do
 
   ## Returns
 
-  - `{:ok, modes}` where `modes` is a list of mode maps, each describing
-    a named configuration preset with its settings.
+  - `{:ok, modes}` where `modes` is a list of mode name binaries.
   - `{:error, reason}` on failure.
   """
-  @spec modes(pid()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate modes(session), to: :beam_agent_apps
+  @spec modes(pid()) :: {:ok, [binary()]} | {:error, term()}
+  defdelegate modes(session), to: :beam_agent_runtime, as: :app_modes
 end

@@ -28,7 +28,7 @@ ok = beam_agent_provider:set(<<"sess-123">>, <<"openai">>),
 ## See Also
 
   - beam_agent_runtime: runtime state management
-  - beam_agent_config_core: provider auth and OAuth flows
+  - beam_agent_config: provider auth and OAuth flows
   - beam_agent: lifecycle entry point
 """.
 
@@ -74,30 +74,30 @@ list(Session) ->
     end).
 
 -doc "List authentication methods available for a live session or persisted session id.".
--spec auth_methods(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec auth_methods(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 auth_methods(Session) when is_binary(Session) ->
-    beam_agent_config_core:provider_auth_methods(Session);
+    beam_agent_config:provider_auth_methods(Session);
 auth_methods(Session) ->
     beam_agent_core:native_or(Session, provider_auth_methods, [], fun() ->
-        beam_agent_config_core:provider_auth_methods(Session)
+        beam_agent_config:provider_auth_methods(Session)
     end).
 
 -doc "Initiate an OAuth authorization flow for a specific provider.".
--spec oauth_authorize(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec oauth_authorize(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 oauth_authorize(Session, ProviderId, Body) when is_binary(Session) ->
-    beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body);
+    beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body);
 oauth_authorize(Session, ProviderId, Body) ->
     beam_agent_core:native_or(Session, provider_oauth_authorize, [ProviderId, Body], fun() ->
-        beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body)
+        beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body)
     end).
 
 -doc "Handle an OAuth callback after user authorization.".
--spec oauth_callback(pid() | binary(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec oauth_callback(pid() | binary(), binary(), map()) -> {ok, map()} | {error, term()}.
 oauth_callback(Session, ProviderId, Body) when is_binary(Session) ->
-    beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body);
+    beam_agent_config:provider_oauth_callback(Session, ProviderId, Body);
 oauth_callback(Session, ProviderId, Body) ->
     beam_agent_core:native_or(Session, provider_oauth_callback, [ProviderId, Body], fun() ->
-        beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body)
+        beam_agent_config:provider_oauth_callback(Session, ProviderId, Body)
     end).
 
 %%--------------------------------------------------------------------

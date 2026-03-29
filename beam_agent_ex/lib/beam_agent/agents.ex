@@ -34,20 +34,32 @@ defmodule BeamAgent.Agents do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_agents` module. Zero business logic, zero state, zero
-  processes live here -- the Erlang module owns the implementation. The
-  underlying agent type data is stored in ETS tables managed by
-  `:beam_agent_agent_registry`.
+  This module is a thin Elixir facade that delegates every call to the
+  `:beam_agent_catalog` Erlang module's global registry functions. Zero
+  business logic, zero state, zero processes live here -- the Erlang module
+  owns the implementation. The underlying agent type data is stored in the
+  unified ETS table managed by `:beam_agent_registry`.
 
-  See also: `BeamAgent`, `BeamAgent.Skills`, `BeamAgent.Plugins`.
+  See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Plugins`.
   """
+
+  @typedoc "An agent type definition stored in the global registry."
+  @type agent_def() :: %{
+          required(:id) => binary(),
+          required(:name) => binary(),
+          required(:kind) => :agent | :plugin | :slash,
+          required(:enabled) => boolean(),
+          optional(:description) => binary(),
+          optional(:role) => atom(),
+          optional(:version) => binary(),
+          optional(:config) => map()
+        }
 
   @doc """
-  Create the global agent types ETS table. Idempotent.
+  Create the global registry ETS table. Idempotent.
   """
   @spec ensure_table() :: :ok
-  defdelegate ensure_table(), to: :beam_agent_agents
+  defdelegate ensure_table(), to: :beam_agent_catalog, as: :ensure_registry
 
   @doc """
   Register an agent type globally (shared across all sessions).
@@ -58,29 +70,29 @@ defmodule BeamAgent.Agents do
   - `opts` -- map of agent options (`:name`, `:description`, `:role`, `:enabled`, `:config`).
   """
   @spec register(binary(), map()) :: :ok
-  defdelegate register(id, opts), to: :beam_agent_agents
+  defdelegate register(id, opts), to: :beam_agent_catalog, as: :register_agent
 
   @doc """
   Unregister an agent type by id. Idempotent.
   """
   @spec unregister(binary()) :: :ok
-  defdelegate unregister(id), to: :beam_agent_agents
+  defdelegate unregister(id), to: :beam_agent_catalog, as: :unregister_agent
 
   @doc """
   Fetch a single agent type by id.
   """
-  @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
-  defdelegate get(id), to: :beam_agent_agents
+  @spec get(binary()) :: {:ok, agent_def()} | {:error, :not_found}
+  defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_agent
 
   @doc """
   List all registered agent types.
   """
-  @spec list() :: [map()]
-  defdelegate list(), to: :beam_agent_agents
+  @spec list() :: [agent_def()]
+  defdelegate list(), to: :beam_agent_catalog, as: :registered_agents
 
   @doc """
   Remove all registered agent types.
   """
   @spec clear() :: :ok
-  defdelegate clear(), to: :beam_agent_agents
+  defdelegate clear(), to: :beam_agent_catalog, as: :clear_registered_agents
 end

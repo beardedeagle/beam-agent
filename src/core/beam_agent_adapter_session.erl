@@ -1,5 +1,21 @@
--module(beam_agent_behaviour).
--moduledoc false.
+-module(beam_agent_adapter_session).
+-moduledoc """
+Sub-behaviour for session-based agentic coder backends.
+
+Backends that manage persistent sessions via the session engine
+(`beam_agent_session_engine`) implement this sub-behaviour in addition to
+`beam_agent_adapter`. This covers all agentic coder backends: Claude, Codex,
+Gemini, OpenCode, Copilot, and future additions (Cursor, Aider, Windsurf).
+
+The required callbacks handle session lifecycle and query dispatch. Optional
+callbacks cover control protocols, runtime model switching, and permission
+mode changes.
+
+Formerly `beam_agent_behaviour` — renamed during the Phase 0 sub-behaviour
+contract refactor.
+
+See also: `beam_agent_adapter`, `beam_agent_session_handler`.
+""".
 
 %% Required callbacks — every adapter must implement these.
 

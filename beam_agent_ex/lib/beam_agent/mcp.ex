@@ -166,18 +166,7 @@ defmodule BeamAgent.MCP do
   @type mcp_registry() :: %{binary() => sdk_mcp_server()}
 
   @typedoc "Opaque state record for the MCP server-side dispatch state machine."
-  @type dispatch_state() :: %{
-          required(:lifecycle) =>
-            :uninitialized | :initializing | :ready | :error | :shutting_down,
-          required(:server_info) => implementation_info(),
-          required(:server_capabilities) => map(),
-          optional(:session_capabilities) => map(),
-          optional(:tool_registry) => mcp_registry(),
-          optional(:handler_timeout) => pos_integer(),
-          optional(:provider) => module(),
-          optional(:provider_state) => term(),
-          optional(:error_info) => term()
-        }
+  @type dispatch_state() :: :beam_agent_mcp_dispatch.dispatch_state()
 
   @typedoc """
   Result type from `dispatch_message/2`.
@@ -186,23 +175,10 @@ defmodule BeamAgent.MCP do
   to send back over the transport, or `{:noreply, new_state}` for notifications
   that require no response.
   """
-  @type dispatch_result() :: {map() | :noreply, dispatch_state()}
+  @type dispatch_result() :: :beam_agent_mcp_dispatch.dispatch_result()
 
   @typedoc "Opaque state record for the MCP client-side dispatch state machine."
-  @type client_state() :: %{
-          required(:lifecycle) =>
-            :uninitialized | :initializing | :ready | :error | :disconnected | :shutting_down,
-          required(:client_info) => implementation_info(),
-          required(:client_capabilities) => map(),
-          optional(:server_capabilities) => map(),
-          optional(:session_capabilities) => map(),
-          required(:next_id) => pos_integer(),
-          required(:pending) => %{request_id() => pending_request()},
-          required(:default_timeout) => pos_integer(),
-          optional(:handler) => module(),
-          optional(:handler_state) => term(),
-          optional(:error_info) => term()
-        }
+  @type client_state() :: :beam_agent_mcp_client_dispatch.client_state()
 
   @typedoc """
   Result type from `client_handle_message/2`.
@@ -214,12 +190,7 @@ defmodule BeamAgent.MCP do
   - `{:notification, method, params, state}` — server notification
   - `{:noreply, state}` — no reply needed
   """
-  @type client_result() ::
-          {:response, request_id(), term(), client_state()}
-          | {:error_response, request_id(), integer(), binary(), client_state()}
-          | {:server_request, map(), client_state()}
-          | {:notification, binary(), map(), client_state()}
-          | {:noreply, client_state()}
+  @type client_result() :: :beam_agent_mcp_client_dispatch.client_result()
 
   @typedoc """
   Describes a request that timed out in the client pending-request queue.

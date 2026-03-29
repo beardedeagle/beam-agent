@@ -144,7 +144,10 @@ session history at any time.
     get_native_session_messages/1,
     get_native_session_messages/2,
     session_count/0,
-    message_count/1
+    message_count/1,
+    export_session/1,
+    import_session/1,
+    import_session/2
 ]).
 
 -export_type([
@@ -152,7 +155,9 @@ session history at any time.
     list_opts/0,
     message_opts/0,
     session_share/0,
-    session_summary/0
+    session_summary/0,
+    exported_session/0,
+    import_opts/0
 ]).
 
 %%--------------------------------------------------------------------
@@ -199,6 +204,12 @@ Contains the session ID, generated content, generation timestamp,
 message count at generation time, and the generator identifier.
 """.
 -type session_summary() :: beam_agent_session_store_core:session_summary().
+
+-doc "Versioned session snapshot for export/import.".
+-type exported_session() :: beam_agent_session_store_core:exported_session().
+
+-doc "Options for import_session/2.".
+-type import_opts() :: beam_agent_session_store_core:import_opts().
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -674,3 +685,48 @@ SessionId is the binary session identifier.
 -spec message_count(binary()) -> non_neg_integer().
 message_count(SessionId) ->
     beam_agent_session_store_core:message_count(SessionId).
+
+%%--------------------------------------------------------------------
+%% Export / Import
+%%--------------------------------------------------------------------
+
+-doc """
+Export a session to a versioned, portable snapshot.
+
+Returns the session metadata and all messages (including hidden) in a
+version-1 map. The result can be serialized with `term_to_binary/1`
+or converted to JSON for transport.
+
+Returns `{error, not_found}` if the session does not exist.
+""".
+-spec export_session(binary()) -> {ok, exported_session()} | {error, not_found}.
+export_session(SessionId) ->
+    beam_agent_session_store_core:export_session(SessionId).
+
+-doc """
+Import a session from a previously exported snapshot.
+
+Equivalent to `import_session(Exported, #{})`.
+""".
+-spec import_session(exported_session()) ->
+    {ok, session_meta()} | {error, term()}.
+import_session(Exported) ->
+    beam_agent_session_store_core:import_session(Exported).
+
+-doc """
+Import a session from a previously exported snapshot with options.
+
+Options:
+- `session_id` — override the session id (default: use the exported id)
+
+The session metadata is preserved including the original `created_at`
+timestamp. Messages are re-recorded in order, which assigns fresh
+sequence numbers and updates the message count.
+
+Returns `{error, invalid_export_format}` if the map is not a valid
+version-1 export.
+""".
+-spec import_session(exported_session(), import_opts()) ->
+    {ok, session_meta()} | {error, term()}.
+import_session(Exported, Opts) ->
+    beam_agent_session_store_core:import_session(Exported, Opts).

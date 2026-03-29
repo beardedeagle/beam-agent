@@ -7,7 +7,7 @@ ensure_credential_key_test() ->
 
 config_requirements_include_provider_catalog_test() ->
     SessionId = <<"config-req-session">>,
-    {ok, Requirements} = beam_agent_config_core:config_requirements_read(SessionId),
+    {ok, Requirements} = beam_agent_config:config_requirements_read(SessionId),
     Providers = maps:get(providers, Requirements),
     ?assert(lists:any(fun(#{id := <<"openai">>}) -> true; (_) -> false end, Providers)),
     ?assert(lists:any(fun(#{id := <<"google">>}) -> true; (_) -> false end, Providers)),
@@ -17,7 +17,7 @@ provider_auth_methods_follow_current_provider_test() ->
     ok = beam_agent_runtime_core:clear(),
     SessionId = <<"config-auth-session">>,
     ok = beam_agent_runtime_core:set_provider(SessionId, <<"google">>),
-    {ok, Methods} = beam_agent_config_core:provider_auth_methods(SessionId),
+    {ok, Methods} = beam_agent_config:provider_auth_methods(SessionId),
     ?assert(lists:any(fun
         (#{kind := <<"api_key">>, provider_id := <<"google">>, current := true}) -> true;
         (_) -> false
@@ -31,7 +31,7 @@ provider_auth_methods_follow_current_provider_test() ->
 provider_oauth_authorize_includes_provider_metadata_test() ->
     ok = beam_agent_control_core:clear(),
     SessionId = <<"config-oauth-session">>,
-    {ok, Pending} = beam_agent_config_core:provider_oauth_authorize(SessionId, <<"openai">>, #{
+    {ok, Pending} = beam_agent_config:provider_oauth_authorize(SessionId, <<"openai">>, #{
         authorize_url => <<"https://example.test/oauth">>
     }),
     ?assertEqual(<<"oauth_callback">>, maps:get(auth_method, Pending)),
@@ -48,7 +48,7 @@ provider_auth_methods_accept_session_identity_test() ->
     ok = beam_agent_runtime_core:clear(),
     SessionId = <<"config-auth-id">>,
     ok = beam_agent_runtime_core:set_provider(SessionId, <<"google">>),
-    {ok, Methods} = beam_agent_config_core:provider_auth_methods(SessionId),
+    {ok, Methods} = beam_agent_config:provider_auth_methods(SessionId),
     ?assert(lists:any(fun
         (#{kind := <<"api_key">>, provider_id := <<"google">>, current := true}) -> true;
         (_) -> false
@@ -63,11 +63,11 @@ provider_oauth_callback_redacts_callback_payload_test() ->
         provider_id => <<"openai">>,
         api_key => <<"secret-api-key">>
     }),
-    {ok, Pending} = beam_agent_config_core:provider_oauth_authorize(SessionId, <<"openai">>, #{
+    {ok, Pending} = beam_agent_config:provider_oauth_authorize(SessionId, <<"openai">>, #{
         authorize_url => <<"https://example.test/oauth">>
     }),
     RequestId = maps:get(request_id, Pending),
-    {ok, Callback} = beam_agent_config_core:provider_oauth_callback(SessionId, <<"openai">>, #{
+    {ok, Callback} = beam_agent_config:provider_oauth_callback(SessionId, <<"openai">>, #{
         request_id => RequestId,
         code => <<"secret-code">>,
         access_token => <<"secret-token">>
@@ -77,7 +77,7 @@ provider_oauth_callback_redacts_callback_payload_test() ->
     OAuthCallback = maps:get(oauth_callback, Provider),
     ?assertEqual(redacted, maps:get(code, OAuthCallback)),
     ?assertEqual(redacted, maps:get(access_token, OAuthCallback)),
-    {ok, Config} = beam_agent_config_core:config_read(SessionId),
+    {ok, Config} = beam_agent_config:config_read(SessionId),
     Runtime = maps:get(runtime, Config),
     RuntimeProvider = maps:get(provider, Runtime),
     ?assertEqual(redacted, maps:get(api_key, RuntimeProvider)),
@@ -94,7 +94,7 @@ external_agent_detect_redacts_provider_secrets_test() ->
         provider_id => <<"openai">>,
         api_key => <<"secret-api-key">>
     }),
-    {ok, Detect} = beam_agent_config_core:external_agent_config_detect(SessionId, #{}),
+    {ok, Detect} = beam_agent_config:external_agent_config_detect(SessionId, #{}),
     SanitizedConfig = maps:get(config, Detect),
     Runtime = maps:get(runtime, SanitizedConfig),
     Provider = maps:get(provider, Runtime),

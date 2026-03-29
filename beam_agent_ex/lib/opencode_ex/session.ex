@@ -78,7 +78,7 @@ defmodule OpencodeEx.Session do
            required(:session_id) => binary(),
            required(:stop_reason) => binary(),
            required(:stop_reason_atom) => stop_reason(),
-           required(:structured_output) => term(),
+           required(:structured_output) => map() | binary() | nil,
            required(:subtype) => binary(),
            required(:surpassed_threshold) => number(),
            required(:system_info) => map(),
@@ -121,7 +121,7 @@ defmodule OpencodeEx.Session do
 
       {:ok, response} = OpencodeEx.Session.send_control(session, "ping", %{})
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :opencode_session.send_control(session, method, params)
   end
@@ -129,7 +129,7 @@ defmodule OpencodeEx.Session do
   @doc """
   Interrupt a running query.
   """
-  @spec interrupt(pid()) :: :ok | {:error, term()}
+  @spec interrupt(pid()) :: :ok | {:error, :no_active_query | :reconnecting | :session_error}
   def interrupt(session) do
     :opencode_session.interrupt(session)
   end
@@ -137,7 +137,7 @@ defmodule OpencodeEx.Session do
   @doc """
   Query session info.
   """
-  @spec session_info(pid()) :: {:ok, map()} | {:error, term()}
+  @spec session_info(pid()) :: {:ok, map()} | {:error, :reconnecting | :session_error}
   def session_info(session) do
     :opencode_session.session_info(session)
   end
@@ -145,7 +145,8 @@ defmodule OpencodeEx.Session do
   @doc """
   Change the model at runtime.
   """
-  @spec set_model(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_model(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_model(session, model) do
     :opencode_session.set_model(session, model)
   end
@@ -153,7 +154,8 @@ defmodule OpencodeEx.Session do
   @doc """
   Change the permission mode at runtime.
   """
-  @spec set_permission_mode(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec set_permission_mode(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_permission_mode(session, mode) do
     :opencode_session.set_permission_mode(session, mode)
   end

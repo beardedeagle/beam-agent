@@ -140,7 +140,7 @@ defmodule BeamAgent.Orchestrator do
   @doc """
   Cancel a run and any active orchestrated descendants.
   """
-  @spec cancel(binary(), term()) :: :ok | {:error, term()}
+  @spec cancel(binary(), term()) :: :ok | {:error, :not_found}
   defdelegate cancel(run_id, reason), to: :beam_agent_orchestrator
 
   @doc """

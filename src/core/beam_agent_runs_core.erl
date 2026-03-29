@@ -120,16 +120,16 @@ hardened write proxy is the right level of machinery here.
 -type step_transition_error() ::
     {error, {invalid_status_transition, terminal_current_status(), terminal_status()}}.
 -type run_telemetry_request_meta() :: #{
-    requested_kind := term(),
-    run_id := term(),
+    requested_kind := run_kind() | undefined,
+    run_id := binary() | undefined,
     session_id => binary(),
     thread_id => binary(),
     parent_run_id => binary()
 }.
 -type step_telemetry_request_meta() :: #{
     run_id := binary(),
-    requested_kind := term(),
-    step_id := term()
+    requested_kind := step_kind() | undefined,
+    step_id := binary() | undefined
 }.
 -type run_telemetry_meta() :: #{
     run_id := binary(),
@@ -158,11 +158,11 @@ hardened write proxy is the right level of machinery here.
       | {unsupported_scope_key, atom()}
       | {invalid_status_transition, terminal_current_status(), terminal_status()}}.
 -type telemetry_metadata() :: #{
-    run_id := term(),
+    run_id := binary() | undefined,
     parent_run_id => binary(),
-    requested_kind => term(),
+    requested_kind => run_kind() | step_kind() | undefined,
     session_id => binary(),
-    step_id => term(),
+    step_id => binary() | undefined,
     target_status => terminal_status(),
     thread_id => binary()
 }.
@@ -294,7 +294,7 @@ Runs may only complete once all of their steps are already terminal.
 Use `complete_step/3` first, or fail/cancel the run to cascade active
 step state.
 """.
--spec complete_run(binary(), term()) ->
+-spec complete_run(binary(), term()) ->  %% Result is genuinely term(): caller-provided completion value
     {ok, run()} |
     {error, not_found | active_steps |
         {invalid_status_transition, run_status(), completed}}.
@@ -328,14 +328,14 @@ complete_run(RunId, Result) when is_binary(RunId) ->
     Outcome.
 
 -doc "Fail a running run and cascade failure to active steps.".
--spec fail_run(binary(), term()) ->
+-spec fail_run(binary(), term()) ->  %% ErrorTerm is genuinely term(): caller-provided error reason
     {ok, run()} |
     {error, not_found | {invalid_status_transition, run_status(), failed}}.
 fail_run(RunId, ErrorTerm) when is_binary(RunId) ->
     transition_run_with_step_cascade(RunId, failed, ErrorTerm).
 
 -doc "Cancel a running run and cascade cancellation to active steps.".
--spec cancel_run(binary(), term()) ->
+-spec cancel_run(binary(), term()) ->  %% Reason is genuinely term(): caller-provided cancellation reason
     {ok, run()} |
     {error, not_found | {invalid_status_transition, run_status(), cancelled}}.
 cancel_run(RunId, Reason) when is_binary(RunId) ->
@@ -416,7 +416,7 @@ list_steps(RunId) when is_binary(RunId) ->
     end.
 
 -doc "Complete a running step.".
--spec complete_step(binary(), binary(), term()) ->
+-spec complete_step(binary(), binary(), term()) ->  %% Result is genuinely term(): caller-provided completion value
     {ok, step()} |
     {error, not_found | {invalid_status_transition, step_status(), completed}}.
 complete_step(RunId, StepId, Result)
@@ -424,7 +424,7 @@ complete_step(RunId, StepId, Result)
     transition_step(RunId, StepId, completed, Result).
 
 -doc "Fail a running step.".
--spec fail_step(binary(), binary(), term()) ->
+-spec fail_step(binary(), binary(), term()) ->  %% ErrorTerm is genuinely term(): caller-provided error reason
     {ok, step()} |
     {error, not_found | {invalid_status_transition, step_status(), failed}}.
 fail_step(RunId, StepId, ErrorTerm)
@@ -432,7 +432,7 @@ fail_step(RunId, StepId, ErrorTerm)
     transition_step(RunId, StepId, failed, ErrorTerm).
 
 -doc "Cancel a running step.".
--spec cancel_step(binary(), binary(), term()) ->
+-spec cancel_step(binary(), binary(), term()) ->  %% Reason is genuinely term(): caller-provided cancellation reason
     {ok, step()} |
     {error, not_found | {invalid_status_transition, step_status(), cancelled}}.
 cancel_step(RunId, StepId, Reason)
@@ -608,7 +608,7 @@ normalize_run_filter(Filter) ->
 %% Internal: Transitions
 %%--------------------------------------------------------------------
 
--spec transition_run_with_step_cascade(binary(), failed | cancelled, term()) ->
+-spec transition_run_with_step_cascade(binary(), failed | cancelled, term()) ->  %% Payload is genuinely term(): caller-provided error/cancel payload
     {ok, run()} |
     {error, not_found | {invalid_status_transition, run_status(), failed | cancelled}}.
 transition_run_with_step_cascade(RunId, TargetStatus, Payload) ->
@@ -637,7 +637,7 @@ transition_run_with_step_cascade(RunId, TargetStatus, Payload) ->
     telemetry_finish(run, Operation, StartTime, Result, TeleMeta),
     Result.
 
--spec transition_step(binary(), binary(), completed | failed | cancelled, term()) ->
+-spec transition_step(binary(), binary(), completed | failed | cancelled, term()) ->  %% Payload is genuinely term(): caller-provided result/error/cancel payload
     {ok, step()} |
     {error, not_found | {invalid_status_transition, step_status(),
         completed | failed | cancelled}}.
@@ -685,7 +685,7 @@ active_steps(RunId) ->
     {ok, Steps} = beam_agent_runs_store:list_steps(RunId),
     [Step || #{status := running} = Step <- Steps].
 
--spec cascade_active_steps(binary(), failed | cancelled, term(), integer()) -> ok.
+-spec cascade_active_steps(binary(), failed | cancelled, term(), integer()) -> ok.  %% Payload is genuinely term(): cascaded from caller-provided error/cancel payload
 cascade_active_steps(RunId, TargetStatus, Payload, Now) ->
     {ok, Steps} = beam_agent_runs_store:list_steps(RunId),
     lists:foreach(fun
@@ -698,7 +698,7 @@ cascade_active_steps(RunId, TargetStatus, Payload, Now) ->
     end, Steps),
     ok.
 
--spec terminalize_run(run(), completed | failed | cancelled, term(), term(), term(),
+-spec terminalize_run(run(), completed | failed | cancelled, term(), term(), term(),  %% Result/ErrorTerm/CancelReason are genuinely term(): caller-provided payloads
     integer()) -> run().
 terminalize_run(Run, completed, Result, _ErrorTerm, _CancelReason, Now) ->
     (maps:without([error, cancel_reason], Run))#{
@@ -722,7 +722,7 @@ terminalize_run(Run, cancelled, _Result, _ErrorTerm, CancelReason, Now) ->
         updated_at => Now
     }.
 
--spec terminalize_step(step(), completed | failed | cancelled, term(), integer()) -> step().
+-spec terminalize_step(step(), completed | failed | cancelled, term(), integer()) -> step().  %% Payload is genuinely term(): caller-provided result/error/cancel payload
 terminalize_step(Step, completed, Result, Now) ->
     (maps:without([error, cancel_reason], Step))#{
         status => completed,
@@ -869,7 +869,7 @@ normalize_optional_binary(Key, Map) ->
             {error, {invalid_filter, Key}}
     end.
 
--spec normalize_kind(kind, term(), invalid_run_opt | invalid_step_opt | invalid_filter) ->
+-spec normalize_kind(kind, term(), invalid_run_opt | invalid_step_opt | invalid_filter) ->  %% Value is genuinely term(): validates arbitrary user input
     {ok, atom() | binary()} |
     {error, {invalid_run_opt | invalid_step_opt | invalid_filter, kind}}.
 normalize_kind(_Key, Value, _ErrorTag) when is_atom(Value) ->

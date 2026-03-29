@@ -23,7 +23,11 @@ all BeamAgent backends.
     stream_from/1,
     stream_from/2,
     get/1,
-    ack/2
+    ack/2,
+    %% Audit convenience API
+    list_events/0,
+    list_events/1,
+    get_event/1
 ]).
 
 -export_type([
@@ -31,7 +35,12 @@ all BeamAgent backends.
     tag/0,
     event_input/0,
     event_filter/0,
-    entry/0
+    entry/0,
+    %% Audit types
+    category/0,
+    action/0,
+    audit_event/0,
+    audit_filter/0
 ]).
 
 -doc "Journal event type identifier.".
@@ -48,6 +57,18 @@ all BeamAgent backends.
 
 -doc "Journal entry record returned by the public API.".
 -type entry() :: beam_agent_journal_core:entry().
+
+-doc "Audit event category (e.g., `command`, `policy`, `orchestrator`).".
+-type category() :: beam_agent_audit_core:category().
+
+-doc "Audit event action (e.g., `run`, `delegated`, `allow`).".
+-type action() :: beam_agent_audit_core:action().
+
+-doc "Audit event record returned by the audit API.".
+-type audit_event() :: beam_agent_audit_core:audit_event().
+
+-doc "Filter map accepted by `list_events/1`.".
+-type audit_filter() :: beam_agent_audit_core:audit_filter().
 
 -doc """
 Ensure the journal ETS tables exist.
@@ -118,3 +139,22 @@ get(EventId) ->
 -spec ack(binary(), binary()) -> ok | {error, not_found}.
 ack(ConsumerId, EventId) ->
     beam_agent_journal_core:ack(ConsumerId, EventId).
+
+%%--------------------------------------------------------------------
+%% Audit Convenience API
+%%--------------------------------------------------------------------
+
+-doc "List all audit events, oldest first.".
+-spec list_events() -> {ok, [audit_event()]}.
+list_events() ->
+    beam_agent_audit_core:list_events().
+
+-doc "List audit events with exact-match filters.".
+-spec list_events(audit_filter()) -> {ok, [audit_event()]} | {error, term()}.
+list_events(Filter) ->
+    beam_agent_audit_core:list_events(Filter).
+
+-doc "Fetch an audit event by id.".
+-spec get_event(binary()) -> {ok, audit_event()} | {error, not_found}.
+get_event(EventId) ->
+    beam_agent_audit_core:get_event(EventId).

@@ -64,16 +64,7 @@ defmodule BeamAgent.Runtime do
   view.
   """
   @spec get_state(pid() | binary()) ::
-          {:ok,
-           %{
-             optional(:provider_id) => binary(),
-             optional(:provider) => map(),
-             optional(:model_id) => binary(),
-             optional(:agent) => binary(),
-             optional(:mode) => binary(),
-             optional(:system) => binary() | map(),
-             optional(:tools) => map() | list()
-           }}
+          {:ok, :beam_agent_runtime_core.runtime_state()}
   defdelegate get_state(session), to: :beam_agent_runtime
 
   @doc """
@@ -182,7 +173,7 @@ defmodule BeamAgent.Runtime do
   remains redacted.
   """
   @spec provider_status(pid() | binary()) ::
-          {:ok, %{required(:provider_id) => :undefined | binary(), optional(atom()) => term()}}
+          {:ok, %{required(:provider_id) => :undefined | binary()}}
   defdelegate provider_status(session), to: :beam_agent_runtime
 
   @doc """
@@ -194,7 +185,7 @@ defmodule BeamAgent.Runtime do
   Returns `{:ok, status_map}` with `:provider_id` set.
   """
   @spec provider_status(pid() | binary(), binary()) ::
-          {:ok, %{required(:provider_id) => binary(), optional(atom()) => term()}}
+          {:ok, %{required(:provider_id) => binary()}}
   defdelegate provider_status(session, provider_id), to: :beam_agent_runtime
 
   @doc """
@@ -220,6 +211,113 @@ defmodule BeamAgent.Runtime do
   defdelegate validate_provider_config(provider_id, config), to: :beam_agent_runtime
 
   # ---------------------------------------------------------------------------
+  # Table lifecycle
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Ensure the runtime ETS table exists.
+
+  Creates the runtime state table if it does not already exist. Idempotent.
+  """
+  @spec ensure_tables() :: :ok
+  defdelegate ensure_tables(), to: :beam_agent_runtime
+
+  @doc """
+  Clear all runtime state across every session.
+
+  Deletes all objects from the runtime ETS table. Use this for test cleanup
+  or node-wide reset.
+  """
+  @spec clear() :: :ok
+  defdelegate clear(), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Session lifecycle
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Prime runtime state from session options.
+
+  Extracts canonical runtime keys (`:provider_id`, `:provider`, `:model_id`,
+  `:agent`, `:mode`, `:system`, `:tools`) from the options map and persists them
+  in ETS. Keys with `nil` or `undefined` values are filtered out. Typically
+  called once during session initialization.
+  """
+  @spec register_session(pid() | binary(), map()) :: :ok
+  defdelegate register_session(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Delete all runtime state for a session.
+
+  Removes the session's entry from the runtime ETS table entirely.
+  """
+  @spec clear_session(pid() | binary()) :: :ok
+  defdelegate clear_session(session), to: :beam_agent_runtime
+
+  @doc """
+  Merge runtime defaults into query parameters.
+
+  Combines stored runtime state (`:provider_id`, `:provider`, `:model_id`,
+  `:agent`, `:mode`, `:system`, `:tools`) with the explicit query params.
+  Explicit params always take precedence. Nested provider config maps are
+  merged shallowly.
+  """
+  @spec merge_query_opts(pid() | binary(), map()) :: map()
+  defdelegate merge_query_opts(session, params), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # App registry
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Register or update an app entry for a session.
+
+  Creates a new entry if `app_id` is not yet registered under `session`.
+  Updates the existing entry (merging opts) if it already exists.
+
+  `opts` may include `:name` (binary), `:modes` (list of binaries), and
+  `:metadata` (map).
+  """
+  @spec app_register(pid() | binary(), binary(), map()) ::
+          {:ok, :beam_agent_runtime.app_entry()}
+  defdelegate app_register(session, app_id, opts), to: :beam_agent_runtime
+
+  @doc """
+  Remove an app entry for a session.
+
+  No-op if the entry does not exist.
+  """
+  @spec app_unregister(pid() | binary(), binary()) :: :ok
+  defdelegate app_unregister(session, app_id), to: :beam_agent_runtime
+
+  @doc """
+  Ensure the unified runtime ETS table exists.
+
+  Idempotent. Used by the app registry before any ETS access.
+  """
+  @spec app_ensure_tables() :: :ok
+  defdelegate app_ensure_tables(), to: :beam_agent_runtime
+
+  @doc """
+  Clear all app registry data.
+  """
+  @spec app_clear() :: :ok
+  defdelegate app_clear(), to: :beam_agent_runtime
+
+  @doc false
+  @spec app_info_impl(pid() | binary()) ::
+          {:ok, :beam_agent_runtime.app_entry()} | {:error, :no_app}
+  defdelegate app_info_impl(session), to: :beam_agent_runtime
+
+  @doc false
+  @spec app_init_impl(pid() | binary()) :: {:ok, :beam_agent_runtime.app_entry()}
+  defdelegate app_init_impl(session), to: :beam_agent_runtime
+
+  @doc false
+  @spec app_modes_impl(pid() | binary()) :: {:ok, [binary()]}
+  defdelegate app_modes_impl(session), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
   # Session-scoped runtime operations
   # ---------------------------------------------------------------------------
 
@@ -240,7 +338,7 @@ defmodule BeamAgent.Runtime do
   - `{:ok, model}` on success.
   - `{:error, reason}` on failure.
   """
-  @spec set_model(pid(), binary()) :: {:ok, binary()} | {:error, term()}
+  @spec set_model(pid(), binary()) :: {:ok, binary()} | {:error, :not_supported | term()}
   defdelegate set_model(session, model), to: :beam_agent_runtime
 
   @doc """
@@ -258,7 +356,8 @@ defmodule BeamAgent.Runtime do
   - `{:ok, mode}` on success.
   - `{:error, reason}` on failure.
   """
-  @spec set_permission_mode(pid(), binary()) :: {:ok, binary()} | {:error, term()}
+  @spec set_permission_mode(pid(), binary()) ::
+          {:ok, binary() | map()} | {:error, :not_supported | term()}
   defdelegate set_permission_mode(session, mode), to: :beam_agent_runtime
 
   @doc """
@@ -278,7 +377,7 @@ defmodule BeamAgent.Runtime do
   - `{:error, :not_supported}` if the backend does not support interrupts.
   - `{:error, reason}` on failure.
   """
-  @spec interrupt(pid()) :: :ok | {:error, term()}
+  @spec interrupt(pid()) :: :ok | {:error, :no_active_query | :not_supported | term()}
   defdelegate interrupt(session), to: :beam_agent_runtime
 
   @doc """
@@ -295,7 +394,7 @@ defmodule BeamAgent.Runtime do
 
   - `:ok` or `{:error, reason}`.
   """
-  @spec abort(pid()) :: :ok | {:error, term()}
+  @spec abort(pid()) :: :ok | {:error, :not_supported | term()}
   defdelegate abort(session), to: :beam_agent_runtime
 
   @doc """
@@ -316,7 +415,7 @@ defmodule BeamAgent.Runtime do
   - `{:error, :not_supported}` if the backend does not handle this method.
   - `{:error, reason}` on failure.
   """
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, :not_supported | term()}
   defdelegate send_control(session, method, params), to: :beam_agent_runtime
 
   @doc """
@@ -390,7 +489,7 @@ defmodule BeamAgent.Runtime do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec windows_sandbox_setup_start(pid(), map()) :: {:ok, term()} | {:error, term()}
+  @spec windows_sandbox_setup_start(pid(), map()) :: {:ok, map()} | {:error, term()}
   defdelegate windows_sandbox_setup_start(session, opts), to: :beam_agent_runtime
 
   @doc """
@@ -408,7 +507,7 @@ defmodule BeamAgent.Runtime do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, term()} | {:error, term()}
+  @spec set_max_thinking_tokens(pid(), pos_integer()) :: {:ok, map()} | {:error, term()}
   defdelegate set_max_thinking_tokens(session, max_tokens), to: :beam_agent_runtime
 
   @doc """
@@ -425,6 +524,233 @@ defmodule BeamAgent.Runtime do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec stop_task(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec stop_task(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate stop_task(session, task_id), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Account operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Retrieve account and authentication information for the session's backend.
+
+  Returns details about the authenticated user including identity,
+  subscription plan, usage quotas, and the authentication method in use.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, info_map}` or `{:error, reason}`.
+  """
+  @spec account_info(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_info(session), to: :beam_agent_runtime
+
+  @doc """
+  Initiate an account login flow.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- credentials/OAuth parameters map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_login(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_login(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Cancel an in-progress account login flow.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- should match the original login parameters.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_cancel(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_cancel(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Log out of the current account.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_logout(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_logout(session), to: :beam_agent_runtime
+
+  @doc """
+  Get rate limit information for the current account.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, rate_limit_info}` or `{:error, reason}`.
+  """
+  @spec account_rate_limits(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_rate_limits(session), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # App/project operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  List apps and projects registered for the session.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, apps}` or `{:error, reason}`.
+  """
+  @spec apps_list(pid()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
+  defdelegate apps_list(session), to: :beam_agent_runtime
+
+  @doc """
+  List apps and projects for the session with filter options.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- filter options map.
+
+  ## Returns
+
+  - `{:ok, apps}` or `{:error, reason}`.
+  """
+  @spec apps_list(pid(), map()) :: {:ok, [:beam_agent_runtime.app_entry()]} | {:error, term()}
+  defdelegate apps_list(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Get information about the current app or project context.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, app_info}` or `{:error, reason}`.
+  """
+  @spec app_info(pid()) ::
+          {:ok, :beam_agent_runtime.app_entry()} | {:error, :no_app | term()}
+  defdelegate app_info(session), to: :beam_agent_runtime
+
+  @doc """
+  Initialize the app/project context by scanning the working directory.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, reason}`.
+  """
+  @spec app_init(pid()) :: {:ok, :beam_agent_runtime.app_entry()} | {:error, term()}
+  defdelegate app_init(session), to: :beam_agent_runtime
+
+  @doc """
+  Append a log entry to the session's app log.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `body` -- log entry map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec app_log(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate app_log(session, body), to: :beam_agent_runtime
+
+  @doc """
+  List available app modes for the session.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, modes}` or `{:error, reason}`.
+  """
+  @spec app_modes(pid()) :: {:ok, [binary()]} | {:error, term()}
+  defdelegate app_modes(session), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Todo operations
+  # ---------------------------------------------------------------------------
+
+  @typedoc "Todo item status: `:pending`, `:in_progress`, or `:completed`."
+  @type todo_status() :: :beam_agent_runtime.todo_status()
+
+  @typedoc "A parsed todo item map with `:content`, `:status`, and optional `:active_form`."
+  @type todo_item() :: :beam_agent_runtime.todo_item()
+
+  @doc """
+  Extract all todo items from a flat list of messages.
+
+  Scans the message list for messages that carry todo arrays and returns
+  all todo items in order. Pure function -- no ETS, no side effects.
+
+  ## Parameters
+
+  - `messages` -- list of session messages.
+
+  ## Returns
+
+  A list of todo item maps.
+  """
+  @spec extract_todos([BeamAgent.message()]) :: [todo_item()]
+  defdelegate extract_todos(messages), to: :beam_agent_runtime
+
+  @doc """
+  Filter a todo list by status.
+
+  ## Parameters
+
+  - `todos` -- list of todo item maps.
+  - `status` -- atom (`:pending`, `:in_progress`, or `:completed`).
+
+  ## Returns
+
+  Filtered list of todo items.
+  """
+  @spec filter_by_status([todo_item()], todo_status()) :: [todo_item()]
+  defdelegate filter_by_status(todos, status), to: :beam_agent_runtime
+
+  @doc """
+  Summarize a todo list as a count map.
+
+  ## Parameters
+
+  - `todos` -- list of todo item maps.
+
+  ## Returns
+
+  A map with `:total` and one key per distinct status.
+  """
+  @spec todo_summary([todo_item()]) ::
+          %{required(:total) => non_neg_integer(), atom() => non_neg_integer()}
+  defdelegate todo_summary(todos), to: :beam_agent_runtime
 end

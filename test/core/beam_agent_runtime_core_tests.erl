@@ -137,8 +137,8 @@ raw_ets_shows_protected_provider_config_test() ->
     %% but the top-level state map goes through protect which encrypts
     %% any top-level sensitive keys. Verify by checking that the
     %% provider sub-map roundtrips correctly through get_state.
-    Key = beam_agent_ets:session_key(SessionId),
-    [{_, RawState}] = ets:lookup(beam_agent_runtime_core, Key),
+    Key = {runtime, beam_agent_ets:session_key(SessionId)},
+    [{_, RawState}] = ets:lookup(beam_agent_runtime, Key),
     %% provider_id at top level is not sensitive, should be present as-is
     ?assertEqual(<<"openai">>, maps:get(provider_id, RawState)),
     %% The state should roundtrip correctly through get_state

@@ -29,6 +29,7 @@ end, Matches).
 -export([
     ensure_tables/0,
     clear/0,
+    configure_persistence/1,
     remember/2,
     remember/3,
     get/1,
@@ -51,7 +52,12 @@ end, Matches).
     memory_input/0,
     update_input/0,
     memory_filter/0,
-    memory_record/0
+    memory_record/0,
+    scope_error/0,
+    memory_input_error/0,
+    memory_update_error/0,
+    memory_filter_error/0,
+    memory_operation/0
 ]).
 
 -type scope() :: beam_agent_memory_core:scope().
@@ -60,6 +66,11 @@ end, Matches).
 -type update_input() :: beam_agent_memory_core:update_input().
 -type memory_filter() :: beam_agent_memory_core:memory_filter().
 -type memory_record() :: beam_agent_memory_core:memory_record().
+-type scope_error() :: beam_agent_memory_core:scope_error().
+-type memory_input_error() :: beam_agent_memory_core:memory_input_error().
+-type memory_update_error() :: beam_agent_memory_core:memory_update_error().
+-type memory_filter_error() :: beam_agent_memory_core:memory_filter_error().
+-type memory_operation() :: beam_agent_memory_core:memory_operation().
 
 -doc "Ensure the memory store exists. Idempotent.".
 -spec ensure_tables() -> ok.
@@ -71,15 +82,37 @@ ensure_tables() ->
 clear() ->
     beam_agent_memory_core:clear().
 
+-doc """
+Configure a persistence adapter for the memory domain.
+
+By default memories live in ETS and vanish on VM restart. Call this
+function to switch to a durable adapter such as `beam_agent_store_dets`.
+
+```erlang
+beam_agent_memory:configure_persistence(#{
+    adapter => beam_agent_store_dets,
+    options => #{data_dir => "/tmp/beam_agent"}
+}).
+```
+
+When using DETS, callers must call
+`beam_agent_store_dets:close_table(beam_agent_memory_records)` during
+application shutdown to flush pending writes.
+""".
+-spec configure_persistence(beam_agent_store:store_config()) ->
+    ok | {error, invalid_options | {invalid_adapter, atom()}}.
+configure_persistence(Config) ->
+    beam_agent_store:configure_domain(memory, Config).
+
 -doc "Remember content with embedded or explicit kind on a scope.".
 -spec remember(binary() | scope(), memory_input()) ->
-    {ok, memory_record()} | {error, term()}.
+    {ok, memory_record()} | {error, memory_input_error()}.
 remember(Scope, MemoryInput) ->
     beam_agent_memory_core:remember(Scope, MemoryInput).
 
 -doc "Remember content with an explicit kind on a scope.".
 -spec remember(binary() | scope(), atom() | binary(), memory_input()) ->
-    {ok, memory_record()} | {error, term()}.
+    {ok, memory_record()} | {error, memory_input_error()}.
 remember(Scope, Kind, MemoryInput) ->
     beam_agent_memory_core:remember(Scope, Kind, MemoryInput).
 
@@ -94,24 +127,23 @@ list() ->
     beam_agent_memory_core:list().
 
 -doc "List memories with exact-match filters and visibility controls.".
--spec list(memory_filter()) -> {ok, [memory_record()]} | {error, term()}.
+-spec list(memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
 list(Filter) ->
     beam_agent_memory_core:list(Filter).
 
 -doc "Recall memories for a scope using lexical search.".
 -spec recall(binary() | scope(), binary()) ->
-    {ok, [memory_record()]} | {error, term()}.
+    {ok, [memory_record()]} | {error, scope_error() | memory_filter_error()}.
 recall(Scope, Query) ->
     beam_agent_memory_core:recall(Scope, Query).
 
 -doc "Search memories across all scopes.".
--spec search(binary()) -> {ok, [memory_record()]} | {error, term()}.
+-spec search(binary()) -> {ok, [memory_record()]}.
 search(Query) ->
     beam_agent_memory_core:search(Query).
 
 -doc "Search memories with a lexical query plus exact-match filters.".
--spec search(binary(), memory_filter()) ->
-    {ok, [memory_record()]} | {error, term()}.
+-spec search(binary(), memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
 search(Query, Filter) ->
     beam_agent_memory_core:search(Query, Filter).
 
@@ -132,7 +164,7 @@ When `ttl` is updated, `expires_at` is automatically recalculated from the
 current time. The `updated_at` timestamp is always refreshed.
 """.
 -spec update(binary(), update_input()) ->
-    {ok, memory_record()} | {error, not_found | {immutable_field, atom()} | term()}.
+    {ok, memory_record()} | {error, memory_update_error()}.
 update(MemoryId, Changes) ->
     beam_agent_memory_core:update(MemoryId, Changes).
 
@@ -152,11 +184,6 @@ expire() ->
     beam_agent_memory_core:expire().
 
 -doc "Expire currently expired, unpinned memories matching a filter.".
--spec expire(memory_filter()) ->
-    {ok, non_neg_integer()} |
-    {error, {invalid_filter, before | include_expired | kind | limit | memory_id |
-        min_salience | pinned | run_id | session_id | since | source_ref_id |
-        source_ref_type | thread_id} |
-        {invalid_scope, memory_id | run_id | session_id | source_ref_id | thread_id}}.
+-spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, memory_filter_error()}.
 expire(Filter) ->
     beam_agent_memory_core:expire(Filter).

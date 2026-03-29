@@ -81,20 +81,17 @@ proxied through the table owner in hardened mode.
     since => integer()
 }.
 
--define(RUNS_TABLE, beam_agent_run_records).
--define(STEPS_TABLE, beam_agent_run_steps).
+-define(DOMAINS_TABLE, beam_agent_domains).
 -define(STORE_DOMAIN, runs).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
 %%--------------------------------------------------------------------
 
--doc "Ensure the runs ETS tables exist. Idempotent.".
+-doc "Ensure the shared domains table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?RUNS_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_store:ensure_table(?STORE_DOMAIN, ?STEPS_TABLE, [set, named_table,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?DOMAINS_TABLE, [set, named_table,
         {read_concurrency, true}]),
     ok.
 
@@ -102,8 +99,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?RUNS_TABLE),
-    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?STEPS_TABLE),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{run, '_'}, '_'}),
+    beam_agent_ets:match_delete(?DOMAINS_TABLE, {{run_step, '_'}, '_'}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -114,20 +111,20 @@ clear() ->
 -spec insert_run(run_record()) -> boolean().
 insert_run(#{run_id := RunId} = Run) when is_binary(RunId) ->
     ensure_tables(),
-    beam_agent_store:insert_new(?STORE_DOMAIN, ?RUNS_TABLE, {RunId, Run}).
+    beam_agent_store:insert_new(?STORE_DOMAIN, ?DOMAINS_TABLE, {{run, RunId}, Run}).
 
 -doc "Overwrite or insert a run record.".
 -spec put_run(run_record()) -> ok.
 put_run(#{run_id := RunId} = Run) when is_binary(RunId) ->
     ensure_tables(),
-    true = beam_agent_store:insert(?STORE_DOMAIN, ?RUNS_TABLE, {RunId, Run}),
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE, {{run, RunId}, Run}),
     ok.
 
 -doc "Fetch a run by id.".
 -spec get_run(binary()) -> {ok, run_record()} | {error, not_found}.
 get_run(RunId) when is_binary(RunId) ->
     ensure_tables(),
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?RUNS_TABLE, RunId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, {run, RunId}) of
         [{_, Run}] -> {ok, Run};
         [] -> {error, not_found}
     end.
@@ -137,12 +134,14 @@ get_run(RunId) when is_binary(RunId) ->
 list_runs(Filter) when is_map(Filter) ->
     ensure_tables(),
     Runs = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({_, Run}, Acc) ->
+        ({{run, _}, Run}, Acc) ->
             case matches_filters(Run, Filter) of
                 true -> [Run | Acc];
                 false -> Acc
-            end
-    end, [], ?RUNS_TABLE),
+            end;
+        (_, Acc) ->
+            Acc
+    end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_runs/2, Runs),
     {ok, apply_limit(Sorted, Filter)}.
 
@@ -155,24 +154,24 @@ list_runs(Filter) when is_map(Filter) ->
 insert_step(#{run_id := RunId, step_id := StepId} = Step)
   when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
-    Key = {RunId, StepId},
-    beam_agent_store:insert_new(?STORE_DOMAIN, ?STEPS_TABLE, {Key, Step}).
+    Key = {run_step, {RunId, StepId}},
+    beam_agent_store:insert_new(?STORE_DOMAIN, ?DOMAINS_TABLE, {Key, Step}).
 
 -doc "Overwrite or insert a step record.".
 -spec put_step(step_record()) -> ok.
 put_step(#{run_id := RunId, step_id := StepId} = Step)
   when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
-    Key = {RunId, StepId},
-    true = beam_agent_store:insert(?STORE_DOMAIN, ?STEPS_TABLE, {Key, Step}),
+    Key = {run_step, {RunId, StepId}},
+    true = beam_agent_store:insert(?STORE_DOMAIN, ?DOMAINS_TABLE, {Key, Step}),
     ok.
 
 -doc "Fetch a step by run id and step id.".
 -spec get_step(binary(), binary()) -> {ok, step_record()} | {error, not_found}.
 get_step(RunId, StepId) when is_binary(RunId), is_binary(StepId) ->
     ensure_tables(),
-    Key = {RunId, StepId},
-    case beam_agent_store:lookup(?STORE_DOMAIN, ?STEPS_TABLE, Key) of
+    Key = {run_step, {RunId, StepId}},
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?DOMAINS_TABLE, Key) of
         [{_, Step}] -> {ok, Step};
         [] -> {error, not_found}
     end.
@@ -182,11 +181,11 @@ get_step(RunId, StepId) when is_binary(RunId), is_binary(StepId) ->
 list_steps(RunId) when is_binary(RunId) ->
     ensure_tables(),
     Steps = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({{StepRunId, _}, Step}, Acc) when StepRunId =:= RunId ->
+        ({{run_step, {StepRunId, _}}, Step}, Acc) when StepRunId =:= RunId ->
             [Step | Acc];
         (_, Acc) ->
             Acc
-    end, [], ?STEPS_TABLE),
+    end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_steps/2, Steps),
     {ok, Sorted}.
 

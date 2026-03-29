@@ -1,5 +1,9 @@
 -module(copilot_client).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
+
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
 -type session_meta() :: beam_agent_adapter_types:session_meta().
 -type session_share() :: beam_agent_adapter_types:session_share().
 -type session_summary() :: beam_agent_adapter_types:session_summary().
@@ -217,10 +221,10 @@ query(Session, Prompt, Params) ->
         {error, _} = Err ->
             Err
     end.
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 session_info(Session) ->
     copilot_session:session_info(Session).
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_model(Session, Model) ->
     copilot_session:set_model(Session, Model).
 -spec resume_session(binary()) -> {ok, pid()} | {error, term()}.
@@ -229,10 +233,10 @@ resume_session(SessionId) when is_binary(SessionId) ->
 -spec resume_session(binary(), map()) -> {ok, pid()} | {error, term()}.
 resume_session(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
     start_session(Opts#{session_id => SessionId, resume => true}).
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, 'no_active_query' | 'reconnecting' | 'session_error'}.
 interrupt(Session) ->
     copilot_session:interrupt(Session).
--spec abort(pid()) -> ok | {error, term()}.
+-spec abort(pid()) -> ok | {error, 'no_active_query' | 'reconnecting' | 'session_error'}.
 abort(Session) ->
     interrupt(Session).
 -spec health(pid()) -> session_health().
@@ -244,20 +248,20 @@ set_permission_mode(Session, Mode) ->
     beam_agent_control_core:set_permission_mode(SessionId, Mode),
     {ok, #{permission_mode => Mode}}.
 -spec send_command(pid(), binary(), map()) ->
-                      {ok, term()} | {error, term()}.
+                      {ok, map()} | {error, term()}.
 send_command(Session, Method, Params) ->
     copilot_session:send_control(Session, Method, Params).
 -spec send_control(pid(), binary(), map()) ->
-                      {ok, term()} | {error, term()}.
+                      {ok, map()} | {error, term()}.
 send_control(Session, Method, Params) ->
     send_command(Session, Method, Params).
--spec get_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_status(pid()) -> {ok, map()} | {error, term()}.
 get_status(Session) ->
     send_command(Session, <<"status.get">>, #{}).
--spec get_auth_status(pid()) -> {ok, term()} | {error, term()}.
+-spec get_auth_status(pid()) -> {ok, map()} | {error, term()}.
 get_auth_status(Session) ->
     send_command(Session, <<"auth.getStatus">>, #{}).
--spec model_list(pid()) -> {ok, term()} | {error, term()}.
+-spec model_list(pid()) -> {ok, map()} | {error, term()}.
 model_list(Session) ->
     send_command(Session, <<"models.list">>, #{}).
 -spec get_last_session_id(pid()) ->
@@ -289,8 +293,6 @@ list_server_sessions(Session, Filter) when is_map(Filter) ->
             {ok, Sessions};
         {ok, #{sessions := Sessions}} when is_list(Sessions) ->
             {ok, Sessions};
-        {ok, Sessions} when is_list(Sessions) ->
-            {ok, Sessions};
         {ok, _} = Ok ->
             Ok;
         {error, _} = Err ->
@@ -311,26 +313,26 @@ get_server_session(Session, SessionId) when is_binary(SessionId) ->
             Err
     end.
 -spec delete_server_session(pid(), binary()) ->
-                               {ok, term()} | {error, term()}.
+                               {ok, map()} | {error, term()}.
 delete_server_session(Session, SessionId) when is_binary(SessionId) ->
     send_command(Session,
                  <<"session.delete">>,
                  #{<<"sessionId">> => SessionId}).
--spec session_get_messages(pid()) -> {ok, term()} | {error, term()}.
+-spec session_get_messages(pid()) -> {ok, map()} | {error, term()}.
 session_get_messages(Session) ->
     SessionId = get_session_id(Session),
     session_get_messages(Session, SessionId).
 -spec session_get_messages(pid(), binary()) ->
-                              {ok, term()} | {error, term()}.
+                              {ok, map()} | {error, term()}.
 session_get_messages(Session, SessionId) when is_binary(SessionId) ->
     send_command(Session,
                  <<"session.getMessages">>,
                  #{<<"sessionId">> => SessionId}).
--spec session_destroy(pid()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid()) -> {ok, map()} | {error, term()}.
 session_destroy(Session) ->
     SessionId = get_session_id(Session),
     session_destroy(Session, SessionId).
--spec session_destroy(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec session_destroy(pid(), binary()) -> {ok, map()} | {error, term()}.
 session_destroy(Session, SessionId) when is_binary(SessionId) ->
     send_command(Session,
                  <<"session.destroy">>,
@@ -474,7 +476,7 @@ mcp_server_status(Session) ->
             {ok, #{}}
     end.
 -spec set_mcp_servers(pid(), [beam_agent_tool_registry:sdk_mcp_server()]) ->
-                         {ok, term()} | {error, term()}.
+                         {ok, map()} | {error, term()}.
 set_mcp_servers(Session, Servers) ->
     case
         beam_agent_tool_registry:update_session_registry(Session,
@@ -597,7 +599,7 @@ receive_event(_Session, Ref, Timeout) ->
 -spec event_unsubscribe(pid(), reference()) -> ok | {error, bad_ref}.
 event_unsubscribe(Session, Ref) ->
     beam_agent_events:unsubscribe(get_session_id(Session), Ref).
--spec model_list(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec model_list(pid(), map()) -> {ok, map()} | {error, term()}.
 model_list(Session, _Opts) ->
     model_list(Session).
 -spec list_server_agents(pid()) -> {ok, [map()]} | {error, term()}.
@@ -701,33 +703,33 @@ turn_interrupt(Session, ThreadId, TurnId) ->
     end.
 -spec thread_realtime_start(pid(), map()) -> {ok, map()}.
 thread_realtime_start(Session, Params) when is_map(Params) ->
-    beam_agent_collaboration:start_realtime(get_session_id(Session), with_backend(Params, copilot)).
+    beam_agent_control:start_realtime(get_session_id(Session), with_backend(Params, copilot)).
 -spec thread_realtime_append_audio(pid(), binary(), map()) -> {ok, map()} | {error, not_found}.
 thread_realtime_append_audio(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
-    beam_agent_collaboration:append_realtime_audio(get_session_id(Session), ThreadId, Params).
+    beam_agent_control:append_realtime_audio(get_session_id(Session), ThreadId, Params).
 -spec thread_realtime_append_text(pid(), binary(), map()) -> {ok, map()} | {error, not_found}.
 thread_realtime_append_text(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
-    beam_agent_collaboration:append_realtime_text(get_session_id(Session), ThreadId, Params).
+    beam_agent_control:append_realtime_text(get_session_id(Session), ThreadId, Params).
 -spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, not_found}.
 thread_realtime_stop(Session, ThreadId) when is_binary(ThreadId) ->
-    beam_agent_collaboration:stop_realtime(get_session_id(Session), ThreadId).
+    beam_agent_control:stop_realtime(get_session_id(Session), ThreadId).
 -spec review_start(pid(), map()) -> {ok, map()}.
 review_start(Session, Params) when is_map(Params) ->
-    beam_agent_collaboration:start_review(get_session_id(Session), with_backend(Params, copilot)).
+    beam_agent_control:start_review(get_session_id(Session), with_backend(Params, copilot)).
 -spec collaboration_mode_list(pid()) -> {ok, adapter_status()}.
 collaboration_mode_list(Session) ->
-    {ok, Result} = beam_agent_collaboration:collaboration_modes(get_session_id(Session)),
+    {ok, Result} = beam_agent_control:collaboration_modes(get_session_id(Session)),
     {ok, with_adapter_source(Result)}.
 -spec experimental_feature_list(pid()) -> {ok, adapter_status()}.
 experimental_feature_list(Session) ->
     experimental_feature_list(Session, #{}).
 -spec experimental_feature_list(pid(), map()) -> {ok, adapter_status()}.
 experimental_feature_list(Session, Opts) when is_map(Opts) ->
-    {ok, Result} = beam_agent_collaboration:experimental_features(get_session_id(Session), Opts),
+    {ok, Result} = beam_agent_control:experimental_features(get_session_id(Session), Opts),
     {ok, with_adapter_source(Result)}.
--spec list_commands(pid()) -> {ok, list()} | {error, term()}.
+-spec list_commands(pid()) -> {ok, list()} | {error, 'reconnecting' | 'session_error'}.
 list_commands(Session) ->
     supported_commands(Session).
 -spec skills_list(pid()) -> {ok, [map()]} | {error, term()}.
@@ -753,7 +755,7 @@ mcp_status(Session) ->
 -spec mcp_server_status_list(pid()) -> {ok, #{binary() => map()}}.
 mcp_server_status_list(Session) ->
     mcp_server_status(Session).
--spec account_rate_limits(pid()) -> {ok, map()} | {error, term()}.
+-spec account_rate_limits(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 account_rate_limits(Session) ->
     account_info(Session).
 -spec with_adapter_source(map()) -> adapter_status().
@@ -886,146 +888,146 @@ receive_message_from(Session, Ref, Timeout) ->
 %%====================================================================
 
 %% Session management
--spec session_model_current(pid()) -> {ok, term()} | {error, term()}.
+-spec session_model_current(pid()) -> {ok, map()} | {error, term()}.
 session_model_current(Session) ->
     send_command(Session, <<"session.model.getCurrent">>, #{}).
 
--spec session_mode_get(pid()) -> {ok, term()} | {error, term()}.
+-spec session_mode_get(pid()) -> {ok, map()} | {error, term()}.
 session_mode_get(Session) ->
     send_command(Session, <<"session.mode.get">>, #{}).
 
--spec session_mode_set(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec session_mode_set(pid(), binary()) -> {ok, map()} | {error, term()}.
 session_mode_set(Session, Mode) when is_binary(Mode) ->
     send_command(Session, <<"session.mode.set">>, #{<<"mode">> => Mode}).
 
--spec session_plan_read(pid()) -> {ok, term()} | {error, term()}.
+-spec session_plan_read(pid()) -> {ok, map()} | {error, term()}.
 session_plan_read(Session) ->
     send_command(Session, <<"session.plan.read">>, #{}).
 
--spec session_plan_update(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec session_plan_update(pid(), map()) -> {ok, map()} | {error, term()}.
 session_plan_update(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.plan.update">>, Params).
 
--spec session_plan_delete(pid()) -> {ok, term()} | {error, term()}.
+-spec session_plan_delete(pid()) -> {ok, map()} | {error, term()}.
 session_plan_delete(Session) ->
     send_command(Session, <<"session.plan.delete">>, #{}).
 
--spec session_foreground_get(pid()) -> {ok, term()} | {error, term()}.
+-spec session_foreground_get(pid()) -> {ok, map()} | {error, term()}.
 session_foreground_get(Session) ->
     send_command(Session, <<"session.getForeground">>, #{}).
 
--spec session_foreground_set(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec session_foreground_set(pid(), map()) -> {ok, map()} | {error, term()}.
 session_foreground_set(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.setForeground">>, Params).
 
--spec session_log(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec session_log(pid(), map()) -> {ok, map()} | {error, term()}.
 session_log(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.log">>, Params).
 
 %% Workspace
--spec workspace_list_files(pid()) -> {ok, term()} | {error, term()}.
+-spec workspace_list_files(pid()) -> {ok, map()} | {error, term()}.
 workspace_list_files(Session) ->
     send_command(Session, <<"session.workspace.listFiles">>, #{}).
 
--spec workspace_read_file(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec workspace_read_file(pid(), binary()) -> {ok, map()} | {error, term()}.
 workspace_read_file(Session, Path) when is_binary(Path) ->
     send_command(Session, <<"session.workspace.readFile">>,
                  #{<<"path">> => Path}).
 
--spec workspace_create_file(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec workspace_create_file(pid(), map()) -> {ok, map()} | {error, term()}.
 workspace_create_file(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.workspace.createFile">>, Params).
 
 %% Agents
--spec agent_list(pid()) -> {ok, term()} | {error, term()}.
+-spec agent_list(pid()) -> {ok, map()} | {error, term()}.
 agent_list(Session) ->
     send_command(Session, <<"session.agent.list">>, #{}).
 
--spec agent_current(pid()) -> {ok, term()} | {error, term()}.
+-spec agent_current(pid()) -> {ok, map()} | {error, term()}.
 agent_current(Session) ->
     send_command(Session, <<"session.agent.getCurrent">>, #{}).
 
--spec agent_select(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec agent_select(pid(), binary()) -> {ok, map()} | {error, term()}.
 agent_select(Session, AgentId) when is_binary(AgentId) ->
     send_command(Session, <<"session.agent.select">>,
                  #{<<"agentId">> => AgentId}).
 
--spec agent_deselect(pid()) -> {ok, term()} | {error, term()}.
+-spec agent_deselect(pid()) -> {ok, map()} | {error, term()}.
 agent_deselect(Session) ->
     send_command(Session, <<"session.agent.deselect">>, #{}).
 
--spec agent_reload(pid()) -> {ok, term()} | {error, term()}.
+-spec agent_reload(pid()) -> {ok, map()} | {error, term()}.
 agent_reload(Session) ->
     send_command(Session, <<"session.agent.reload">>, #{}).
 
 %% Skills
--spec skills_enable(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec skills_enable(pid(), binary()) -> {ok, map()} | {error, term()}.
 skills_enable(Session, SkillId) when is_binary(SkillId) ->
     send_command(Session, <<"session.skills.enable">>,
                  #{<<"skillId">> => SkillId}).
 
--spec skills_disable(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec skills_disable(pid(), binary()) -> {ok, map()} | {error, term()}.
 skills_disable(Session, SkillId) when is_binary(SkillId) ->
     send_command(Session, <<"session.skills.disable">>,
                  #{<<"skillId">> => SkillId}).
 
--spec skills_reload(pid()) -> {ok, term()} | {error, term()}.
+-spec skills_reload(pid()) -> {ok, map()} | {error, term()}.
 skills_reload(Session) ->
     send_command(Session, <<"session.skills.reload">>, #{}).
 
 %% MCP
--spec mcp_list(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_list(pid()) -> {ok, map()} | {error, term()}.
 mcp_list(Session) ->
     send_command(Session, <<"session.mcp.list">>, #{}).
 
--spec mcp_enable(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec mcp_enable(pid(), binary()) -> {ok, map()} | {error, term()}.
 mcp_enable(Session, ServerId) when is_binary(ServerId) ->
     send_command(Session, <<"session.mcp.enable">>,
                  #{<<"serverId">> => ServerId}).
 
--spec mcp_disable(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec mcp_disable(pid(), binary()) -> {ok, map()} | {error, term()}.
 mcp_disable(Session, ServerId) when is_binary(ServerId) ->
     send_command(Session, <<"session.mcp.disable">>,
                  #{<<"serverId">> => ServerId}).
 
--spec mcp_reload(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_reload(pid()) -> {ok, map()} | {error, term()}.
 mcp_reload(Session) ->
     send_command(Session, <<"session.mcp.reload">>, #{}).
 
 %% Fleet, plugins, compaction
--spec fleet_start(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec fleet_start(pid(), map()) -> {ok, map()} | {error, term()}.
 fleet_start(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.fleet.start">>, Params).
 
--spec plugins_list(pid()) -> {ok, term()} | {error, term()}.
+-spec plugins_list(pid()) -> {ok, map()} | {error, term()}.
 plugins_list(Session) ->
     send_command(Session, <<"session.plugins.list">>, #{}).
 
--spec compaction_compact(pid()) -> {ok, term()} | {error, term()}.
+-spec compaction_compact(pid()) -> {ok, map()} | {error, term()}.
 compaction_compact(Session) ->
     send_command(Session, <<"session.compaction.compact">>, #{}).
 
 %% Shell
--spec shell_exec(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec shell_exec(pid(), binary()) -> {ok, map()} | {error, term()}.
 shell_exec(Session, Command) when is_binary(Command) ->
     send_command(Session, <<"session.shell.exec">>,
                  #{<<"command">> => Command}).
 
--spec shell_kill(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec shell_kill(pid(), binary()) -> {ok, map()} | {error, term()}.
 shell_kill(Session, ProcessId) when is_binary(ProcessId) ->
     send_command(Session, <<"session.shell.kill">>,
                  #{<<"processId">> => ProcessId}).
 
 %% UI, tools, account
--spec ui_elicitation(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec ui_elicitation(pid(), map()) -> {ok, map()} | {error, term()}.
 ui_elicitation(Session, Params) when is_map(Params) ->
     send_command(Session, <<"session.ui.elicitation">>, Params).
 
--spec tools_list(pid()) -> {ok, term()} | {error, term()}.
+-spec tools_list(pid()) -> {ok, map()} | {error, term()}.
 tools_list(Session) ->
     send_command(Session, <<"tools.list">>, #{}).
 
--spec account_quota(pid()) -> {ok, term()} | {error, term()}.
+-spec account_quota(pid()) -> {ok, map()} | {error, term()}.
 account_quota(Session) ->
     send_command(Session, <<"account.getQuota">>, #{}).
 
@@ -1099,7 +1101,7 @@ session_matches_id(SessionId, Session) when is_map(Session) ->
                          init_response_key(),
                          system_info_key(),
                          init_default()) ->
-                            {ok, term()} | {error, term()}.
+                            {ok, _} | {error, reconnecting | session_error}.
 extract_init_field(Session, IRKey, SIKey, Default) ->
     case session_info(Session) of
         {ok, Info} ->
@@ -1132,3 +1134,22 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> copilot.
+backend_name() -> copilot.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].

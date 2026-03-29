@@ -128,6 +128,16 @@
 -define(PT_VALIDATOR_MOD, beam_agent_guard_validator_mod).
 -define(PT_HISTORY_MAX, beam_agent_guard_history_max).
 
+%% do_evaluate calls erlang:apply/3 with a validator module retrieved from
+%% persistent_term, which dialyzer cannot resolve statically. This causes
+%% it to infer that the dynamic call always crashes (catch-only path), so
+%% it reports that 'allow' is never returned. Suppress the contract warning.
+-dialyzer({no_contracts, [{do_evaluate, 2},
+                          {handle_active_evaluate, 2},
+                          {check_and_bump_rate_limits, 2},
+                          {check_and_bump_program, 3},
+                          {check_and_bump_category, 3}]}).
+
 %%--------------------------------------------------------------------
 %% API
 %%--------------------------------------------------------------------
@@ -473,7 +483,7 @@ check_and_bump_category(Category, Now, RC) ->
 %%   - If the new count exceeds the limit, report exceeded (the bump
 %%     stays as a record of the denied attempt — safe direction).
 %%   - Otherwise, the bump counts a successful check.
--spec check_and_bump_one(term(), integer(),
+-spec check_and_bump_one({atom(), atom()} | {binary(), binary()} | binary(), integer(),
                          {pos_integer(), pos_integer()} | undefined) ->
     ok | {exceeded, pos_integer()}.
 check_and_bump_one(_Key, _Now, undefined) -> ok;
@@ -663,7 +673,7 @@ get_history_since(CutoffTime) ->
 get_recent_history(N) ->
     collect_last(?HISTORY_TABLE, ets:last(?HISTORY_TABLE), N, []).
 
--spec collect_last(atom(), term(), non_neg_integer(), [map()]) -> [map()].
+-spec collect_last(atom(), '$end_of_table' | integer(), non_neg_integer(), [map()]) -> [map()].
 collect_last(_T, '$end_of_table', _N, Acc) -> Acc;
 collect_last(_T, _Key, 0, Acc) -> Acc;
 collect_last(T, Key, N, Acc) ->

@@ -1,10 +1,10 @@
--module(beam_agent_collaboration_tests).
+-module(beam_agent_control_collaboration_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
 start_review_populates_stage_history_and_metrics_test() ->
     reset_state(),
-    {ok, Review} = beam_agent_collaboration:start_review(<<"review-session">>, #{
+    {ok, Review} = beam_agent_control:start_review(<<"review-session">>, #{
         backend => gemini,
         target => <<"pull-request">>,
         stage => <<"triage">>,
@@ -29,7 +29,7 @@ start_review_populates_stage_history_and_metrics_test() ->
 
 realtime_tracks_transport_metadata_and_event_counts_test() ->
     reset_state(),
-    {ok, Realtime0} = beam_agent_collaboration:start_realtime(<<"realtime-session">>, #{
+    {ok, Realtime0} = beam_agent_control:start_realtime(<<"realtime-session">>, #{
         backend => gemini,
         mode => <<"voice">>,
         transport => mediated,
@@ -43,13 +43,13 @@ realtime_tracks_transport_metadata_and_event_counts_test() ->
     ?assertEqual(<<"pcm16">>, maps:get(codec, TransportMeta)),
     ?assertEqual(16000, maps:get(sample_rate, TransportMeta)),
     {ok, Realtime1} =
-        beam_agent_collaboration:append_realtime_text(<<"realtime-session">>, ThreadId, #{
+        beam_agent_control:append_realtime_text(<<"realtime-session">>, ThreadId, #{
             text => <<"hello realtime">>
         }),
     ?assertEqual(2, maps:get(event_count, Realtime1)),
     ?assertEqual(1, maps:get(text_chunks, maps:get(input_summary, Realtime1))),
     {ok, Realtime2} =
-        beam_agent_collaboration:append_realtime_audio(<<"realtime-session">>, ThreadId, #{
+        beam_agent_control:append_realtime_audio(<<"realtime-session">>, ThreadId, #{
             mime => <<"audio/wav">>,
             path => <<"/tmp/realtime.wav">>,
             size => 42
@@ -57,14 +57,14 @@ realtime_tracks_transport_metadata_and_event_counts_test() ->
     ?assertEqual(3, maps:get(event_count, Realtime2)),
     ?assertEqual(1, maps:get(audio_chunks, maps:get(input_summary, Realtime2))),
     {ok, Realtime3} =
-        beam_agent_collaboration:stop_realtime(<<"realtime-session">>, ThreadId),
+        beam_agent_control:stop_realtime(<<"realtime-session">>, ThreadId),
     ?assertEqual(4, maps:get(event_count, Realtime3)),
     Sequences = [maps:get(sequence, Event) || Event <- maps:get(output_events, Realtime3)],
     ?assertEqual([1, 2, 3, 4], Sequences),
     reset_state().
 
 reset_state() ->
-    ok = beam_agent_collaboration:clear(),
+    ok = beam_agent_control:clear_collaboration(),
     ok = beam_agent_threads_core:clear(),
     ok = beam_agent_session_store_core:clear(),
     ok = beam_agent_events:clear().

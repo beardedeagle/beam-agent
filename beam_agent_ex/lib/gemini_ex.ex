@@ -69,7 +69,7 @@ defmodule GeminiEx do
            required(:session_id) => binary(),
            required(:stop_reason) => binary(),
            required(:stop_reason_atom) => stop_reason(),
-           required(:structured_output) => term(),
+           required(:structured_output) => map() | binary() | nil,
            required(:subtype) => binary(),
            required(:surpassed_threshold) => number(),
            required(:system_info) => map(),
@@ -148,7 +148,7 @@ defmodule GeminiEx do
            required(:permission_prompt_tool_name) => binary(),
            required(:permission_suggestions) => [any()],
            required(:prompt) => binary(),
-           required(:reason) => term(),
+           required(:reason) => atom() | binary(),
            required(:session_id) => binary(),
            required(:stop_hook_active) => boolean(),
            required(:stop_reason) => atom() | binary(),
@@ -211,7 +211,7 @@ defmodule GeminiEx do
            required(:tools) => [
              %{
                :description => binary(),
-               :handler => (term() -> any()),
+               :handler => (map() -> {:ok, [map()]} | {:error, binary()}),
                :input_schema => map(),
                :name => binary()
              }
@@ -402,11 +402,11 @@ defmodule GeminiEx do
   @doc "Convert a single content_block into a flat message."
   @spec block_to_message(content_block()) :: %{
           :type => :raw | :text | :thinking | :tool_result | :tool_use,
-          :content => term(),
-          :raw => term(),
-          :tool_input => term(),
-          :tool_name => term(),
-          :tool_use_id => term()
+          :content => binary() | nil,
+          :raw => map() | nil,
+          :tool_input => map() | nil,
+          :tool_name => binary() | nil,
+          :tool_use_id => binary() | nil
         }
   def block_to_message(block), do: :beam_agent_content_core.block_to_message(block)
 
@@ -423,7 +423,7 @@ defmodule GeminiEx do
   end
 
   @doc "Send a raw control message via universal control dispatch."
-  @spec send_control(pid(), binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec send_control(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
   def send_control(session, method, params \\ %{}) do
     :gemini_cli_client.send_control(session, method, params)
   end
@@ -441,7 +441,7 @@ defmodule GeminiEx do
   @spec mcp_server(binary(), [
           %{
             :description => binary(),
-            :handler => (map() -> {term(), term()}),
+            :handler => (map() -> {:ok, [map()]} | {:error, binary()}),
             :input_schema => map(),
             :name => binary()
           }

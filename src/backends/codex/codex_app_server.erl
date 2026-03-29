@@ -1,5 +1,9 @@
 -module(codex_app_server).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
+
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
 -export([start_session/1,
          start_exec/1,
          stop/1,
@@ -361,7 +365,7 @@ thread_realtime_stop(Session, ThreadId) ->
 review_start(Session, Params) when is_map(Params) ->
     case session_transport(Session) of
         realtime ->
-            beam_agent_collaboration:start_review(
+            beam_agent_control:start_review(
                 get_session_id(Session),
                 with_backend_transport(Params, Session));
         _ ->
@@ -371,7 +375,7 @@ review_start(Session, Params) when is_map(Params) ->
 collaboration_mode_list(Session) ->
     case session_transport(Session) of
         realtime ->
-            {ok, Result} = beam_agent_collaboration:collaboration_modes(get_session_id(Session)),
+            {ok, Result} = beam_agent_control:collaboration_modes(get_session_id(Session)),
             {ok, with_adapter_source(Session, Result)};
         _ ->
             send_control_to(Session, <<"collaborationMode/list">>, #{})
@@ -384,7 +388,7 @@ experimental_feature_list(Session) ->
 experimental_feature_list(Session, Params) when is_map(Params) ->
     case session_transport(Session) of
         realtime ->
-            {ok, Result} = beam_agent_collaboration:experimental_features(get_session_id(Session), Params),
+            {ok, Result} = beam_agent_control:experimental_features(get_session_id(Session), Params),
             {ok, with_adapter_source(Session, Result)};
         _ ->
             send_control_to(Session, <<"experimentalFeature/list">>, Params)
@@ -442,7 +446,7 @@ config_read(Session, Params) when is_map(Params) ->
            session := map()}} |
     {error, term()}.
 config_update(Session, Body) when is_map(Body) ->
-    beam_agent_config_core:config_update(Session, Body).
+    beam_agent_config:config_update(Session, Body).
 -spec config_providers(pid()) -> {ok, [map()]}.
 config_providers(Session) ->
     provider_list(Session).
@@ -489,17 +493,17 @@ provider_list(Session) ->
     beam_agent_runtime_core:list_providers(Session).
 -spec provider_auth_methods(pid()) -> {ok, [map()]}.
 provider_auth_methods(Session) ->
-    beam_agent_config_core:provider_auth_methods(Session).
+    beam_agent_config:provider_auth_methods(Session).
 -spec provider_oauth_authorize(pid(), binary(), map()) ->
                                   {ok, map()}.
 provider_oauth_authorize(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config_core:provider_oauth_authorize(Session, ProviderId, Body).
+    beam_agent_config:provider_oauth_authorize(Session, ProviderId, Body).
 -spec provider_oauth_callback(pid(), binary(), map()) ->
                                  {ok, map()} | {error, invalid_api_key | invalid_provider_config}.
 provider_oauth_callback(Session, ProviderId, Body)
     when is_binary(ProviderId), is_map(Body) ->
-    beam_agent_config_core:provider_oauth_callback(Session, ProviderId, Body).
+    beam_agent_config:provider_oauth_callback(Session, ProviderId, Body).
 -spec mcp_server_oauth_login(pid(), map()) ->
                                 {ok, map()} | {error, term()}.
 mcp_server_oauth_login(Session, Params) when is_map(Params) ->
@@ -892,3 +896,22 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> codex.
+backend_name() -> codex.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].

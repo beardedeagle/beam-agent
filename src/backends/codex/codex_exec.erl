@@ -1,7 +1,7 @@
 -module(codex_exec).
 -moduledoc false.
 -behaviour(gen_statem).
--behaviour(beam_agent_behaviour).
+-behaviour(beam_agent_adapter_session).
 -export([start_link/1,send_query/4,receive_message/3,health/1,stop/1]).
 -export([send_control/3,
          interrupt/1,

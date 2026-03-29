@@ -1,9 +1,9 @@
 -module(claude_agent_session).
 -moduledoc false.
 
--behaviour(beam_agent_behaviour).
+-behaviour(beam_agent_adapter_session).
 
-%% beam_agent_behaviour callbacks
+%% beam_agent_adapter_session callbacks
 -export([
     start_link/1,
     send_query/4,
@@ -34,7 +34,7 @@
 ]).
 
 %%====================================================================
-%% beam_agent_behaviour callbacks
+%% beam_agent_adapter_session callbacks
 %%====================================================================
 
 -spec start_link(beam_agent_core:session_opts()) ->
@@ -65,23 +65,23 @@ stop(Pid) ->
 %%====================================================================
 
 -spec send_control(pid(), binary(), map()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 send_control(Pid, Method, Params) ->
     beam_agent_session_engine:send_control(Pid, Method, Params).
 
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, 'no_active_query' | 'reconnecting' | 'session_error'}.
 interrupt(Pid) ->
     beam_agent_session_engine:interrupt(Pid).
 
--spec session_info(pid()) -> {ok, map()} | {error, term()}.
+-spec session_info(pid()) -> {ok, map()} | {error, 'reconnecting' | 'session_error'}.
 session_info(Pid) ->
     beam_agent_session_engine:session_info(Pid).
 
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_model(Pid, Model) ->
     beam_agent_session_engine:set_model(Pid, Model).
 
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, map()} | {error, 'not_supported' | 'reconnecting' | 'session_error'}.
 set_permission_mode(Pid, Mode) ->
     beam_agent_session_engine:set_permission_mode(Pid, Mode).
 
@@ -93,37 +93,37 @@ set_permission_mode(Pid, Mode) ->
 cancel(Pid, Ref) ->
     gen_statem:call(Pid, {cancel, Ref}, 5_000).
 
--spec rewind_files(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec rewind_files(pid(), binary()) -> {ok, map()} | {error, term()}.
 rewind_files(Pid, UserMessageId) ->
     send_control(Pid, <<"rewind_files">>,
                  #{<<"user_message_id">> => UserMessageId}).
 
--spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec stop_task(pid(), binary()) -> {ok, map()} | {error, term()}.
 stop_task(Pid, TaskId) ->
     send_control(Pid, <<"stop_task">>, #{<<"task_id">> => TaskId}).
 
 -spec set_max_thinking_tokens(pid(), pos_integer()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 set_max_thinking_tokens(Pid, MaxTokens)
   when is_integer(MaxTokens), MaxTokens > 0 ->
     send_control(Pid, <<"set_max_thinking_tokens">>,
                  #{<<"maxThinkingTokens">> => MaxTokens}).
 
--spec mcp_server_status(pid()) -> {ok, term()} | {error, term()}.
+-spec mcp_server_status(pid()) -> {ok, map()} | {error, term()}.
 mcp_server_status(Pid) ->
     send_control(Pid, <<"mcp_status">>, #{}).
 
--spec set_mcp_servers(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec set_mcp_servers(pid(), map()) -> {ok, map()} | {error, term()}.
 set_mcp_servers(Pid, Servers) when is_map(Servers) ->
     send_control(Pid, <<"mcp_set_servers">>, #{<<"servers">> => Servers}).
 
--spec reconnect_mcp_server(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec reconnect_mcp_server(pid(), binary()) -> {ok, map()} | {error, term()}.
 reconnect_mcp_server(Pid, ServerName) when is_binary(ServerName) ->
     send_control(Pid, <<"mcp_reconnect">>,
                  #{<<"serverName">> => ServerName}).
 
 -spec toggle_mcp_server(pid(), binary(), boolean()) ->
-    {ok, term()} | {error, term()}.
+    {ok, map()} | {error, term()}.
 toggle_mcp_server(Pid, ServerName, Enabled)
   when is_binary(ServerName), is_boolean(Enabled) ->
     send_control(Pid, <<"mcp_toggle">>,

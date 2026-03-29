@@ -207,7 +207,8 @@ build_session_info(#hstate{copilot_session_id = CopilotSId,
 -spec terminate_handler(term(), #hstate{}) -> ok.
 terminate_handler(Reason, #hstate{pending = Pending} = HState) ->
     _ = fire_hook(session_end,
-                  #{event => session_end, reason => Reason},
+                  #{event => session_end, reason => Reason,
+                    session_id => HState#hstate.copilot_session_id},
                   HState),
     %% Reply to all pending callers
     maps:foreach(

@@ -958,13 +958,13 @@ maybe_put(_Key, undefined, Map) ->
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
 
--spec consistent_scope(term(), term()) -> boolean().
+-spec consistent_scope(binary() | undefined, binary() | undefined) -> boolean().
 consistent_scope(undefined, _Value) -> true;
 consistent_scope(_Value, undefined) -> true;
 consistent_scope(Value, Value) -> true;
 consistent_scope(_Left, _Right) -> false.
 
--spec choose_scope(binary() | undefined, term()) -> term().
+-spec choose_scope(binary() | undefined, binary() | undefined) -> binary() | undefined.
 choose_scope(undefined, Value) -> Value;
 choose_scope(Value, _Fallback) -> Value.
 

@@ -1,5 +1,9 @@
 -module(opencode_client).
 -moduledoc false.
+-behaviour(beam_agent_adapter).
+
+%% beam_agent_adapter callbacks
+-export([backend_name/0, backend_type/0, capabilities/0]).
 
 %% Thread record — canonical definition in beam_agent_adapter_types.
 -type thread_record() :: beam_agent_adapter_types:thread_meta().
@@ -370,7 +374,7 @@ config_value_write(Session, KeyPath, Value) ->
                             {ok, map()} | {error, _}.
 config_value_write(Session, KeyPath, Value, Opts)
     when is_binary(KeyPath), is_map(Opts) ->
-    beam_agent_config_core:config_value_write(Session, KeyPath, Value, Opts).
+    beam_agent_config:config_value_write(Session, KeyPath, Value, Opts).
 -spec config_batch_write(pid(), [map()]) -> {ok, map()} | {error, _}.
 config_batch_write(Session, Edits) ->
     config_batch_write(Session, Edits, #{}).
@@ -378,19 +382,19 @@ config_batch_write(Session, Edits) ->
                             {ok, map()} | {error, _}.
 config_batch_write(Session, Edits, Opts)
     when is_list(Edits), is_map(Opts) ->
-    beam_agent_config_core:config_batch_write(Session, Edits, Opts).
+    beam_agent_config:config_batch_write(Session, Edits, Opts).
 -spec config_requirements_read(pid()) -> {ok, map()}.
 config_requirements_read(Session) ->
-    beam_agent_config_core:config_requirements_read(Session).
+    beam_agent_config:config_requirements_read(Session).
 -spec external_agent_config_detect(pid()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session) ->
     external_agent_config_detect(Session, #{}).
 -spec external_agent_config_detect(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_detect(Session, Opts) when is_map(Opts) ->
-    beam_agent_config_core:external_agent_config_detect(Session, Opts).
+    beam_agent_config:external_agent_config_detect(Session, Opts).
 -spec external_agent_config_import(pid(), map()) -> {ok, map()} | {error, _}.
 external_agent_config_import(Session, Opts) when is_map(Opts) ->
-    beam_agent_config_core:external_agent_config_import(Session, Opts).
+    beam_agent_config:external_agent_config_import(Session, Opts).
 -spec list_commands(pid()) -> {ok, map()} | {error, term()}.
 list_commands(Session) ->
     gen_statem:call(Session, list_commands, 10000).
@@ -781,31 +785,31 @@ thread_compact(Session, Opts) when is_map(Opts) ->
 -spec thread_realtime_start(pid(), map()) -> {ok, map()}.
 thread_realtime_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:start_realtime(SessionId, with_backend(Params, opencode)).
+    beam_agent_control:start_realtime(SessionId, with_backend(Params, opencode)).
 -spec thread_realtime_append_audio(pid(), binary(), map()) ->
                                       {ok, map()} | {error, not_found}.
 thread_realtime_append_audio(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:append_realtime_audio(SessionId, ThreadId, Params).
+    beam_agent_control:append_realtime_audio(SessionId, ThreadId, Params).
 -spec thread_realtime_append_text(pid(), binary(), map()) ->
                                      {ok, map()} | {error, not_found}.
 thread_realtime_append_text(Session, ThreadId, Params)
     when is_binary(ThreadId), is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:append_realtime_text(SessionId, ThreadId, Params).
+    beam_agent_control:append_realtime_text(SessionId, ThreadId, Params).
 -spec thread_realtime_stop(pid(), binary()) -> {ok, map()} | {error, not_found}.
 thread_realtime_stop(Session, ThreadId) when is_binary(ThreadId) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:stop_realtime(SessionId, ThreadId).
+    beam_agent_control:stop_realtime(SessionId, ThreadId).
 -spec review_start(pid(), map()) -> {ok, map()}.
 review_start(Session, Params) when is_map(Params) ->
     SessionId = get_session_id(Session),
-    beam_agent_collaboration:start_review(SessionId, with_backend(Params, opencode)).
+    beam_agent_control:start_review(SessionId, with_backend(Params, opencode)).
 -spec collaboration_mode_list(pid()) -> {ok, session_view()}.
 collaboration_mode_list(Session) ->
     SessionId = get_session_id(Session),
-    {ok, Result} = beam_agent_collaboration:collaboration_modes(SessionId),
+    {ok, Result} = beam_agent_control:collaboration_modes(SessionId),
     {ok, with_adapter_source(Session, Result)}.
 -spec experimental_feature_list(pid()) -> {ok, session_view()}.
 experimental_feature_list(Session) ->
@@ -813,7 +817,7 @@ experimental_feature_list(Session) ->
 -spec experimental_feature_list(pid(), map()) -> {ok, session_view()}.
 experimental_feature_list(Session, Opts) when is_map(Opts) ->
     SessionId = get_session_id(Session),
-    {ok, Result} = beam_agent_collaboration:experimental_features(SessionId, Opts),
+    {ok, Result} = beam_agent_control:experimental_features(SessionId, Opts),
     {ok, with_adapter_source(Session, Result)}.
 -spec mcp_server_status(pid()) -> {ok, map()}.
 mcp_server_status(Session) ->
@@ -1076,3 +1080,22 @@ opt_value([Key | Rest], Opts, Default) ->
         {ok, Value} -> Value;
         error -> opt_value(Rest, Opts, Default)
     end.
+
+%%====================================================================
+%% beam_agent_adapter callbacks
+%%====================================================================
+
+-spec backend_name() -> opencode.
+backend_name() -> opencode.
+
+-spec backend_type() -> agentic.
+backend_type() -> agentic.
+
+-spec capabilities() -> [beam_agent_adapter:capability()].
+capabilities() ->
+    [session_lifecycle, session_info, runtime_model_switch, interrupt,
+     permission_mode, session_history, session_mutation, thread_management,
+     metadata_accessors, in_process_mcp, mcp_management, hooks,
+     checkpointing, thinking_budget, task_stop, command_execution,
+     approval_callbacks, user_input_callbacks, realtime_review,
+     config_management, provider_management, attachments, event_streaming].

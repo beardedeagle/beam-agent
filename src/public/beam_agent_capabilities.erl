@@ -14,7 +14,7 @@ Every capability/backend pair is described across three orthogonal dimensions:
   - `implementation` — `direct_backend | universal | direct_backend_and_universal`
   - `fidelity` — `exact | validated_equivalent`
 
-All 23 built-in capabilities are at `full` support level across all 5 built-in
+All 24 built-in capabilities are at `full` support level across all 5 built-in
 backends. The `implementation` field records whether the route is a direct backend
 call, a BeamAgent universal path (OTP-layer shim), or a hybrid that exposes both.
 
@@ -26,7 +26,7 @@ via `register_backend/2`, and individual capability entries can be
 overridden via `register_capability/3`.
 
 ```erlang
-%% Register a new backend with all 23 capabilities:
+%% Register a new backend with all 24 capabilities:
 ok = beam_agent_capabilities:register_backend(my_backend, #{
     session_lifecycle => #{support_level => full,
                            implementation => direct_backend,
@@ -42,7 +42,7 @@ ok = beam_agent_capabilities:register_capability(gemini, checkpointing, #{
 }).
 ```
 
-## The 23 capabilities
+## The 24 capabilities
 
 ```
 session_lifecycle       session_info            runtime_model_switch
@@ -52,7 +52,7 @@ in_process_mcp          mcp_management          hooks
 checkpointing           thinking_budget         task_stop
 command_execution       approval_callbacks      user_input_callbacks
 realtime_review         config_management       provider_management
-attachments             event_streaming
+attachments             event_streaming         memory
 ```
 
 ## Quick start
@@ -130,7 +130,8 @@ Entries are ETS-backed runtime data seeded from compiled-in defaults.
   | config_management
   | provider_management
   | attachments
-  | event_streaming.
+  | event_streaming
+  | memory.
 
 -type support_level() :: missing | partial | baseline | full.
 -type implementation() :: direct_backend | universal | direct_backend_and_universal.
@@ -166,8 +167,7 @@ Entries are ETS-backed runtime data seeded from compiled-in defaults.
     support := #{beam_agent_backend:backend() => support_info()}
 }.
 
--define(CAP_TABLE, beam_agent_capabilities_registry).
--define(CAP_META_TABLE, beam_agent_capabilities_meta).
+-define(REG_TABLE, beam_agent_registry).
 
 %%--------------------------------------------------------------------
 %% Table Management
@@ -176,16 +176,11 @@ Entries are ETS-backed runtime data seeded from compiled-in defaults.
 -doc "Ensure the capability registry ETS tables exist and are seeded.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    case beam_agent_ets:whereis(?CAP_TABLE) of
-        undefined ->
-            ok = beam_agent_ets:ensure_table(?CAP_TABLE,
-                [set, named_table, {read_concurrency, true}]),
-            ok = beam_agent_ets:ensure_table(?CAP_META_TABLE,
-                [set, named_table, {read_concurrency, true}]),
-            seed_defaults(),
-            ok;
-        _Tid ->
-            ok
+    ok = beam_agent_registry:ensure_table(),
+    %% Seed defaults on first call (check for a known seeded key).
+    case ets:lookup(?REG_TABLE, {capability, claude, session_lifecycle}) of
+        [_] -> ok;
+        []  -> seed_defaults(), ok
     end.
 
 -doc """
@@ -196,8 +191,8 @@ Removes all custom backend registrations and capability overrides.
 -spec reset() -> ok.
 reset() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?CAP_TABLE),
-    beam_agent_ets:delete_all_objects(?CAP_META_TABLE),
+    beam_agent_ets:match_delete(?REG_TABLE, {{capability, '_', '_'}, '_'}),
+    beam_agent_ets:match_delete(?REG_TABLE, {{cap_meta, '_'}, '_'}),
     seed_defaults(),
     ok.
 
@@ -225,10 +220,10 @@ ok = beam_agent_capabilities:register_backend(my_backend, #{
 register_backend(Backend, Capabilities) when is_atom(Backend), is_map(Capabilities) ->
     ensure_tables(),
     maps:foreach(fun(CapId, SupportInfo) ->
-        true = beam_agent_ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo})
+        true = beam_agent_ets:insert(?REG_TABLE, {{capability, Backend, CapId}, SupportInfo})
     end, Capabilities),
-    %% Track this backend in the meta table.
-    true = beam_agent_ets:insert(?CAP_META_TABLE, {{backend, Backend}, true}),
+    %% Track this backend in the shared registry.
+    true = beam_agent_ets:insert(?REG_TABLE, {{cap_meta, {backend, Backend}}, true}),
     ok.
 
 -doc """
@@ -246,8 +241,8 @@ ok = beam_agent_capabilities:register_capability(gemini, checkpointing, #{
 register_capability(Backend, CapId, SupportInfo)
   when is_atom(Backend), is_atom(CapId), is_map(SupportInfo) ->
     ensure_tables(),
-    true = beam_agent_ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo}),
-    true = beam_agent_ets:insert(?CAP_META_TABLE, {{backend, Backend}, true}),
+    true = beam_agent_ets:insert(?REG_TABLE, {{capability, Backend, CapId}, SupportInfo}),
+    true = beam_agent_ets:insert(?REG_TABLE, {{cap_meta, {backend, Backend}}, true}),
     ok.
 
 -doc """
@@ -260,9 +255,9 @@ unregister_backend(Backend) when is_atom(Backend) ->
     ensure_tables(),
     CapIds = capability_ids(),
     lists:foreach(fun(CapId) ->
-        beam_agent_ets:delete(?CAP_TABLE, {Backend, CapId})
+        beam_agent_ets:delete(?REG_TABLE, {capability, Backend, CapId})
     end, CapIds),
-    beam_agent_ets:delete(?CAP_META_TABLE, {backend, Backend}),
+    beam_agent_ets:delete(?REG_TABLE, {cap_meta, {backend, Backend}}),
     ok.
 
 %%--------------------------------------------------------------------
@@ -416,16 +411,15 @@ assert_capability(Capability, BackendLike) ->
 
 -spec lookup_support(atom(), capability()) -> support_info() | undefined.
 lookup_support(Backend, CapId) ->
-    case beam_agent_ets:lookup(?CAP_TABLE, {Backend, CapId}) of
-        [{{Backend, CapId}, SupportInfo}] -> SupportInfo;
+    case ets:lookup(?REG_TABLE, {capability, Backend, CapId}) of
+        [{{capability, Backend, CapId}, SupportInfo}] -> SupportInfo;
         [] -> undefined
     end.
 
 -spec registered_backends() -> [atom()].
 registered_backends() ->
-    beam_agent_ets:foldl(fun({{backend, B}, _}, Acc) -> [B | Acc];
-                            (_, Acc) -> Acc
-                         end, [], ?CAP_META_TABLE).
+    Matches = ets:match_object(?REG_TABLE, {{cap_meta, {backend, '_'}}, '_'}),
+    [B || {{cap_meta, {backend, B}}, _} <- Matches].
 
 -spec is_known_capability(term()) -> boolean().
 is_known_capability(Cap) ->
@@ -438,7 +432,7 @@ is_known_capability(Cap) ->
 -spec normalize_backend(term()) -> {ok, atom()} | {error, {unknown_backend, term()}}.
 normalize_backend(Backend) when is_atom(Backend) ->
     ensure_tables(),
-    case beam_agent_ets:lookup(?CAP_META_TABLE, {backend, Backend}) of
+    case ets:lookup(?REG_TABLE, {cap_meta, {backend, Backend}}) of
         [_] -> {ok, Backend};
         []  ->
             %% Try the standard beam_agent_backend normalization for
@@ -506,7 +500,8 @@ capability_definitions() ->
      {config_management, <<"Config management">>},
      {provider_management, <<"Provider and runtime management">>},
      {attachments, <<"Attachments in query and send (512 KB default size limit, configurable)">>},
-     {event_streaming, <<"Backend event streaming">>}].
+     {event_streaming, <<"Backend event streaming">>},
+     {memory, <<"Agent memory persistence">>}].
 
 %%--------------------------------------------------------------------
 %% Internal: Built-in Default Seeding
@@ -518,11 +513,11 @@ seed_defaults() ->
     DefaultMatrix = default_matrix(),
     lists:foreach(fun(#{id := CapId, support := SupportMap}) ->
         maps:foreach(fun(Backend, SupportInfo) ->
-            true = beam_agent_ets:insert(?CAP_TABLE, {{Backend, CapId}, SupportInfo})
+            true = beam_agent_ets:insert(?REG_TABLE, {{capability, Backend, CapId}, SupportInfo})
         end, SupportMap)
     end, DefaultMatrix),
     lists:foreach(fun(B) ->
-        true = beam_agent_ets:insert(?CAP_META_TABLE, {{backend, B}, true})
+        true = beam_agent_ets:insert(?REG_TABLE, {{cap_meta, {backend, B}}, true})
     end, BuiltinBackends),
     ok.
 
@@ -681,7 +676,9 @@ default_matrix() ->
             opencode => support(full, direct_backend, exact),
             copilot => support(full, universal, exact,
                 #{notes => <<"Universal event bus streams canonical session and control events for Copilot sessions.">>})
-        })
+        }),
+        cap(memory,
+            all_backends(full, universal, exact))
     ].
 
 %%--------------------------------------------------------------------

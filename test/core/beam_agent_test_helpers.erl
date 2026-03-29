@@ -37,5 +37,5 @@ reset_state() ->
     ok = beam_agent_orchestrator_core:clear(),
     ok = beam_agent_session_store_core:clear(),
     ok = beam_agent_threads_core:clear(),
-    ok = beam_agent_collaboration:clear(),
+    ok = beam_agent_control:clear_collaboration(),
     ok = beam_agent_events:clear().

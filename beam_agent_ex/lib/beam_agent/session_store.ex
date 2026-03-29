@@ -112,6 +112,28 @@ defmodule BeamAgent.SessionStore do
           optional(:include_hidden) => boolean()
         }
 
+  @typedoc """
+  Versioned session snapshot for export/import.
+
+  Contains `:version` (always `1`), `:session_id`, `:metadata` (session
+  metadata), `:messages` (all messages including hidden ones), and
+  `:exported_at` (unix millisecond timestamp).
+  """
+  @type exported_session() :: %{
+          required(:version) => 1,
+          required(:session_id) => binary(),
+          required(:metadata) => session_meta(),
+          required(:messages) => [message()],
+          required(:exported_at) => integer()
+        }
+
+  @typedoc """
+  Options for `import_session/2`.
+
+  Supported keys: `:session_id` (override the imported session's ID).
+  """
+  @type import_opts() :: %{optional(:session_id) => binary()}
+
   @typedoc "A session message record with a required `:type` key and optional wire fields."
   @type message() :: %{
           required(:type) => atom(),
@@ -169,6 +191,102 @@ defmodule BeamAgent.SessionStore do
           required(:message_count) => non_neg_integer(),
           required(:generated_by) => binary()
         }
+
+  # -------------------------------------------------------------------
+  # Table Lifecycle
+  # -------------------------------------------------------------------
+
+  @doc """
+  Ensure all session store tables exist.
+
+  Creates the `beam_agent_sessions`, `beam_agent_session_messages`, and
+  `beam_agent_session_counters` tables if they do not already exist. This
+  function is idempotent and safe to call from any process at any time.
+
+  Most functions in this module call `ensure_tables/0` internally, so
+  explicit calls are only needed when you want to guarantee table existence
+  before entering a hot path.
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.ensure_tables()
+  ```
+  """
+  @spec ensure_tables() :: :ok
+  defdelegate ensure_tables(), to: :beam_agent_session_store
+
+  @doc """
+  Clear all session data from the store.
+
+  Deletes every entry from the sessions, messages, and counters tables.
+  The tables themselves remain in place. This is a destructive operation
+  intended for test teardown or full resets.
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.clear()
+  ```
+  """
+  @spec clear() :: :ok
+  defdelegate clear(), to: :beam_agent_session_store
+
+  # -------------------------------------------------------------------
+  # Session Metadata
+  # -------------------------------------------------------------------
+
+  @doc """
+  Register a new session with metadata.
+
+  Creates a session entry in the store with the given `session_id` and
+  metadata map. If a session with this ID already exists, this is a no-op
+  (use `update_session/2` to modify existing sessions).
+
+  The store automatically populates `created_at`, `updated_at`, and
+  `message_count` fields. Any values provided in `meta` for these fields
+  are used as defaults.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier (e.g. `"sess_abc123"`)
+  - `meta` -- map of initial metadata (`:adapter`, `:model`, `:cwd`, `:extra`, etc.)
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.register_session("sess_001", %{
+    adapter: :claude,
+    model: "claude-sonnet-4-20250514",
+    cwd: "/home/user/project"
+  })
+  ```
+  """
+  @spec register_session(binary(), map()) :: :ok | {:error, :session_limit_reached}
+  defdelegate register_session(session_id, meta), to: :beam_agent_session_store
+
+  @doc """
+  Update an existing session's metadata.
+
+  Merges the provided fields into the existing session metadata and refreshes
+  the `updated_at` timestamp. If the session does not exist, it is created
+  via `register_session/2`.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier
+  - `patch` -- map of fields to merge into the existing metadata
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.update_session("sess_001", %{
+    model: "claude-opus-4-20250514"
+  })
+  ```
+  """
+  @spec update_session(binary(), map()) :: :ok
+  defdelegate update_session(session_id, patch), to: :beam_agent_session_store
 
   @doc """
   List all sessions in the store, sorted by most-recently updated.
@@ -336,6 +454,23 @@ defmodule BeamAgent.SessionStore do
   defdelegate unshare_session(session_id), to: :beam_agent_session_store
 
   @doc """
+  Get the current share state for a session.
+
+  Returns `{:ok, share}` with the share map (which may have status `:active`
+  or `:revoked`), or `{:error, :not_found}` if the session has no share
+  record.
+
+  ## Example
+
+  ```elixir
+  {:ok, share} = BeamAgent.SessionStore.get_share("sess_001")
+  share.status  # => :active
+  ```
+  """
+  @spec get_share(binary()) :: {:ok, session_share()} | {:error, :not_found}
+  defdelegate get_share(session_id), to: :beam_agent_session_store
+
+  @doc """
   Generate and store a summary for a session.
 
   Builds a deterministic text summary from the session message history and stores
@@ -358,6 +493,76 @@ defmodule BeamAgent.SessionStore do
   """
   @spec summarize_session(binary(), map()) :: {:ok, session_summary()} | {:error, :not_found}
   defdelegate summarize_session(session_id, opts), to: :beam_agent_session_store
+
+  @doc """
+  Get the stored summary for a session.
+
+  Returns `{:ok, summary}` with the summary map, or `{:error, :not_found}`
+  if the session has no stored summary.
+
+  ## Example
+
+  ```elixir
+  {:ok, summary} = BeamAgent.SessionStore.get_summary("sess_001")
+  summary.content
+  ```
+  """
+  @spec get_summary(binary()) :: {:ok, session_summary()} | {:error, :not_found}
+  defdelegate get_summary(session_id), to: :beam_agent_session_store
+
+  # -------------------------------------------------------------------
+  # Message Storage
+  # -------------------------------------------------------------------
+
+  @doc """
+  Record a single message for a session.
+
+  Stores the message with an auto-incrementing sequence number for ordering
+  and updates the session metadata (message count, timestamps, model
+  extraction). If the session has not been registered, a minimal session
+  entry is auto-created.
+
+  Also publishes the message via `:beam_agent_events` for live subscribers.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier
+  - `message` -- a message map with at least a `:type` key
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.record_message("sess_001", %{
+    type: :assistant,
+    content: "Hello!"
+  })
+  ```
+  """
+  @spec record_message(binary(), message()) :: :ok | {:error, :message_limit_reached}
+  defdelegate record_message(session_id, message), to: :beam_agent_session_store
+
+  @doc """
+  Record multiple messages for a session in order.
+
+  Convenience function that calls `record_message/2` for each message in the
+  list, preserving the given order.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier
+  - `messages` -- list of message maps
+
+  ## Example
+
+  ```elixir
+  :ok = BeamAgent.SessionStore.record_messages("sess_001", [
+    %{type: :user, content: "Hi"},
+    %{type: :assistant, content: "Hello!"}
+  ])
+  ```
+  """
+  @spec record_messages(binary(), [message()]) :: :ok | {:error, :message_limit_reached}
+  defdelegate record_messages(session_id, messages), to: :beam_agent_session_store
 
   @doc """
   Get all messages for a session in recording order.
@@ -446,4 +651,103 @@ defmodule BeamAgent.SessionStore do
   """
   @spec get_native_session_messages(binary(), map()) :: {:ok, [message()]} | {:error, term()}
   defdelegate get_native_session_messages(session_id, opts), to: :beam_agent_session_store
+
+  # -------------------------------------------------------------------
+  # Convenience
+  # -------------------------------------------------------------------
+
+  @doc """
+  Get the total number of tracked sessions.
+
+  Returns the count of session entries in the store.
+
+  ## Example
+
+  ```elixir
+  count = BeamAgent.SessionStore.session_count()
+  ```
+  """
+  @spec session_count() :: non_neg_integer()
+  defdelegate session_count(), to: :beam_agent_session_store
+
+  @doc """
+  Get the recorded message count for a specific session.
+
+  Returns the number of messages stored for this session. Returns `0` if the
+  session does not exist or has no messages.
+
+  ## Example
+
+  ```elixir
+  count = BeamAgent.SessionStore.message_count("sess_001")
+  ```
+  """
+  @spec message_count(binary()) :: non_neg_integer()
+  defdelegate message_count(session_id), to: :beam_agent_session_store
+
+  # -------------------------------------------------------------------
+  # Export / Import
+  # -------------------------------------------------------------------
+
+  @doc """
+  Export a session to a versioned, portable snapshot.
+
+  Returns the session metadata and all messages (including hidden) in a
+  version-1 map. The result can be serialized with `:erlang.term_to_binary/1`
+  or converted to JSON for transport.
+
+  Returns `{:error, :not_found}` if the session does not exist.
+
+  ## Example
+
+  ```elixir
+  {:ok, snapshot} = BeamAgent.SessionStore.export_session("sess_001")
+  snapshot.version  # => 1
+  ```
+  """
+  @spec export_session(binary()) :: {:ok, exported_session()} | {:error, :not_found}
+  defdelegate export_session(session_id), to: :beam_agent_session_store
+
+  @doc """
+  Import a session from a previously exported snapshot.
+
+  Equivalent to `import_session(exported, %{})`.
+
+  ## Example
+
+  ```elixir
+  {:ok, snapshot} = BeamAgent.SessionStore.export_session("sess_001")
+  {:ok, meta} = BeamAgent.SessionStore.import_session(snapshot)
+  ```
+  """
+  @spec import_session(exported_session()) :: {:ok, session_meta()} | {:error, term()}
+  defdelegate import_session(exported), to: :beam_agent_session_store
+
+  @doc """
+  Import a session from a previously exported snapshot with options.
+
+  ## Options
+
+  - `:session_id` -- override the session ID (default: use the exported ID)
+
+  The session metadata is preserved including the original `created_at`
+  timestamp. Messages are re-recorded in order, which assigns fresh sequence
+  numbers and updates the message count.
+
+  Returns `{:error, :invalid_export_format}` if the map is not a valid
+  version-1 export.
+
+  ## Example
+
+  ```elixir
+  {:ok, snapshot} = BeamAgent.SessionStore.export_session("sess_001")
+  {:ok, meta} = BeamAgent.SessionStore.import_session(snapshot, %{
+    session_id: "sess_copy_001"
+  })
+  meta.session_id  # => "sess_copy_001"
+  ```
+  """
+  @spec import_session(exported_session(), import_opts()) ::
+          {:ok, session_meta()} | {:error, term()}
+  defdelegate import_session(exported, opts), to: :beam_agent_session_store
 end

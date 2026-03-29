@@ -84,7 +84,7 @@ fallback_attachment_backend(Session) ->
             fallback
     end.
 
--spec resolve_backend(pid() | binary()) -> {ok, beam_agent_backend:backend()} | {error, term()}.
+-spec resolve_backend(pid() | binary()) -> {ok, beam_agent_backend:backend()} | {error, backend_not_present | {unknown_backend, term()} | term()}.
 resolve_backend(Session) ->
     case beam_agent_backend:session_backend(Session) of
         {ok, _Backend} = Ok ->
@@ -94,7 +94,7 @@ resolve_backend(Session) ->
     end.
 
 -spec maybe_backend_from_session_info(pid() | binary()) ->
-    {ok, beam_agent_backend:backend()} | {error, term()}.
+    {ok, beam_agent_backend:backend()} | {error, backend_not_present | {unknown_backend, term()} | term()}.
 maybe_backend_from_session_info(Session) ->
     case beam_agent_core:session_info(Session) of
         {ok, Info} when is_map(Info) ->
@@ -120,7 +120,7 @@ maybe_register_backend(Session, BackendLike) ->
             Error
     end.
 
--spec augment_prompt(binary(), [term()]) -> binary().
+-spec augment_prompt(binary(), [map() | term()]) -> binary().
 augment_prompt(Prompt, Attachments) ->
     Appendix = iolist_to_binary([
         <<"\n\n[BeamAgent attachments]\n">>,
@@ -607,7 +607,7 @@ attachment_manifest_entry(Attachment) ->
     Normalized = normalize_attachment(value(Attachment, [type, <<"type">>], undefined), Attachment),
     maps:with([type, name, mime, uri, path, url, text, mention, skill], Normalized).
 
--spec normalize_type(term()) -> text | image | audio | file | document | mention | skill | normalized_other.
+-spec normalize_type(atom() | binary() | term()) -> text | image | audio | file | document | mention | skill | normalized_other.
 normalize_type(text) ->
     text;
 normalize_type(<<"text">>) ->

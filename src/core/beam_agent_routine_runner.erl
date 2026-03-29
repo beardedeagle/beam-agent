@@ -65,14 +65,14 @@ or other existing owner process.
     thread_id => binary()
 }.
 -type routine_result_meta() :: #{
-    job_id := term(),
+    job_id := binary(),
     manual := boolean(),
     slot_at := integer(),
     target_type := query | run
 }.
 
 -doc "Execute a routine immediately without advancing its schedule.".
--spec run_now(binary()) -> {ok, beam_agent_runs_core:run()} | {error, term()}.
+-spec run_now(binary()) -> {ok, beam_agent_runs_core:run()} | {error, not_found}.
 run_now(JobId) when is_binary(JobId) ->
     StartTime = telemetry_start(run_now, #{job_id => JobId}),
     Result = case beam_agent_routines_core:get(JobId) of
@@ -167,8 +167,6 @@ run_due(Opts) when is_map(Opts) ->
                 after
                     ok = beam_agent_routines_core:release_due_job(JobId, RunnerId)
                 end;
-            {error, claimed} ->
-                Acc;
             {error, not_found} ->
                 Acc
         end
@@ -281,6 +279,7 @@ run_query(Session, Scope, Job, Target, SlotAt, Manual) ->
     end.
 
 -spec open_session(map(), map()) -> {ok, pid(), boolean()} | {error, term()}.
+%% term() here is legitimate: session start errors propagate from backend transports
 open_session(#{session := #{kind := live, ref := Session}}, _RoutingPolicy) ->
     {ok, Session, false};
 open_session(#{session := #{kind := routed, opts := SessionOpts0}, stop_session := StopSession},
@@ -306,7 +305,7 @@ prepare_thread(Session, #{start := ThreadOpts}) ->
         {error, _} = Error -> Error
     end.
 
--spec bootstrap_failed_run(map(), map(), query_target(), integer(), boolean(), term()) ->
+-spec bootstrap_failed_run(map(), map(), query_target(), integer(), boolean(), map() | binary()) ->
     terminal_run().
 bootstrap_failed_run(Scope, Job, _Target, SlotAt, Manual, Reason) ->
     RunOpts = #{
@@ -390,13 +389,13 @@ final_content(Messages) ->
         _ -> undefined
     end.
 
--spec result_map(term()) -> map().
+-spec result_map(map() | binary() | term()) -> map().
 result_map(Result) when is_map(Result) ->
     Result;
 result_map(Result) ->
     #{result => Result}.
 
--spec maybe_put(atom(), term(), map()) -> map().
+-spec maybe_put(atom(), undefined | binary() | map() | term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->

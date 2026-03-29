@@ -134,7 +134,7 @@ defmodule BeamAgent.Raw do
   Calls the Claude adapter directly and returns the raw session list from the
   Claude SDK session store. Not available on other backends.
   """
-  @spec list_native_sessions() :: {:ok, term()} | {:error, term()}
+  @spec list_native_sessions() :: {:ok, [map()]} | {:error, term()}
   defdelegate list_native_sessions(), to: :beam_agent_raw
 
   @doc """
@@ -143,7 +143,7 @@ defmodule BeamAgent.Raw do
   `opts` is a map passed directly to the Claude adapter's `list_native_sessions/1`
   function.
   """
-  @spec list_native_sessions(map()) :: {:ok, term()} | {:error, term()}
+  @spec list_native_sessions(map()) :: {:ok, [map()]} | {:error, term()}
   defdelegate list_native_sessions(opts), to: :beam_agent_raw
 
   @doc """
@@ -151,7 +151,7 @@ defmodule BeamAgent.Raw do
 
   Returns the raw message list from the Claude SDK session store.
   """
-  @spec get_native_session_messages(binary()) :: {:ok, term()} | {:error, term()}
+  @spec get_native_session_messages(binary()) :: {:ok, [map()]} | {:error, term()}
   defdelegate get_native_session_messages(session_id), to: :beam_agent_raw
 
   @doc """
@@ -160,7 +160,7 @@ defmodule BeamAgent.Raw do
   `opts` is a map passed directly to the Claude adapter. Use this variant when
   you need pagination or filtering supported by the underlying Claude adapter.
   """
-  @spec get_native_session_messages(binary(), map()) :: {:ok, term()} | {:error, term()}
+  @spec get_native_session_messages(binary(), map()) :: {:ok, [map()]} | {:error, term()}
   defdelegate get_native_session_messages(session_id, opts), to: :beam_agent_raw
 
   @doc """
@@ -171,7 +171,7 @@ defmodule BeamAgent.Raw do
 
   Use `session_destroy/2` if the session process is no longer alive.
   """
-  @spec session_destroy(pid()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate session_destroy(session), to: :beam_agent_raw
 
   @doc """
@@ -181,7 +181,7 @@ defmodule BeamAgent.Raw do
   process may or may not still be running. The pid is still required to route to
   the correct backend adapter.
   """
-  @spec session_destroy(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  @spec session_destroy(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate session_destroy(session, session_id), to: :beam_agent_raw
 
   @doc """
@@ -190,7 +190,7 @@ defmodule BeamAgent.Raw do
   Delegates to the backend adapter's `server_health/1`. The return value format
   is adapter-specific.
   """
-  @spec server_health(pid()) :: {:ok, term()} | {:error, term()}
+  @spec server_health(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate server_health(session), to: :beam_agent_raw
 
   @doc """
@@ -199,7 +199,7 @@ defmodule BeamAgent.Raw do
   Delegates to the backend adapter's `get_status/1`. The return value format is
   adapter-specific.
   """
-  @spec get_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec get_status(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate get_status(session), to: :beam_agent_raw
 
   @doc """
@@ -208,7 +208,7 @@ defmodule BeamAgent.Raw do
   Delegates to the backend adapter's `get_auth_status/1`. The return value format
   is adapter-specific.
   """
-  @spec get_auth_status(pid()) :: {:ok, term()} | {:error, term()}
+  @spec get_auth_status(pid()) :: {:ok, map()} | {:error, term()}
   defdelegate get_auth_status(session), to: :beam_agent_raw
 
   @doc """

@@ -21,7 +21,15 @@ backend atoms) remain in their respective facade modules.
     init_response_key/0,
     system_info_key/0,
     init_default/0,
-    session_health/0
+    session_health/0,
+    %% Re-exports for backend package extraction — backends depend on
+    %% these types but should not need a direct dependency on beam_agent_core.
+    session_opts/0,
+    query_opts/0,
+    message/0,
+    message_type/0,
+    backend_type/0,
+    capability/0
 ]).
 
 %%--------------------------------------------------------------------
@@ -88,3 +96,29 @@ denormalized fields for direct access without nested lookups.
 -doc "Health states for a backend adapter session.".
 -type session_health() ::
           ready | connecting | initializing | active_query | error.
+
+%%--------------------------------------------------------------------
+%% Re-exported Core Types (for backend package extraction)
+%%--------------------------------------------------------------------
+
+-doc "Session configuration options — see beam_agent_core for the canonical definition.".
+-type session_opts() :: beam_agent_core:session_opts().
+
+-doc "Per-query options — see beam_agent_core for the canonical definition.".
+-type query_opts() :: beam_agent_core:query_opts().
+
+-doc "Normalized message across all backends — see beam_agent_core for the canonical definition.".
+-type message() :: beam_agent_core:message().
+
+-doc "Message type discriminator — see beam_agent_core for the canonical definition.".
+-type message_type() :: beam_agent_core:message_type().
+
+%%--------------------------------------------------------------------
+%% Re-exported Adapter Types (for backend package extraction)
+%%--------------------------------------------------------------------
+
+-doc "Backend category discriminator — see beam_agent_adapter for the canonical definition.".
+-type backend_type() :: beam_agent_adapter:backend_type().
+
+-doc "Capability atom — see beam_agent_adapter for the canonical definition.".
+-type capability() :: beam_agent_adapter:capability().

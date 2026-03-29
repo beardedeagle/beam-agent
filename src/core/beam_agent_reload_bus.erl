@@ -7,9 +7,9 @@ when global registrable components change (hooks, skills, MCP servers,
 command policies). Sessions subscribe to the bus during init and receive
 `{beam_agent_reload, Type, Version}` messages when changes occur.
 
-The bus uses two ETS tables:
-  - `beam_agent_reload_subscribers` — tracks subscriber pids
-  - `beam_agent_reload_version` — monotonic version counter
+The bus uses a single ETS table (`beam_agent_reload`) with namespaced keys:
+  - `{subscriber, Pid}` — tracks subscriber pids
+  - `version` — monotonic version counter
 
 No processes are spawned. Subscriber notifications are sent via
 `erlang:send/2` from the caller of `notify/1`. Dead subscribers
@@ -73,32 +73,31 @@ Reserved for future use: `policy`.
 -type reload_type() :: hooks | skills | tools | plugins | agents
                      | commands | config | routines | policy.
 
--define(SUBS_TABLE, beam_agent_reload_subscribers).
--define(VERSION_TABLE, beam_agent_reload_version).
+-define(TABLE, beam_agent_reload).
 
 %%--------------------------------------------------------------------
 %% Table Management
 %%--------------------------------------------------------------------
 
 -doc """
-Create the reload bus ETS tables. Idempotent.
+Create the reload bus ETS table. Idempotent.
 
 Called from `beam_agent:init/0` during application startup.
 Safe to call multiple times — subsequent calls are no-ops.
 """.
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?SUBS_TABLE,
-        [set, named_table, {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?VERSION_TABLE,
-        [set, named_table, {read_concurrency, true}]),
+    beam_agent_ets:ensure_table(?TABLE,
+        [set, named_table,
+         {read_concurrency, true},
+         {write_concurrency, true}]),
     %% Seed the version counter if it doesn't exist yet.
     %% insert_new is atomic and returns false if key exists.
     %% Uses beam_agent_ets for hardened mode compatibility.
-    case ets:whereis(?VERSION_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> ok;
         _Tid ->
-            _ = beam_agent_ets:insert_new(?VERSION_TABLE, {version, 0}),
+            _ = beam_agent_ets:insert_new(?TABLE, {version, 0}),
             ok
     end.
 
@@ -119,10 +118,10 @@ an already-subscribed pid is a no-op.
 """.
 -spec subscribe(pid()) -> ok.
 subscribe(Pid) when is_pid(Pid) ->
-    case ets:whereis(?SUBS_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> ok;
         _Tid ->
-            beam_agent_ets:insert(?SUBS_TABLE, {Pid}),
+            beam_agent_ets:insert(?TABLE, {{subscriber, Pid}}),
             ok
     end.
 
@@ -137,10 +136,10 @@ Idempotent — unsubscribing a pid that is not subscribed is a no-op.
 """.
 -spec unsubscribe(pid()) -> ok.
 unsubscribe(Pid) when is_pid(Pid) ->
-    case ets:whereis(?SUBS_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> ok;
         _Tid ->
-            beam_agent_ets:delete(?SUBS_TABLE, Pid),
+            beam_agent_ets:delete(?TABLE, {subscriber, Pid}),
             ok
     end.
 
@@ -159,11 +158,11 @@ Returns `ok`. Safe to call even if tables do not exist yet.
 """.
 -spec notify(reload_type()) -> ok.
 notify(Type) when is_atom(Type) ->
-    case ets:whereis(?VERSION_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> ok;
         _Tid ->
             Version = beam_agent_ets:update_counter(
-                ?VERSION_TABLE, version, {2, 1}, {version, 0}),
+                ?TABLE, version, {2, 1}, {version, 0}),
             Msg = {beam_agent_reload, Type, Version},
             notify_subscribers(Msg)
     end.
@@ -181,10 +180,10 @@ atomically on each `notify/1` call.
 """.
 -spec version() -> non_neg_integer().
 version() ->
-    case ets:whereis(?VERSION_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> 0;
         _Tid ->
-            case ets:lookup(?VERSION_TABLE, version) of
+            case ets:lookup(?TABLE, version) of
                 [{version, V}] -> V;
                 [] -> 0
             end
@@ -196,18 +195,18 @@ version() ->
 
 -spec notify_subscribers({beam_agent_reload, reload_type(), pos_integer()}) -> ok.
 notify_subscribers(Msg) ->
-    case ets:whereis(?SUBS_TABLE) of
+    case ets:whereis(?TABLE) of
         undefined -> ok;
         _Tid ->
-            Subscribers = ets:tab2list(?SUBS_TABLE),
-            lists:foreach(fun({Pid}) ->
+            Subscribers = ets:match_object(?TABLE, {{subscriber, '_'}}),
+            lists:foreach(fun({{subscriber, Pid}}) ->
                 case erlang:is_process_alive(Pid) of
                     true ->
                         _ = erlang:send(Pid, Msg, [noconnect]),
                         ok;
                     false ->
                         %% Prune dead subscriber
-                        beam_agent_ets:delete(?SUBS_TABLE, Pid),
+                        beam_agent_ets:delete(?TABLE, {subscriber, Pid}),
                         ok
                 end
             end, Subscribers)

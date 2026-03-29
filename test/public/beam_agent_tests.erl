@@ -60,15 +60,15 @@ supports_test() ->
     ?assertEqual({ok, true}, beam_agent_capabilities:supports(event_streaming, codex)).
 
 exports_fuzzy_file_search_session_lifecycle_test() ->
-    ensure_loaded(beam_agent_search),
-    ?assert(erlang:function_exported(beam_agent_search,
-                                     session_start,
+    ensure_loaded(beam_agent_catalog),
+    ?assert(erlang:function_exported(beam_agent_catalog,
+                                     search_session_start,
                                      3)),
-    ?assert(erlang:function_exported(beam_agent_search,
-                                     session_update,
+    ?assert(erlang:function_exported(beam_agent_catalog,
+                                     search_session_update,
                                      3)),
-    ?assert(erlang:function_exported(beam_agent_search,
-                                     session_stop,
+    ?assert(erlang:function_exported(beam_agent_catalog,
+                                     search_session_stop,
                                      2)).
 
 exports_event_stream_subscription_api_test() ->
@@ -119,10 +119,10 @@ exports_artifacts_domain_surface_test() ->
     ?assert(erlang:function_exported(beam_agent_artifacts, delete, 1)).
 
 exports_audit_domain_surface_test() ->
-    ensure_loaded(beam_agent_audit),
-    ?assert(erlang:function_exported(beam_agent_audit, list_events, 0)),
-    ?assert(erlang:function_exported(beam_agent_audit, list_events, 1)),
-    ?assert(erlang:function_exported(beam_agent_audit, get_event, 1)).
+    ensure_loaded(beam_agent_journal),
+    ?assert(erlang:function_exported(beam_agent_journal, list_events, 0)),
+    ?assert(erlang:function_exported(beam_agent_journal, list_events, 1)),
+    ?assert(erlang:function_exported(beam_agent_journal, get_event, 1)).
 
 exports_journal_domain_surface_test() ->
     ensure_loaded(beam_agent_journal),
@@ -255,7 +255,7 @@ exports_claude_native_controls_test() ->
 
 exports_codex_native_admin_and_realtime_test() ->
     lists:foreach(fun ensure_loaded/1, [beam_agent_threads, beam_agent_control,
-                                         beam_agent_skills, beam_agent_apps,
+                                         beam_agent_skills, beam_agent_runtime,
                                          beam_agent_config, beam_agent_mcp,
                                          beam_agent_command]),
     ?assert(erlang:function_exported(beam_agent_threads, thread_unsubscribe, 2)),
@@ -273,7 +273,7 @@ exports_codex_native_admin_and_realtime_test() ->
     ?assert(erlang:function_exported(beam_agent_control, experimental_feature_list, 1)),
     ?assert(erlang:function_exported(beam_agent_skills, remote_list, 1)),
     ?assert(erlang:function_exported(beam_agent_skills, remote_export, 2)),
-    ?assert(erlang:function_exported(beam_agent_apps, list, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, apps_list, 1)),
     ?assert(erlang:function_exported(beam_agent_config, requirements_read, 1)),
     ?assert(erlang:function_exported(beam_agent_config, external_agent_detect, 1)),
     ?assert(erlang:function_exported(beam_agent_config, external_agent_import, 2)),
@@ -284,18 +284,18 @@ exports_codex_native_admin_and_realtime_test() ->
     ?assert(erlang:function_exported(beam_agent_command, turn_respond, 3)).
 
 exports_opencode_native_routes_test() ->
-    lists:foreach(fun ensure_loaded/1, [beam_agent_apps, beam_agent_file,
+    lists:foreach(fun ensure_loaded/1, [beam_agent_runtime, beam_agent_catalog,
                                          beam_agent_command]),
-    ?assert(erlang:function_exported(beam_agent_apps, info, 1)),
-    ?assert(erlang:function_exported(beam_agent_apps, init, 1)),
-    ?assert(erlang:function_exported(beam_agent_apps, log, 2)),
-    ?assert(erlang:function_exported(beam_agent_apps, modes, 1)),
-    ?assert(erlang:function_exported(beam_agent_file, find_text, 2)),
-    ?assert(erlang:function_exported(beam_agent_file, find_files, 2)),
-    ?assert(erlang:function_exported(beam_agent_file, find_symbols, 2)),
-    ?assert(erlang:function_exported(beam_agent_file, list, 2)),
-    ?assert(erlang:function_exported(beam_agent_file, read, 2)),
-    ?assert(erlang:function_exported(beam_agent_file, status, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, app_info, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, app_init, 1)),
+    ?assert(erlang:function_exported(beam_agent_runtime, app_log, 2)),
+    ?assert(erlang:function_exported(beam_agent_runtime, app_modes, 1)),
+    ?assert(erlang:function_exported(beam_agent_catalog, find_text, 2)),
+    ?assert(erlang:function_exported(beam_agent_catalog, find_files, 2)),
+    ?assert(erlang:function_exported(beam_agent_catalog, find_symbols, 2)),
+    ?assert(erlang:function_exported(beam_agent_catalog, file_list, 2)),
+    ?assert(erlang:function_exported(beam_agent_catalog, file_read, 2)),
+    ?assert(erlang:function_exported(beam_agent_catalog, file_status, 1)),
     ?assert(erlang:function_exported(beam_agent_command, session_init, 2)),
     ?assert(erlang:function_exported(beam_agent_command, session_messages, 1)),
     ?assert(erlang:function_exported(beam_agent_command, session_messages, 2)),

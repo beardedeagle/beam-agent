@@ -135,8 +135,76 @@ level deep. The built-in provider catalog is compiled-in static data.
     get_last_session_id/1,
     windows_sandbox_setup_start/2,
     set_max_thinking_tokens/2,
-    stop_task/2
+    stop_task/2,
+    %% Account Management — per-session, native_or routing
+    account_login/2,
+    account_cancel/2,
+    account_logout/1,
+    account_rate_limits/1,
+    account_info/1,
+    %% App/Project Management — per-session, native_or routing
+    apps_list/1,
+    apps_list/2,
+    app_info/1,
+    app_init/1,
+    app_log/2,
+    app_modes/1,
+    %% App Registry (folded from beam_agent_app_core)
+    app_register/3,
+    app_unregister/2,
+    app_ensure_tables/0,
+    app_clear/0,
+    %% App Registry impl — used by backend adapters directly
+    app_info_impl/1,
+    app_init_impl/1,
+    app_modes_impl/1,
+    %% Todo Tracking — pure functions
+    extract_todos/1,
+    filter_by_status/2,
+    todo_summary/1
 ]).
+
+-export_type([todo_item/0, todo_status/0, app_entry/0, apps_list_opts/0]).
+
+-ifdef(TEST).
+-export([
+    apps_list_impl/1, apps_list_impl/2,
+    app_log_impl/2
+]).
+-endif.
+
+%%--------------------------------------------------------------------
+%% Todo Types
+%%--------------------------------------------------------------------
+
+-type todo_status() :: pending | in_progress | completed.
+
+-type todo_item() :: #{
+    content := binary(),
+    status := todo_status(),
+    active_form => binary()
+}.
+
+%%--------------------------------------------------------------------
+%% App Types and Defines (folded from beam_agent_app_core)
+%%--------------------------------------------------------------------
+
+-define(TABLE, beam_agent_runtime).
+-define(DEFAULT_APP_MODES, [<<"default">>, <<"debug">>, <<"verbose">>]).
+
+-type app_entry() :: #{
+    id := binary(),
+    name := binary(),
+    session := pid() | binary(),
+    status := active | inactive,
+    modes := [binary(), ...],
+    log := [#{timestamp := integer(), body := term()}],
+    metadata := #{registered_at => integer(), atom() => term()}
+}.
+
+-type apps_list_opts() :: #{
+    status => active | inactive
+}.
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -404,7 +472,7 @@ Parameters:
 
 Returns {ok, Model} on success or {error, Reason}.
 """.
--spec set_model(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_model(pid(), binary()) -> {ok, binary()} | {error, not_supported | term()}.
 set_model(Session, Model) -> beam_agent_core:set_model(Session, Model).
 
 -doc """
@@ -418,7 +486,7 @@ Parameters:
 
 Returns {ok, Mode} on success or {error, Reason}.
 """.
--spec set_permission_mode(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec set_permission_mode(pid(), binary()) -> {ok, binary() | map()} | {error, not_supported | term()}.
 set_permission_mode(Session, Mode) -> beam_agent_core:set_permission_mode(Session, Mode).
 
 -doc """
@@ -435,7 +503,7 @@ Parameters:
 Returns ok if the interrupt was sent, or {error, not_supported} if the
 backend does not support interrupts, or {error, Reason} on failure.
 """.
--spec interrupt(pid()) -> ok | {error, term()}.
+-spec interrupt(pid()) -> ok | {error, no_active_query | not_supported | term()}.
 interrupt(Session) -> beam_agent_core:interrupt(Session).
 
 -doc """
@@ -449,7 +517,7 @@ Parameters:
 
 Returns ok or {error, Reason}.
 """.
--spec abort(pid()) -> ok | {error, term()}.
+-spec abort(pid()) -> ok | {error, not_supported | term()}.
 abort(Session) -> beam_agent_core:abort(Session).
 
 -doc """
@@ -468,7 +536,7 @@ Parameters:
 Returns {ok, Result} on success or {error, not_supported} if the
 backend does not handle this method, or {error, Reason} on failure.
 """.
--spec send_control(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+-spec send_control(pid(), binary(), map()) -> {ok, map()} | {error, not_supported | term()}.
 send_control(Session, Method, Params) ->
     beam_agent_core:send_control(Session, Method, Params).
 
@@ -493,7 +561,7 @@ Returns {ok, Map} on success, where Map includes keys such as
 status, backend, health, and session_id. Returns {error, Reason}
 if the session is unreachable.
 """.
--spec get_status(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_status(pid() | binary()) -> {ok, map()} | {error, term()}.
 get_status(Session) ->
     beam_agent_core:native_or(Session, get_status, [], fun() ->
         universal_get_status(Session)
@@ -515,7 +583,7 @@ Returns {ok, Map} on success, where Map includes whether the session
 is authenticated, the authentication method, and token expiration if
 applicable. Returns {error, Reason} on failure.
 """.
--spec get_auth_status(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_auth_status(pid() | binary()) -> {ok, map()} | {error, term()}.
 get_auth_status(Session) ->
     beam_agent_core:native_or(Session, get_auth_status, [], fun() ->
         universal_get_auth_status(Session)
@@ -536,7 +604,7 @@ Session is the pid of a running beam_agent session.
 Returns {ok, SessionId} where SessionId is typically a binary string,
 or {error, Reason} if the identifier cannot be determined.
 """.
--spec get_last_session_id(pid() | binary()) -> {ok, term()} | {error, term()}.
+-spec get_last_session_id(pid() | binary()) -> {ok, binary()} | {error, term()}.
 get_last_session_id(Session) ->
     beam_agent_core:native_or(Session, get_last_session_id, [], fun() ->
         {ok, beam_agent_core:session_identity(Session)}
@@ -553,7 +621,7 @@ Initiates sandbox configuration for backends that run in a Windows
 environment. On non-Windows platforms the universal fallback returns
 status => not_applicable with the current platform architecture.
 """.
--spec windows_sandbox_setup_start(pid(), map()) -> {ok, term()} | {error, term()}.
+-spec windows_sandbox_setup_start(pid(), map()) -> {ok, map()} | {error, term()}.
 windows_sandbox_setup_start(Session, Opts) ->
     beam_agent_core:native_or(Session, windows_sandbox_setup_start, [Opts], fun() ->
         {ok, beam_agent_core:with_universal_source(Session, #{
@@ -570,10 +638,10 @@ internal chain-of-thought before producing a visible response. Higher
 values allow deeper reasoning at the cost of latency and token usage.
 The universal fallback persists this as a configuration value.
 """.
--spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, term()} | {error, term()}.
+-spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, map()} | {error, term()}.
 set_max_thinking_tokens(Session, MaxTokens) ->
     beam_agent_core:native_or(Session, set_max_thinking_tokens, [MaxTokens], fun() ->
-        _ = beam_agent_config_core:config_value_write(
+        _ = beam_agent_config:config_value_write(
             Session, <<"max_thinking_tokens">>, MaxTokens, #{}),
         {ok, beam_agent_core:with_universal_source(Session, #{
             max_thinking_tokens => MaxTokens})}
@@ -587,13 +655,313 @@ TaskId identifies the specific task (query or sub-agent invocation)
 to cancel. The universal fallback calls interrupt/1 on the session
 process.
 """.
--spec stop_task(pid(), binary()) -> {ok, term()} | {error, term()}.
+-spec stop_task(pid(), binary()) -> {ok, map()} | {error, term()}.
 stop_task(Session, TaskId) ->
     beam_agent_core:native_or(Session, stop_task, [TaskId], fun() ->
         _ = beam_agent_core:interrupt(Session),
         {ok, beam_agent_core:with_universal_source(Session, #{
             status => stopped, task_id => TaskId})}
     end).
+
+%%--------------------------------------------------------------------
+%% Account Management
+%%
+%% These fallbacks delegate to beam_agent_account_core rather than
+%% inlining the logic (as app management functions below do) because
+%% account_core is a multi-caller module also used by
+%% beam_agent_session_engine for session cleanup.
+%%--------------------------------------------------------------------
+
+-doc "Initiate an account login flow.".
+-spec account_login(pid(), map()) -> {ok, map()} | {error, term()}.
+account_login(Session, Params) ->
+    beam_agent_core:native_or(Session, account_login, [Params], fun() ->
+        beam_agent_account_core:account_login(Session, Params)
+    end).
+
+-doc "Cancel an in-progress account login flow.".
+-spec account_cancel(pid(), map()) -> {ok, map()} | {error, term()}.
+account_cancel(Session, Params) ->
+    beam_agent_core:native_or(Session, account_login_cancel, [Params], fun() ->
+        beam_agent_account_core:account_login_cancel(Session, Params)
+    end).
+
+-doc "Log out of the current account.".
+-spec account_logout(pid()) -> {ok, map()} | {error, term()}.
+account_logout(Session) ->
+    beam_agent_core:native_or(Session, account_logout, [], fun() ->
+        beam_agent_account_core:account_logout(Session)
+    end).
+
+-doc "Get rate limit information for the current account.".
+-spec account_rate_limits(pid()) -> {ok, map()} | {error, term()}.
+account_rate_limits(Session) ->
+    beam_agent_core:native_or(Session, account_rate_limits, [], fun() ->
+        account_info(Session)
+    end).
+
+-doc "Return account and authentication information for the session.".
+-spec account_info(pid()) -> {ok, map()} | {error, term()}.
+account_info(Session) ->
+    beam_agent_core:native_or(Session, account_info, [], fun() ->
+        beam_agent_core:account_info(Session)
+    end).
+
+%%--------------------------------------------------------------------
+%% App/Project Management
+%%--------------------------------------------------------------------
+
+-doc "List apps and projects registered for a session.".
+-spec apps_list(pid()) -> {ok, [app_entry()]} | {error, term()}.
+apps_list(Session) ->
+    beam_agent_core:native_or(Session, apps_list, [], fun() ->
+        apps_list_impl(Session)
+    end).
+
+-doc "List apps and projects with optional filter criteria.".
+-spec apps_list(pid(), map()) -> {ok, [app_entry()]} | {error, term()}.
+apps_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, apps_list, [Opts], fun() ->
+        apps_list_impl(Session, Opts)
+    end).
+
+-doc "Return information about the current app or project context.".
+-spec app_info(pid()) -> {ok, app_entry()} | {error, no_app | term()}.
+app_info(Session) ->
+    beam_agent_core:native_or(Session, app_info, [], fun() ->
+        app_info_impl(Session)
+    end).
+
+-doc "Initialize the app and project context for a session.".
+-spec app_init(pid()) -> {ok, app_entry()} | {error, term()}.
+app_init(Session) ->
+    beam_agent_core:native_or(Session, app_init, [], fun() ->
+        app_init_impl(Session)
+    end).
+
+-doc "Append a log entry to the session's app log.".
+-spec app_log(pid(), map()) -> {ok, map()} | {error, term()}.
+app_log(Session, Body) ->
+    beam_agent_core:native_or(Session, app_log, [Body], fun() ->
+        _ = app_log_impl(Session, Body),
+        {ok, beam_agent_core:with_universal_source(Session, #{status => logged})}
+    end).
+
+-doc "List available app modes for a session.".
+-spec app_modes(pid()) -> {ok, [binary()]} | {error, term()}.
+app_modes(Session) ->
+    beam_agent_core:native_or(Session, app_modes, [], fun() ->
+        app_modes_impl(Session)
+    end).
+
+%%--------------------------------------------------------------------
+%% Todo Tracking
+%%--------------------------------------------------------------------
+
+-doc """
+Extract all `TodoWrite` tool use blocks from a list of messages.
+Scans assistant messages for `tool_use` content blocks where the
+tool name is `TodoWrite`. Returns a flat list of todo items.
+""".
+-spec extract_todos([beam_agent_core:message()]) -> [todo_item()].
+extract_todos(Messages) when is_list(Messages) ->
+    lists:flatmap(fun extract_from_message/1, Messages).
+
+-doc "Filter todo items by status.".
+-spec filter_by_status([todo_item()], todo_status()) -> [todo_item()].
+filter_by_status(Todos, Status) ->
+    [T || #{status := S} = T <- Todos, S =:= Status].
+
+-doc """
+Return a summary map of todo counts by status.
+Example: `#{pending => 2, in_progress => 1, completed => 3, total => 6}`
+""".
+-spec todo_summary([todo_item()]) -> #{atom() => non_neg_integer()}.
+todo_summary(Todos) ->
+    Counts = lists:foldl(fun(#{status := S}, Acc) ->
+        maps:update_with(S, fun(N) -> N + 1 end, 1, Acc)
+    end, #{}, Todos),
+    Counts#{total => length(Todos)}.
+
+%%--------------------------------------------------------------------
+%% App Registry Implementation (folded from beam_agent_app_core)
+%%--------------------------------------------------------------------
+
+-doc "Ensure the unified runtime ETS table exists. Idempotent.".
+-spec app_ensure_tables() -> ok.
+app_ensure_tables() ->
+    beam_agent_ets:ensure_table(?TABLE, [set, named_table,
+        {read_concurrency, true}]).
+
+-doc "Clear all app registry data.".
+-spec app_clear() -> ok.
+app_clear() ->
+    app_ensure_tables(),
+    beam_agent_ets:match_delete(?TABLE, {{app, '_', '_'}, '_'}),
+    ok.
+
+-doc """
+Register or update an app entry for a session.
+
+Creates a new entry if `AppId` is not yet registered under `Session`.
+Updates the existing entry (merging opts) if it already exists.
+
+Opts:
+- `name`: human-readable label (binary)
+- `modes`: list of mode binaries
+- `metadata`: arbitrary map of extra fields
+""".
+-spec app_register(pid() | binary(), binary(), map()) ->
+    {ok, app_entry()}.
+app_register(Session, AppId, Opts)
+  when (is_pid(Session) orelse is_binary(Session)),
+       is_binary(AppId), is_map(Opts) ->
+    app_ensure_tables(),
+    Key = {app, beam_agent_ets:session_key(Session), AppId},
+    Existing = case ets:lookup(?TABLE, Key) of
+        [{_, E}] -> E;
+        []       -> new_app_entry(Session, AppId)
+    end,
+    Name     = maps:get(name, Opts, maps:get(name, Existing, AppId)),
+    Modes    = maps:get(modes, Opts, maps:get(modes, Existing, ?DEFAULT_APP_MODES)),
+    Meta     = maps:merge(maps:get(metadata, Existing, #{}),
+                          maps:get(metadata, Opts, #{})),
+    Entry    = Existing#{
+        name     => Name,
+        modes    => Modes,
+        metadata => Meta,
+        status   => maps:get(status, Opts, maps:get(status, Existing, active))
+    },
+    beam_agent_ets:insert(?TABLE, {Key, Entry}),
+    {ok, Entry}.
+
+-doc "Remove an app entry for a session. No-op if the entry does not exist.".
+-spec app_unregister(pid() | binary(), binary()) -> ok.
+app_unregister(Session, AppId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
+    app_ensure_tables(),
+    Key = {app, beam_agent_ets:session_key(Session), AppId},
+    beam_agent_ets:delete(?TABLE, Key),
+    ok.
+
+%% Internal app implementations used as native_or fallbacks.
+
+-spec apps_list_impl(pid() | binary()) -> {ok, [app_entry()]}.
+apps_list_impl(Session) ->
+    apps_list_impl(Session, #{}).
+
+-spec apps_list_impl(pid() | binary(), apps_list_opts()) -> {ok, [app_entry()]}.
+apps_list_impl(Session, Opts)
+  when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
+    app_ensure_tables(),
+    SK = beam_agent_ets:session_key(Session),
+    All = ets:foldl(fun
+        ({{app, S, _}, Entry}, Acc) when S =:= SK ->
+            case matches_app_status(Entry, Opts) of
+                true  -> [Entry | Acc];
+                false -> Acc
+            end;
+        (_, Acc) ->
+            Acc
+    end, [], ?TABLE),
+    {ok, All}.
+
+-spec app_info_impl(pid() | binary()) -> {ok, app_entry()} | {error, no_app}.
+app_info_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case apps_list_impl(Session) of
+        {ok, []} ->
+            {error, no_app};
+        {ok, [Single]} ->
+            {ok, chronological_log(Single)};
+        {ok, Many} ->
+            Latest = lists:last(
+                lists:sort(fun(A, B) ->
+                    app_registered_at(A) =< app_registered_at(B)
+                end, Many)
+            ),
+            {ok, chronological_log(Latest)}
+    end.
+
+-spec app_init_impl(pid() | binary()) -> {ok, app_entry()}.
+app_init_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case app_info_impl(Session) of
+        {ok, Entry} ->
+            {ok, Entry};
+        {error, no_app} ->
+            DefaultName = default_app_name(Session),
+            app_register(Session, <<"default">>, #{name => DefaultName})
+    end.
+
+-spec app_log_impl(pid() | binary(), term()) -> ok | {error, no_app}.
+app_log_impl(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
+    app_ensure_tables(),
+    SK = beam_agent_ets:session_key(Session),
+    case app_info_impl(Session) of
+        {error, no_app} ->
+            {error, no_app};
+        {ok, Entry} ->
+            AppId = maps:get(id, Entry),
+            Key   = {app, SK, AppId},
+            LogEntry = #{
+                timestamp => erlang:system_time(millisecond),
+                body      => Body
+            },
+            Log0  = maps:get(log, Entry, []),
+            Entry2 = Entry#{log => [LogEntry | Log0]},
+            beam_agent_ets:insert(?TABLE, {Key, Entry2}),
+            ok
+    end.
+
+-spec app_modes_impl(pid() | binary()) -> {ok, [binary()]}.
+app_modes_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case app_info_impl(Session) of
+        {ok, Entry} ->
+            {ok, maps:get(modes, Entry, ?DEFAULT_APP_MODES)};
+        {error, no_app} ->
+            {ok, ?DEFAULT_APP_MODES}
+    end.
+
+%% App registry internal helpers
+
+-spec new_app_entry(pid() | binary(), binary()) ->
+    #{id := binary(), name := binary(), session := pid() | binary(),
+      status := active, modes := [<<_:40, _:_*16>>, ...], log := [],
+      metadata := #{registered_at := integer()}}.
+new_app_entry(Session, AppId) ->
+    #{
+        id       => AppId,
+        name     => AppId,
+        session  => Session,
+        status   => active,
+        modes    => ?DEFAULT_APP_MODES,
+        log      => [],
+        metadata => #{registered_at => erlang:system_time(millisecond)}
+    }.
+
+-spec chronological_log(app_entry()) -> app_entry().
+chronological_log(#{log := Log} = Entry) ->
+    Entry#{log => lists:reverse(Log)}.
+
+-spec app_registered_at(app_entry()) -> integer().
+app_registered_at(Entry) ->
+    Meta = maps:get(metadata, Entry, #{}),
+    maps:get(registered_at, Meta, 0).
+
+-spec matches_app_status(app_entry(), apps_list_opts()) -> boolean().
+matches_app_status(Entry, Opts) ->
+    case maps:find(status, Opts) of
+        {ok, Expected} ->
+            maps:get(status, Entry, active) =:= Expected;
+        error ->
+            true
+    end.
+
+-spec default_app_name(pid() | binary()) -> <<_:32, _:_*8>>.
+default_app_name(Session) when is_pid(Session) ->
+    PidBin = list_to_binary(pid_to_list(Session)),
+    <<"app-", PidBin/binary>>;
+default_app_name(Session) when is_binary(Session) ->
+    <<"app-", Session/binary>>.
 
 %%--------------------------------------------------------------------
 %% Private Helpers
@@ -616,3 +984,35 @@ universal_get_status(Session) ->
 universal_get_auth_status(Session) ->
     {ok, Status} = beam_agent_runtime_core:provider_status(Session),
     {ok, beam_agent_core:with_universal_source(Session, Status)}.
+
+%%--------------------------------------------------------------------
+%% Todo Internals
+%%--------------------------------------------------------------------
+
+-spec extract_from_message(beam_agent_core:message()) -> [todo_item()].
+extract_from_message(#{type := assistant, content_blocks := Blocks})
+  when is_list(Blocks) ->
+    lists:filtermap(fun parse_todo_block/1, Blocks);
+extract_from_message(_) ->
+    [].
+
+-spec parse_todo_block(beam_agent_content_core:content_block()) ->
+    {true, todo_item()} | false.
+parse_todo_block(#{type := tool_use, name := <<"TodoWrite">>,
+                   input := Input}) when is_map(Input) ->
+    Content = maps:get(<<"content">>, Input,
+                  maps:get(<<"subject">>, Input, <<>>)),
+    Status = parse_todo_status(maps:get(<<"status">>, Input, <<"pending">>)),
+    Item = #{content => Content, status => Status},
+    Item2 = case maps:get(<<"activeForm">>, Input, undefined) of
+        undefined -> Item;
+        AF -> Item#{active_form => AF}
+    end,
+    {true, Item2};
+parse_todo_block(_) ->
+    false.
+
+-spec parse_todo_status(binary()) -> todo_status().
+parse_todo_status(<<"in_progress">>) -> in_progress;
+parse_todo_status(<<"completed">>)   -> completed;
+parse_todo_status(_)                 -> pending.
