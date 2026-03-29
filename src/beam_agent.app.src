@@ -89,6 +89,7 @@
         beam_agent_mcp_transport_stdio,
         beam_agent_raw_core,
         beam_agent_redaction,
+        beam_agent_sensitive_keys,
         beam_agent_router,
         beam_agent_routine_runner,
         beam_agent_routing_core,

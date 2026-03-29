@@ -27,6 +27,7 @@ defmodule BeamAgentTest do
     BeamAgent.Search,
     BeamAgent.Runs,
     BeamAgent.Checkpoint,
+    BeamAgent.SensitiveKeys,
     BeamAgent.SessionStore,
     BeamAgent.Threads
   ]
@@ -515,6 +516,13 @@ defmodule BeamAgentTest do
 
   test "Checkpoint module exports file rewind function" do
     assert function_exported?(BeamAgent.Checkpoint, :rewind_files, 2)
+  end
+
+  test "SensitiveKeys module exports sensitive key functions" do
+    assert function_exported?(BeamAgent.SensitiveKeys, :all, 0)
+    assert function_exported?(BeamAgent.SensitiveKeys, :credential_match_keys, 0)
+    assert function_exported?(BeamAgent.SensitiveKeys, :redaction_match_keys, 0)
+    assert function_exported?(BeamAgent.SensitiveKeys, :is_sensitive, 1)
   end
 
   test "SessionStore module exports session persistence functions" do
