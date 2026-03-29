@@ -67,9 +67,10 @@ over thread lifecycle, forking, archiving, or rollback operations.
 ## Architecture
 
 This module is a thin public wrapper that delegates every call to
-beam_agent_threads_core. The core module owns the ETS tables
+beam_agent_threads_core. The core module owns the store tables
 (beam_agent_threads_core for thread metadata, beam_agent_active_threads
-for active thread tracking) and all implementation logic.
+for active thread tracking) routed through `beam_agent_store`
+(domain `threads`) and all implementation logic.
 
 Thread messages are stored in the session-level message store
 (beam_agent_session_store_core) with a thread_id tag. This keeps
@@ -93,9 +94,10 @@ hidden from the active view.
 
 ## Architecture deep dive
 
-Thread state is managed by beam_agent_threads_core using two ETS tables:
-beam_agent_threads_core for thread metadata and beam_agent_active_threads
-for tracking the single active thread per session.
+Thread state is managed by beam_agent_threads_core using two tables routed
+through `beam_agent_store` (domain `threads`): beam_agent_threads_core for
+thread metadata and beam_agent_active_threads for tracking the single
+active thread per session. The default adapter is `beam_agent_store_ets`.
 
 Thread messages are stored in the session-level message store
 (beam_agent_session_store_core) tagged with a thread_id, making them
@@ -197,7 +199,7 @@ auto-generated if omitted), parent_thread_id (binary).
 %%--------------------------------------------------------------------
 
 -doc """
-Ensure the thread store ETS tables exist.
+Ensure the thread store tables exist.
 
 Creates the beam_agent_threads_core and beam_agent_active_threads
 tables if they do not already exist. This function is idempotent
