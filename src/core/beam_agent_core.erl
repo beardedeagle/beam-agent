@@ -494,10 +494,10 @@ restore_session(SessionId, Opts)
     case beam_agent_session_store_core:get_session(SessionId) of
         {ok, Meta} ->
             SessionOpts = build_restore_opts(SessionId, Meta, Opts),
-            case maps:is_key(backend, SessionOpts) of
-                true ->
+            case maps:get(backend, SessionOpts, undefined) of
+                B when is_atom(B), B =/= undefined ->
                     start_session(SessionOpts);
-                false ->
+                _ ->
                     {error, {missing_backend, SessionId}}
             end;
         {error, not_found} ->
@@ -1026,7 +1026,8 @@ opt_value([Key | Rest], Opts, Default) ->
                          map()) -> session_opts().
 build_restore_opts(SessionId, Meta, CallerOpts) ->
     Stored0 = case maps:find(adapter, Meta) of
-        {ok, Adapter} when is_atom(Adapter) -> #{backend => Adapter};
+        {ok, Adapter} when is_atom(Adapter), Adapter =/= undefined ->
+            #{backend => Adapter};
         _ -> #{}
     end,
     Stored1 = case maps:find(model, Meta) of

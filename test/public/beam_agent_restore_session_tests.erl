@@ -40,7 +40,7 @@ safe_restore(SessionId, Opts) ->
 flush_exits() ->
     receive
         {'EXIT', _, _} -> flush_exits()
-    after 100 -> ok
+    after 0 -> ok
     end.
 
 %%====================================================================
@@ -64,8 +64,7 @@ session_not_found_test() ->
     ?assertEqual(
         {error, {session_not_found, <<"nonexistent-session">>}},
         beam_agent:restore_session(<<"nonexistent-session">>, #{})
-    ),
-    beam_agent_session_store_core:clear().
+    ).
 
 %%====================================================================
 %% Error: missing backend
@@ -80,8 +79,7 @@ missing_backend_no_adapter_no_opts_test() ->
     ?assertEqual(
         {error, {missing_backend, SId}},
         beam_agent:restore_session(SId, #{})
-    ),
-    beam_agent_session_store_core:clear().
+    ).
 
 %%====================================================================
 %% Happy path: opts built correctly, start_session called
@@ -100,8 +98,7 @@ restore_reaches_start_session_test() ->
     %% start_session was actually invoked.
     {error, Reason} = safe_restore(SId, #{}),
     ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason),
-    beam_agent_session_store_core:clear().
+    ?assertNotMatch({missing_backend, _}, Reason).
 
 %%====================================================================
 %% Caller opts override stored metadata
@@ -122,8 +119,7 @@ caller_opts_override_test() ->
         model => <<"override-model">>
     }),
     ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason),
-    beam_agent_session_store_core:clear().
+    ?assertNotMatch({missing_backend, _}, Reason).
 
 %%====================================================================
 %% Caller-supplied backend fills missing adapter
@@ -138,8 +134,7 @@ caller_backend_fills_gap_test() ->
     %% Stored metadata has no adapter, but caller provides backend.
     %% Should NOT get missing_backend.
     {error, Reason} = safe_restore(SId, #{backend => claude}),
-    ?assertNotMatch({missing_backend, _}, Reason),
-    beam_agent_session_store_core:clear().
+    ?assertNotMatch({missing_backend, _}, Reason).
 
 %%====================================================================
 %% Empty/blank metadata fields are ignored
@@ -157,5 +152,4 @@ blank_metadata_fields_ignored_test() ->
     %% The call reaches start_session (error is not from our layer).
     {error, Reason} = safe_restore(SId, #{}),
     ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason),
-    beam_agent_session_store_core:clear().
+    ?assertNotMatch({missing_backend, _}, Reason).
