@@ -27,6 +27,7 @@ How to add a new agentic coder backend to BeamAgent.
   - [Thick Framework, Thin Adapters](#thick-framework-thin-adapters)
   - [The Event Streaming Architecture](#the-event-streaming-architecture)
   - [MCP Integration](#mcp-integration)
+  - [Hook Integration](#hook-integration)
 - [Part 4: Reference](#part-4-reference)
   - [Complete Callback Reference](#complete-callback-reference)
   - [Capability Matrix Explained](#capability-matrix-explained)
@@ -1872,6 +1873,69 @@ handle_server_request(ReqId, <<"tool.call">>, Params,
 4. Optionally inject SDK tool definitions into the CLI's available tools
    via CLI arguments or init parameters (as Copilot does with
    `maybe_inject_sdk_tools/2`).
+
+
+### Hook Integration
+
+BeamAgent's SDK hook system lets consumers register callbacks that fire at
+key lifecycle points during a session. Handlers are responsible for firing
+hooks at the correct moments.
+
+**How it works:**
+
+1. The consumer passes `sdk_hooks` in session opts.
+2. In `init_handler/1`, build the hook registry:
+
+```erlang
+HookRegistry = beam_agent_hooks_core:build_registry(
+    maps:get(sdk_hooks, Opts, undefined)).
+```
+
+3. Store the registry in your handler state (e.g., `#hstate.sdk_hook_registry`).
+4. Create a local `fire_hook/3` helper that delegates to the core:
+
+```erlang
+fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
+    beam_agent_hooks_core:fire(Event, Context, Registry).
+```
+
+**Hook events your handler should fire:**
+
+| Event | When to fire | Type | Return handling |
+|-------|-------------|------|-----------------|
+| `session_start` | `on_state_enter/3` when entering `ready` | Notification | `_ = fire_hook(...)` (discard) |
+| `session_end` | `terminate_handler/2` | Notification | `_ = fire_hook(...)` (discard) |
+| `user_prompt_submit` | `encode_query/3` before encoding the prompt | Blocking | Must handle all three returns |
+| `stop` | When a `result` message completes a query | Notification | `_ = fire_hook(...)` (discard) |
+| `post_tool_use_failure` | When an `error` message completes a query | Notification | `_ = fire_hook(...)` (discard) |
+
+**Blocking hook return values:**
+
+`user_prompt_submit` is a blocking event — the hook can modify, deny, or
+escalate the prompt. Your `encode_query/3` must handle all three returns:
+
+```erlang
+case fire_hook(user_prompt_submit, HookCtx, HState) of
+    {ok, FinalCtx} ->
+        FinalPrompt = maps:get(prompt, FinalCtx),
+        %% Encode and send the (possibly modified) prompt...
+        {ok, EncodedMsg, HState1};
+    {deny, Reason} ->
+        {error, {hook_denied, Reason}};
+    {ask, Reason} ->
+        {error, {hook_ask, Reason}}
+end.
+```
+
+**Crash protection:** Blocking hooks that crash return
+`{deny, <<"hook crashed (fail-safe deny)">>}` (fail-closed). Notification
+hooks that crash are silently swallowed (fail-open). This is handled by
+`beam_agent_hooks_core:fire/3` — your handler does not need crash protection.
+
+**Optional hooks:** `pre_tool_use`, `post_tool_use`, and `notification` hooks
+are only relevant for handlers that process tool-call results. If your
+backend/transport does not produce tool-result events (e.g., realtime
+WebSocket), you may omit these hooks.
 
 
 ---

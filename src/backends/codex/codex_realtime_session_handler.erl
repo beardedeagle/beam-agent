@@ -21,7 +21,8 @@
     is_query_complete/2,
     handle_custom_call/3,
     handle_set_model/2,
-    handle_set_permission_mode/2
+    handle_set_permission_mode/2,
+    on_state_enter/3
 ]).
 
 %% Dialyzer: ws_send_actions/2 uses #hstate{} in the spec; the record
@@ -46,7 +47,10 @@
     output_buffer = <<>> :: binary(),
 
     %% Thread tracking
-    active_threads = #{} :: #{binary() => map()}
+    active_threads = #{} :: #{binary() => map()},
+
+    %% SDK registries
+    sdk_hook_registry  :: beam_agent_hooks_core:hook_registry() | undefined
 }).
 
 %%====================================================================
@@ -69,6 +73,8 @@ init_handler(Opts) ->
                              codex_realtime_protocol:default_model()),
             Voice = maps:get(voice, Opts, undefined),
             SessionId = maps:get(session_id, Opts),
+            HookRegistry = beam_agent_hooks_core:build_registry(
+                               maps:get(sdk_hooks, Opts, undefined)),
             {Scheme, Host, Port, Path} = resolve_ws_target(Opts, Model),
             Headers = codex_realtime_protocol:build_headers(
                           ApiKey, maps:get(realtime_headers, Opts, #{})),
@@ -85,7 +91,8 @@ init_handler(Opts) ->
                 session_id     = SessionId,
                 model          = Model,
                 voice          = Voice,
-                opts           = maps:remove(api_key, Opts)
+                opts           = maps:remove(api_key, Opts),
+                sdk_hook_registry = HookRegistry
             },
             {ok, #{
                 transport_spec => {beam_agent_transport_ws, TransportOpts},
@@ -110,8 +117,9 @@ handle_data(Buffer, HState) ->
                     case maps:get(<<"type">>, Json, <<>>) of
                         <<"response.done">> ->
                             {Msg, HState1} = handle_response_done(Json, HState),
-                            HState2 = HState1#hstate{output_buffer = <<>>},
-                            {ok, [Msg], <<>>, [], HState2};
+                            HState2 = maybe_fire_message_hooks(Msg, HState1),
+                            HState3 = HState2#hstate{output_buffer = <<>>},
+                            {ok, [Msg], <<>>, [], HState3};
                         _ ->
                             Messages = codex_realtime_protocol:normalize_server_event(Json),
                             HState1 = accumulate_output(Messages, HState),
@@ -129,12 +137,24 @@ handle_data(Buffer, HState) ->
     {ok, term(), #hstate{}} | {error, term()}.
 encode_query(_Prompt, _Params, #hstate{ws_ref = undefined}) ->
     {error, not_connected};
-encode_query(Prompt, _Params, #hstate{ws_ref = WsRef,
-                                      session_id = SessionId} = HState) ->
-    _ThreadId = ensure_active_thread(SessionId),
-    Messages = codex_realtime_protocol:text_messages(Prompt),
-    HState1 = HState#hstate{output_buffer = <<>>},
-    {ok, {ws_frames, WsRef, Messages}, HState1}.
+encode_query(Prompt, Params, #hstate{ws_ref = WsRef,
+                                     session_id = SessionId} = HState) ->
+    %% Fire user_prompt_submit hook before encoding
+    HookCtx = #{event => user_prompt_submit,
+                prompt => Prompt, params => Params,
+                session_id => SessionId},
+    case fire_hook(user_prompt_submit, HookCtx, HState) of
+        {ok, FinalCtx} ->
+            FinalPrompt = maps:get(prompt, FinalCtx),
+            _ThreadId = ensure_active_thread(SessionId),
+            Messages = codex_realtime_protocol:text_messages(FinalPrompt),
+            HState1 = HState#hstate{output_buffer = <<>>},
+            {ok, {ws_frames, WsRef, Messages}, HState1};
+        {deny, Reason} ->
+            {error, {hook_denied, Reason}};
+        {ask, Reason} ->
+            {error, {hook_ask, Reason}}
+    end.
 
 -spec build_session_info(#hstate{}) ->
     #{adapter := codex,
@@ -162,7 +182,12 @@ build_session_info(#hstate{session_id = SessionId,
     }.
 
 -spec terminate_handler(term(), #hstate{}) -> ok.
-terminate_handler(_Reason, _HState) ->
+terminate_handler(Reason, HState) ->
+    _ = fire_hook(session_end,
+            #{event => session_end,
+              session_id => HState#hstate.session_id,
+              reason => Reason},
+            HState),
     ok.
 
 %%====================================================================
@@ -214,7 +239,7 @@ encode_interrupt(#hstate{ws_ref = WsRef} = HState) ->
 
 -spec is_query_complete(beam_agent_core:message(), #hstate{}) -> boolean().
 is_query_complete(#{type := result}, _HState) -> true;
-is_query_complete(#{type := error, is_error := true}, _HState) -> true;
+is_query_complete(#{type := error}, _HState) -> true;
 is_query_complete(_, _HState) -> false.
 
 -spec handle_custom_call(term(), gen_statem:from(), #hstate{}) ->
@@ -277,6 +302,25 @@ handle_set_model(Model, #hstate{opts = Opts} = HState) ->
 handle_set_permission_mode(Mode, #hstate{opts = Opts} = HState) ->
     HState1 = HState#hstate{opts = Opts#{permission_mode => Mode}},
     {ok, Mode, [], HState1}.
+
+-doc """
+Perform side effects on state transitions.
+
+Fires session_start hook when the WebSocket session enters the ready state.
+""".
+-spec on_state_enter(beam_agent_session_handler:state_name(),
+                     beam_agent_session_handler:state_name() | undefined,
+                     #hstate{}) ->
+    {ok, [beam_agent_session_handler:handler_action()], #hstate{}}.
+on_state_enter(ready, _OldState, #hstate{session_id = SessionId} = HState) ->
+    _ = fire_hook(session_start,
+            #{event => session_start,
+              session_id => SessionId,
+              system_info => build_session_info(HState)},
+            HState),
+    {ok, [], HState};
+on_state_enter(_State, _OldState, HState) ->
+    {ok, [], HState}.
 
 %%====================================================================
 %% Internal: response.done handling
@@ -395,6 +439,40 @@ session_update_actions(Params, #hstate{opts = Opts} = HState) ->
         [] -> [];
         Msgs -> ws_send_actions(HState, Msgs)
     end.
+
+%%====================================================================
+%% Internal: hook firing
+%%====================================================================
+
+-spec fire_hook(beam_agent_hooks_core:hook_event(),
+                beam_agent_hooks_core:hook_context(),
+                #hstate{}) ->
+    {ok, beam_agent_hooks_core:hook_context()}
+  | {deny, binary()}
+  | {ask, binary()}.
+fire_hook(Event, Context, #hstate{sdk_hook_registry = Registry}) ->
+    beam_agent_hooks_core:fire(Event, Context, Registry).
+
+%% Only called from handle_data/2 on the single message produced by
+%% handle_response_done/2, which returns exactly result or error.
+%% No catch-all needed — dialyzer correctly infers exhaustive coverage.
+-spec maybe_fire_message_hooks(beam_agent_core:message(), #hstate{}) ->
+    #hstate{}.
+maybe_fire_message_hooks(#{type := result} = Msg, HState) ->
+    _ = fire_hook(stop,
+                  #{event => stop,
+                    content => maps:get(content, Msg, <<>>),
+                    stop_reason => maps:get(stop_reason, Msg, undefined),
+                    session_id => HState#hstate.session_id},
+                  HState),
+    HState;
+maybe_fire_message_hooks(#{type := error} = Msg, HState) ->
+    _ = fire_hook(post_tool_use_failure,
+                  #{event => post_tool_use_failure,
+                    content => maps:get(content, Msg, <<>>),
+                    session_id => HState#hstate.session_id},
+                  HState),
+    HState.
 
 %%====================================================================
 %% Internal: configuration

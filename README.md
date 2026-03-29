@@ -470,6 +470,24 @@ That path uses the direct realtime websocket transport for Codex-native
 audio/text sessions while the app-server transport remains available for the
 broader CLI control-plane surface.
 
+Realtime sessions support the full SDK hook lifecycle — `session_start`,
+`session_end`, `user_prompt_submit` (blocking), `stop`, and
+`post_tool_use_failure` — so the same hooks registered for app-server
+sessions fire in realtime mode as well:
+
+```erlang
+Hook = beam_agent_hooks_core:hook(user_prompt_submit, fun(Ctx) ->
+    %% Inspect or modify the prompt before it's sent over WebSocket
+    {ok, Ctx}
+end),
+{ok, Session} = beam_agent:start_session(#{
+    backend => codex,
+    transport => realtime,
+    api_key => <<"sk-live-key">>,
+    sdk_hooks => [Hook]
+}).
+```
+
 ### MCP (Model Context Protocol)
 
 The SDK includes a full MCP 2025-06-18 implementation with four layers:
