@@ -100,7 +100,7 @@ Usage:
 %% Table Lifecycle
 %%--------------------------------------------------------------------
 
--doc "Ensure the threads ETS table exists. Idempotent.".
+-doc "Ensure the thread storage tables exist for the configured store. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
     beam_agent_store:ensure_table(?STORE_DOMAIN, ?THREADS_TABLE,

@@ -154,6 +154,10 @@ resolved automatically by the configured `beam_agent_store` adapter.
 ensure_tables() ->
     beam_agent_store:ensure_table(?STORE_DOMAIN, ?SESSIONS_TABLE, [set,
         named_table, {read_concurrency, true}]),
+    %% ordered_set is required: collect_from/3 and delete_from/2 use
+    %% next/3 prefix scans over {SessionId, Seq} keys. Adapters that
+    %% downgrade ordered_set (e.g. DETS) must provide an ordered
+    %% iteration shim or use foldl+sort for correct behaviour.
     beam_agent_store:ensure_table(?STORE_DOMAIN, ?MESSAGES_TABLE, [ordered_set,
         named_table, {read_concurrency, true}]),
     beam_agent_store:ensure_table(?STORE_DOMAIN, ?COUNTERS_TABLE, [set,
