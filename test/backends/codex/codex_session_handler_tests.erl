@@ -41,6 +41,25 @@ set_permission_mode_returns_no_send_actions_test() ->
     ?assertEqual([], Actions).
 
 %%====================================================================
+%% is_query_complete/2 tests
+%%====================================================================
+
+is_query_complete_result_test() ->
+    HState = minimal_hstate(),
+    ?assertEqual(true,
+        codex_session_handler:is_query_complete(#{type => result}, HState)).
+
+is_query_complete_error_test() ->
+    HState = minimal_hstate(),
+    ?assertEqual(true,
+        codex_session_handler:is_query_complete(#{type => error}, HState)).
+
+is_query_complete_other_message_test() ->
+    HState = minimal_hstate(),
+    ?assertEqual(false,
+        codex_session_handler:is_query_complete(#{type => text}, HState)).
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 

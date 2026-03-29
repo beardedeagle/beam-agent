@@ -333,6 +333,7 @@ on_state_enter(_State, _OldState, HState) ->
 -doc "Detect whether a message signals query completion.".
 -spec is_query_complete(beam_agent_core:message(), #hstate{}) -> boolean().
 is_query_complete(#{type := result}, _HState) -> true;
+is_query_complete(#{type := error}, _HState) -> true;
 is_query_complete(_Msg, _HState) -> false.
 
 -doc """

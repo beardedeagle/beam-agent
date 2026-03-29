@@ -256,6 +256,196 @@ set_model_test() ->
     end.
 
 %%====================================================================
+%% Hook lifecycle tests
+%%====================================================================
+
+hook_session_start_fires_on_ready_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        Hook = make_notify_hook(session_start),
+        {ok, Pid} = start_session_with_hooks([Hook]),
+        ConnPid = test_ws_client:conn_pid(),
+
+        %% Bring to ready without draining (preserve hook messages)
+        Pid ! {transport_up, ConnPid, http},
+        Pid ! {ws_upgraded, ConnPid, make_ref(), [<<"websocket">>], []},
+        wait_for_state(Pid, ready),
+
+        receive
+            {hook_fired, session_start, Ctx} ->
+                ?assert(maps:is_key(session_id, Ctx)),
+                ?assert(maps:is_key(system_info, Ctx))
+        after 1000 ->
+            error(session_start_hook_not_fired)
+        end,
+
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_session_end_fires_on_stop_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        Hook = make_notify_hook(session_end),
+        {ok, Pid} = start_session_with_hooks([Hook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        ok = codex_realtime_session:stop(Pid),
+        receive
+            {hook_fired, session_end, Ctx} ->
+                ?assert(maps:is_key(session_id, Ctx)),
+                ?assert(maps:is_key(reason, Ctx))
+        after 1000 ->
+            error(session_end_hook_not_fired)
+        end
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_user_prompt_submit_fires_on_query_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        Hook = make_notify_hook(user_prompt_submit),
+        {ok, Pid} = start_session_with_hooks([Hook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        {ok, _Ref} = codex_realtime_session:send_query(
+            Pid, <<"hello">>, #{}, 5000),
+
+        receive
+            {hook_fired, user_prompt_submit, Ctx} ->
+                ?assertEqual(<<"hello">>, maps:get(prompt, Ctx)),
+                ?assert(maps:is_key(session_id, Ctx))
+        after 1000 ->
+            error(user_prompt_submit_hook_not_fired)
+        end,
+
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_deny_rejects_query_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        DenyHook = beam_agent_hooks_core:hook(user_prompt_submit,
+            fun(_Ctx) -> {deny, <<"blocked by policy">>} end),
+        {ok, Pid} = start_session_with_hooks([DenyHook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        Result = codex_realtime_session:send_query(
+            Pid, <<"denied">>, #{}, 5000),
+        ?assertMatch({error, {hook_denied, <<"blocked by policy">>}}, Result),
+
+        %% Session stays in ready (not stuck in active_query)
+        ?assertEqual(ready, codex_realtime_session:health(Pid)),
+
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_ask_rejects_query_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        AskHook = beam_agent_hooks_core:hook(user_prompt_submit,
+            fun(_Ctx) -> {ask, <<"needs approval">>} end),
+        {ok, Pid} = start_session_with_hooks([AskHook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        Result = codex_realtime_session:send_query(
+            Pid, <<"ask me">>, #{}, 5000),
+        ?assertMatch({error, {hook_ask, <<"needs approval">>}}, Result),
+
+        %% Session stays in ready (not stuck in active_query)
+        ?assertEqual(ready, codex_realtime_session:health(Pid)),
+
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_stop_fires_on_result_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        Hook = make_notify_hook(stop),
+        {ok, Pid} = start_session_with_hooks([Hook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        {ok, Ref} = codex_realtime_session:send_query(
+            Pid, <<"test">>, #{}, 5000),
+        drain_mailbox(),
+
+        send_ws_event(Pid, ConnPid, #{
+            <<"type">> => <<"response.done">>,
+            <<"response">> => #{<<"status">> => <<"completed">>}
+        }),
+        {ok, _ResultMsg} = codex_realtime_session:receive_message(
+            Pid, Ref, 5000),
+
+        receive
+            {hook_fired, stop, Ctx} ->
+                ?assertEqual(<<"completed">>,
+                    maps:get(stop_reason, Ctx)),
+                ?assert(maps:is_key(session_id, Ctx))
+        after 1000 ->
+            error(stop_hook_not_fired)
+        end,
+
+        wait_for_state(Pid, ready),
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+hook_failure_fires_on_error_test() ->
+    ensure_started(),
+    test_ws_client:setup(),
+    try
+        Hook = make_notify_hook(post_tool_use_failure),
+        {ok, Pid} = start_session_with_hooks([Hook]),
+        ConnPid = test_ws_client:conn_pid(),
+        bring_to_ready(Pid, ConnPid),
+
+        {ok, Ref} = codex_realtime_session:send_query(
+            Pid, <<"fail">>, #{}, 5000),
+        drain_mailbox(),
+
+        send_ws_event(Pid, ConnPid, #{
+            <<"type">> => <<"response.done">>,
+            <<"response">> => #{<<"status">> => <<"failed">>}
+        }),
+        {ok, _ErrorMsg} = codex_realtime_session:receive_message(
+            Pid, Ref, 5000),
+
+        receive
+            {hook_fired, post_tool_use_failure, Ctx} ->
+                ?assertEqual(<<"realtime response failed">>,
+                    maps:get(content, Ctx)),
+                ?assert(maps:is_key(session_id, Ctx))
+        after 1000 ->
+            error(failure_hook_not_fired)
+        end,
+
+        wait_for_state(Pid, ready),
+        ok = codex_realtime_session:stop(Pid)
+    after
+        test_ws_client:teardown()
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -272,6 +462,26 @@ start_session() ->
         realtime_url => <<"ws://example.test:8080/v1/realtime?model=gpt-4o-realtime-preview">>,
         client_module   => test_ws_client
     }).
+
+-spec start_session_with_hooks([beam_agent_hooks_core:hook_def()]) ->
+    {ok, pid()}.
+start_session_with_hooks(Hooks) ->
+    codex_realtime_session:start_link(#{
+        api_key       => <<"test-key">>,
+        model         => <<"gpt-4o-realtime-preview">>,
+        realtime_url  => <<"ws://example.test:8080/v1/realtime?model=gpt-4o-realtime-preview">>,
+        client_module => test_ws_client,
+        sdk_hooks     => Hooks
+    }).
+
+-spec make_notify_hook(beam_agent_hooks_core:hook_event()) ->
+    beam_agent_hooks_core:hook_def().
+make_notify_hook(Event) ->
+    TestPid = self(),
+    beam_agent_hooks_core:hook(Event, fun(Ctx) ->
+        TestPid ! {hook_fired, Event, Ctx},
+        {ok, Ctx}
+    end).
 
 -spec bring_to_ready(pid(), pid()) -> ok.
 bring_to_ready(Pid, ConnPid) ->
