@@ -40,7 +40,7 @@ defmodule BeamAgent.Apps do
   Erlang `:beam_agent_runtime` module. Zero business logic, zero state, zero
   processes live here -- the Erlang module owns the implementation. The
   underlying app data is stored in ETS tables managed by
-  `:beam_agent_app_core`.
+  `:beam_agent_runtime`.
 
   See also: `BeamAgent`, `BeamAgent.Config`, `BeamAgent.Runtime`.
   """

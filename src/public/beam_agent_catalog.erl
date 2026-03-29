@@ -1,4 +1,5 @@
 -module(beam_agent_catalog).
+-include_lib("kernel/include/file.hrl").
 -moduledoc """
 Catalog accessors and global registry for tools, skills, plugins, MCP
 servers, agents, and slash commands.
@@ -148,6 +149,60 @@ beam_agent_catalog_core     beam_agent_registry
     search_session_update/3,
     search_session_stop/2
 ]).
+
+-export_type([file_search_result/0, file_entry/0, file_search_opts/0]).
+
+-ifdef(TEST).
+-export([
+    file_find_text/2, file_find_text/3,
+    file_find_files/1, file_find_files/2,
+    file_find_symbols/1, file_find_symbols/2,
+    file_list_impl/1, file_list_impl/2,
+    file_read_impl/1, file_read_impl/2,
+    file_status_impl/0, file_status_impl/1
+]).
+-endif.
+
+%% Internal helpers: specs are deliberately broader than current call sites.
+-dialyzer({nowarn_function, [
+    file_find_text/2, file_find_text/3,
+    file_find_symbols/2,
+    file_read_impl/2,
+    file_resolve_glob/3
+]}).
+
+%%--------------------------------------------------------------------
+%% File Core Defines (folded from beam_agent_file_core)
+%%--------------------------------------------------------------------
+
+-define(DEFAULT_MAX_RESULTS, 100).
+-define(DEFAULT_MAX_FILE_SIZE, 10485760). %% 10 MB
+-define(DEFAULT_FILE_EXCLUDES, [<<".git">>, <<"_build">>, <<"node_modules">>, <<"deps">>]).
+
+%%--------------------------------------------------------------------
+%% File Core Types (folded from beam_agent_file_core)
+%%--------------------------------------------------------------------
+
+-type file_search_result() :: #{
+    path    := binary(),
+    line    := pos_integer(),
+    content := binary()
+}.
+
+-type file_entry() :: #{
+    path     := binary(),
+    type     := file | directory | symlink | other,
+    size     => non_neg_integer(),
+    modified => calendar:datetime()
+}.
+
+-type file_search_opts() :: #{
+    cwd            => binary(),
+    max_results    => pos_integer(),
+    include        => [binary()],
+    exclude        => [binary()],
+    case_sensitive => boolean()
+}.
 
 %%--------------------------------------------------------------------
 %% Supported / Static Catalog Functions
@@ -553,42 +608,42 @@ clear_registered_commands() -> beam_agent_registry:clear(slash).
 -spec find_text(pid(), binary()) -> {ok, term()} | {error, term()}.
 find_text(Session, Pattern) ->
     beam_agent_core:native_or(Session, find_text, [Pattern], fun() ->
-        beam_agent_file_core:find_text(Pattern, session_file_opts(Session))
+        file_find_text(Pattern, session_file_opts(Session))
     end).
 
 -doc "Find files matching a pattern in the session's working directory.".
 -spec find_files(pid(), map()) -> {ok, term()} | {error, term()}.
 find_files(Session, Opts) ->
     beam_agent_core:native_or(Session, find_files, [Opts], fun() ->
-        beam_agent_file_core:find_files(maps:merge(session_file_opts(Session), Opts))
+        file_find_files(maps:merge(session_file_opts(Session), Opts))
     end).
 
 -doc "Search for code symbols matching Query in the session's project.".
 -spec find_symbols(pid(), binary()) -> {ok, term()} | {error, term()}.
 find_symbols(Session, Query) ->
     beam_agent_core:native_or(Session, find_symbols, [Query], fun() ->
-        beam_agent_file_core:find_symbols(Query, session_file_opts(Session))
+        file_find_symbols(Query, session_file_opts(Session))
     end).
 
 -doc "List files and directories at the given Path.".
 -spec file_list(pid(), binary()) -> {ok, term()} | {error, term()}.
 file_list(Session, Path) ->
     beam_agent_core:native_or(Session, file_list, [Path], fun() ->
-        beam_agent_file_core:file_list(Path)
+        file_list_impl(Path)
     end).
 
 -doc "Read the contents of a file at the given Path.".
 -spec file_read(pid(), binary()) -> {ok, term()} | {error, term()}.
 file_read(Session, Path) ->
     beam_agent_core:native_or(Session, file_read, [Path], fun() ->
-        beam_agent_file_core:file_read(Path)
+        file_read_impl(Path)
     end).
 
 -doc "Get the version-control status of files in the session's project.".
 -spec file_status(pid()) -> {ok, term()} | {error, term()}.
 file_status(Session) ->
     beam_agent_core:native_or(Session, file_status, [], fun() ->
-        beam_agent_file_core:file_status(session_file_opts(Session))
+        file_status_impl(session_file_opts(Session))
     end).
 
 %%--------------------------------------------------------------------
@@ -638,7 +693,7 @@ search_session_stop(Session, SearchSessionId) ->
 %% Internal
 %%--------------------------------------------------------------------
 
--spec session_file_opts(pid()) -> beam_agent_file_core:search_opts().
+-spec session_file_opts(pid()) -> file_search_opts().
 session_file_opts(Session) ->
     case beam_agent_core:session_info(Session) of
         {ok, Info} ->
@@ -654,3 +709,290 @@ session_file_opts(Session) ->
         {error, _} ->
             #{}
     end.
+
+%%--------------------------------------------------------------------
+%% File Core Implementation (folded from beam_agent_file_core)
+%%--------------------------------------------------------------------
+
+%% find_text
+
+-spec file_find_text(binary(), file_search_opts()) ->
+    {ok, [file_search_result()]} | {error, {invalid_pattern, string(), non_neg_integer()}}.
+file_find_text(Pattern, Opts) when is_binary(Pattern), is_map(Opts) ->
+    file_find_text(Pattern, <<"**/*">>, Opts).
+
+-spec file_find_text(binary(), binary(), file_search_opts()) ->
+    {ok, [file_search_result()]} | {error, {invalid_pattern, term(), non_neg_integer()}}.
+file_find_text(Pattern, FileGlob, Opts)
+  when is_binary(Pattern), is_binary(FileGlob), is_map(Opts) ->
+    CaseSensitive = maps:get(case_sensitive, Opts, true),
+    REOpts = case CaseSensitive of
+        true  -> [];
+        false -> [caseless]
+    end,
+    case re:compile(Pattern, REOpts) of
+        {ok, CompiledRE} ->
+            Cwd = file_cwd_binary(Opts),
+            Files = file_resolve_glob(FileGlob, Cwd, Opts),
+            MaxResults = maps:get(max_results, Opts, ?DEFAULT_MAX_RESULTS),
+            Results = file_search_files(CompiledRE, Files, MaxResults, []),
+            {ok, Results};
+        {error, {Reason, Pos}} ->
+            {error, {invalid_pattern, Reason, Pos}}
+    end.
+
+%% find_files
+
+-spec file_find_files(file_search_opts()) -> {ok, [file_entry()]}.
+file_find_files(Opts) when is_map(Opts) ->
+    file_find_files(<<"**/*">>, Opts).
+
+-spec file_find_files(binary(), file_search_opts()) -> {ok, [file_entry()]}.
+file_find_files(Pattern, Opts) when is_binary(Pattern), is_map(Opts) ->
+    Cwd = file_cwd_binary(Opts),
+    Files = file_resolve_glob(Pattern, Cwd, Opts),
+    Entries = [file_to_entry(Cwd, F) || F <- Files],
+    Sorted = lists:sort(fun(A, B) ->
+        maps:get(path, A) =< maps:get(path, B)
+    end, Entries),
+    {ok, Sorted}.
+
+%% find_symbols
+
+-ifdef(TEST).
+-spec file_find_symbols(file_search_opts()) ->
+    {ok, [file_search_result()]} | {error, {invalid_pattern, string(), non_neg_integer()}}.
+file_find_symbols(Opts) when is_map(Opts) ->
+    file_find_symbols(<<>>, Opts).
+-endif.
+
+-spec file_find_symbols(binary(), file_search_opts()) ->
+    {ok, [file_search_result()]} | {error, term()}.
+file_find_symbols(Query, Opts) when is_binary(Query), is_map(Opts) ->
+    Q = re:replace(Query, <<"[\\^$.|?*+(){}\\[\\]\\\\]">>, <<"\\\\&">>,
+                   [global, {return, binary}]),
+    Pattern = case Q of
+        <<>> ->
+            <<"(-spec |^[a-z_][a-zA-Z0-9_]*\\(|"
+              "def |defp |defmodule |"
+              "class |function )">>;
+        _ ->
+            Parts = [
+                <<"(-spec ", Q/binary, "\\()">>,
+                <<"(^", Q/binary, "\\()">>,
+                <<"(def ", Q/binary, "\\b)">>,
+                <<"(defp ", Q/binary, "\\b)">>,
+                <<"(defmodule ", Q/binary, "\\b)">>,
+                <<"(class ", Q/binary, "\\b)">>,
+                <<"(function ", Q/binary, "\\b)">>,
+                <<"(const ", Q/binary, "\\s*=)">>
+            ],
+            file_join_binary(Parts, <<"|">>)
+    end,
+    file_find_text(Pattern, <<"**/*">>, Opts#{case_sensitive => true}).
+
+%% file_list
+
+-spec file_list_impl(binary()) -> {ok, [file_entry()]} | {error, term()}.
+file_list_impl(Path) when is_binary(Path) ->
+    file_list_impl(Path, #{}).
+
+-spec file_list_impl(binary(), file_search_opts()) ->
+    {ok, [file_entry()]} | {error, term()}.
+file_list_impl(Path, Opts) when is_binary(Path), is_map(Opts) ->
+    PathStr = unicode:characters_to_list(Path),
+    case file:list_dir(PathStr) of
+        {ok, Names} ->
+            Sorted = lists:sort(Names),
+            Entries = [file_to_entry(Path, list_to_binary(N)) || N <- Sorted],
+            _ = Opts,
+            {ok, Entries};
+        {error, Reason} ->
+            {error, {list_dir_failed, Path, Reason}}
+    end.
+
+%% file_read
+
+-spec file_read_impl(binary()) ->
+    {ok, #{path := binary(), content := binary()}}
+    | {error, {file_too_large, binary()}}
+    | {error, {read_failed, binary(), atom()}}.
+file_read_impl(Path) when is_binary(Path) ->
+    file_read_impl(Path, #{}).
+
+-spec file_read_impl(binary(), file_search_opts()) ->
+    {ok, #{path := binary(), content := binary()}}
+    | {error, {file_too_large, binary()}}
+    | {error, {read_failed, binary(), term()}}.
+file_read_impl(Path, Opts) when is_binary(Path), is_map(Opts) ->
+    PathStr = unicode:characters_to_list(Path),
+    case file:read_file_info(PathStr) of
+        {ok, #file_info{size = Size}} ->
+            MaxSize = maps:get(max_file_size, Opts, ?DEFAULT_MAX_FILE_SIZE),
+            case Size > MaxSize of
+                true ->
+                    {error, {file_too_large, Path}};
+                false ->
+                    case file:read_file(PathStr) of
+                        {ok, Content} ->
+                            {ok, #{path => Path, content => Content}};
+                        {error, Reason} ->
+                            {error, {read_failed, Path, Reason}}
+                    end
+            end;
+        {error, Reason} ->
+            {error, {read_failed, Path, Reason}}
+    end.
+
+%% file_status
+
+-ifdef(TEST).
+-spec file_status_impl() ->
+    {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}}
+    | {error, {list_dir_failed, binary(), atom() | {_, _}}}.
+file_status_impl() ->
+    file_status_impl(#{}).
+-endif.
+
+-spec file_status_impl(file_search_opts()) ->
+    {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}}
+    | {error, {list_dir_failed, binary(), term()}}.
+file_status_impl(Opts) when is_map(Opts) ->
+    Cwd = file_cwd_binary(Opts),
+    CmdOpts = #{cwd => Cwd, timeout => 10000},
+    case beam_agent_command_core:run(<<"git status --porcelain">>, CmdOpts) of
+        {ok, #{exit_code := 0, output := Output}} ->
+            Lines = binary:split(Output, <<"\n">>, [global, trim]),
+            Files = [parse_git_status_line(L) || L <- Lines, L =/= <<>>],
+            {ok, #{cwd => Cwd, source => git, files => Files}};
+        _ ->
+            file_fallback_status(Cwd)
+    end.
+
+%% File core internal helpers
+
+-spec file_cwd_binary(file_search_opts()) -> binary().
+file_cwd_binary(Opts) ->
+    case maps:find(cwd, Opts) of
+        {ok, Dir} when is_binary(Dir) ->
+            Dir;
+        {ok, Dir} when is_list(Dir) ->
+            unicode:characters_to_binary(Dir);
+        error ->
+            case file:get_cwd() of
+                {ok, Cwd} -> unicode:characters_to_binary(Cwd);
+                {error, _} -> <<".">>
+            end
+    end.
+
+-spec file_resolve_glob(binary(), binary(), file_search_opts()) -> [binary()].
+file_resolve_glob(Glob, Cwd, Opts) ->
+    GlobStr = unicode:characters_to_list(Glob),
+    CwdStr = unicode:characters_to_list(Cwd),
+    RawPaths = filelib:wildcard(GlobStr, CwdStr),
+    Excludes = maps:get(exclude, Opts, ?DEFAULT_FILE_EXCLUDES),
+    AbsFiles = [begin
+        Abs = filename:join(CwdStr, P),
+        unicode:characters_to_binary(Abs)
+    end || P <- RawPaths, filelib:is_regular(filename:join(CwdStr, P))],
+    [F || F <- AbsFiles, not file_is_excluded(F, Excludes)].
+
+-spec file_is_excluded(binary(), [binary()]) -> boolean().
+file_is_excluded(Path, Excludes) ->
+    lists:any(fun(Pat) ->
+        binary:match(Path, Pat) =/= nomatch
+    end, Excludes).
+
+-spec file_search_files(re:mp(), [binary()], pos_integer(), [file_search_result()]) ->
+    [file_search_result()].
+file_search_files(_RE, [], _MaxResults, Acc) ->
+    lists:reverse(Acc);
+file_search_files(_RE, _Files, MaxResults, Acc)
+  when length(Acc) >= MaxResults ->
+    lists:reverse(Acc);
+file_search_files(RE, [File | Rest], MaxResults, Acc) ->
+    Remaining = MaxResults - length(Acc),
+    NewAcc = case file:read_file(unicode:characters_to_list(File)) of
+        {ok, Content} when byte_size(Content) =< ?DEFAULT_MAX_FILE_SIZE ->
+            Lines = binary:split(Content, <<"\n">>, [global]),
+            file_search_lines(RE, File, Lines, 1, Remaining, Acc);
+        {ok, _TooBig} ->
+            Acc;
+        {error, _} ->
+            Acc
+    end,
+    file_search_files(RE, Rest, MaxResults, NewAcc).
+
+-spec file_search_lines(re:mp(), binary(), [binary()], pos_integer(),
+                   pos_integer(), [file_search_result()]) -> [file_search_result()].
+file_search_lines(_RE, _File, [], _LineNum, _Remaining, Acc) ->
+    Acc;
+file_search_lines(_RE, _File, _Lines, _LineNum, 0, Acc) ->
+    Acc;
+file_search_lines(RE, File, [Line | Rest], LineNum, Remaining, Acc) ->
+    case re:run(Line, RE, [{capture, none}]) of
+        match ->
+            Result = #{path => File, line => LineNum, content => Line},
+            file_search_lines(RE, File, Rest, LineNum + 1, Remaining - 1,
+                         [Result | Acc]);
+        nomatch ->
+            file_search_lines(RE, File, Rest, LineNum + 1, Remaining, Acc)
+    end.
+
+-spec file_to_entry(binary(), binary()) -> file_entry().
+file_to_entry(BasePath, Name) ->
+    FullPath = case binary:last(BasePath) of
+        $/ -> <<BasePath/binary, Name/binary>>;
+        _  -> <<BasePath/binary, "/", Name/binary>>
+    end,
+    PathStr = unicode:characters_to_list(FullPath),
+    Base = #{path => FullPath},
+    case file:read_file_info(PathStr, [{time, local}]) of
+        {ok, #file_info{size = Size, type = RawType, mtime = Mtime}} ->
+            Type = file_normalize_type(RawType),
+            Base#{type => Type, size => Size, modified => Mtime};
+        {error, _} ->
+            Base#{type => other}
+    end.
+
+-spec file_normalize_type(device | directory | other | regular | symlink) -> file | directory | symlink | other.
+file_normalize_type(regular)   -> file;
+file_normalize_type(directory) -> directory;
+file_normalize_type(symlink)   -> symlink;
+file_normalize_type(_)         -> other.
+
+-spec parse_git_status_line(binary()) -> #{status := <<_:_*16>>, path := binary()}.
+parse_git_status_line(Line) when byte_size(Line) >= 3 ->
+    <<XY:2/binary, _Space:1/binary, Rest/binary>> = Line,
+    #{status => XY, path => Rest};
+parse_git_status_line(Line) ->
+    #{status => <<>>, path => Line}.
+
+-spec file_fallback_status(binary()) ->
+    {ok, #{cwd := binary(), source := filesystem, files := [map()]}}
+    | {error, {list_dir_failed, binary(), term()}}.
+file_fallback_status(Cwd) ->
+    CwdStr = unicode:characters_to_list(Cwd),
+    case file:list_dir(CwdStr) of
+        {ok, Names} ->
+            Entries = lists:filtermap(fun(Name) ->
+                FullStr = filename:join(CwdStr, Name),
+                FullBin = unicode:characters_to_binary(FullStr),
+                case file:read_file_info(FullStr, [{time, local}]) of
+                    {ok, #file_info{mtime = Mtime}} ->
+                        {true, #{path => FullBin, modified => Mtime}};
+                    {error, _} ->
+                        false
+                end
+            end, lists:sort(Names)),
+            {ok, #{cwd => Cwd, source => filesystem, files => Entries}};
+        {error, Reason} ->
+            {error, {list_dir_failed, Cwd, Reason}}
+    end.
+
+-spec file_join_binary([binary(), ...], binary()) -> binary().
+file_join_binary([H], _Sep) -> H;
+file_join_binary([H | T], Sep) ->
+    lists:foldl(fun(Part, Acc) ->
+        <<Acc/binary, Sep/binary, Part/binary>>
+    end, H, T).

@@ -409,13 +409,13 @@ defmodule OpencodeEx do
   @doc "Get native OpenCode app info."
   @spec app_info(pid()) :: {:ok, map()} | {:error, term()}
   def app_info(session) do
-    :beam_agent_app_core.app_info(session)
+    :beam_agent_runtime.app_info_impl(session)
   end
 
   @doc "Initialize native OpenCode app state."
   @spec app_init(pid()) :: {:ok, term()}
   def app_init(session) do
-    :beam_agent_app_core.app_init(session)
+    :beam_agent_runtime.app_init_impl(session)
   end
 
   @doc "Write a native OpenCode log entry."
@@ -427,7 +427,7 @@ defmodule OpencodeEx do
   @doc "List native OpenCode app modes."
   @spec app_modes(pid()) :: {:ok, [binary()]}
   def app_modes(session) do
-    :beam_agent_app_core.app_modes(session)
+    :beam_agent_runtime.app_modes_impl(session)
   end
 
   @doc "Get details for a specific session by ID from the OpenCode server (native REST)."

@@ -149,13 +149,29 @@ level deep. The built-in provider catalog is compiled-in static data.
     app_init/1,
     app_log/2,
     app_modes/1,
+    %% App Registry (folded from beam_agent_app_core)
+    app_register/3,
+    app_unregister/2,
+    app_ensure_tables/0,
+    app_clear/0,
+    %% App Registry impl — used by backend adapters directly
+    app_info_impl/1,
+    app_init_impl/1,
+    app_modes_impl/1,
     %% Todo Tracking — pure functions
     extract_todos/1,
     filter_by_status/2,
     todo_summary/1
 ]).
 
--export_type([todo_item/0, todo_status/0]).
+-export_type([todo_item/0, todo_status/0, app_entry/0, apps_list_opts/0]).
+
+-ifdef(TEST).
+-export([
+    apps_list_impl/1, apps_list_impl/2,
+    app_log_impl/2
+]).
+-endif.
 
 %%--------------------------------------------------------------------
 %% Todo Types
@@ -167,6 +183,27 @@ level deep. The built-in provider catalog is compiled-in static data.
     content := binary(),
     status := todo_status(),
     active_form => binary()
+}.
+
+%%--------------------------------------------------------------------
+%% App Types and Defines (folded from beam_agent_app_core)
+%%--------------------------------------------------------------------
+
+-define(APP_TABLE, beam_agent_apps).
+-define(DEFAULT_APP_MODES, [<<"default">>, <<"debug">>, <<"verbose">>]).
+
+-type app_entry() :: #{
+    id := binary(),
+    name := binary(),
+    session := pid() | binary(),
+    status := active | inactive,
+    modes := [binary(), ...],
+    log := [#{timestamp := integer(), body := term()}],
+    metadata := #{registered_at => integer(), atom() => term()}
+}.
+
+-type apps_list_opts() :: #{
+    status => active | inactive
 }.
 
 %%--------------------------------------------------------------------
@@ -673,35 +710,35 @@ account_info(Session) ->
 -spec apps_list(pid()) -> {ok, term()} | {error, term()}.
 apps_list(Session) ->
     beam_agent_core:native_or(Session, apps_list, [], fun() ->
-        beam_agent_app_core:apps_list(Session)
+        apps_list_impl(Session)
     end).
 
 -doc "List apps and projects with optional filter criteria.".
 -spec apps_list(pid(), map()) -> {ok, term()} | {error, term()}.
 apps_list(Session, Opts) ->
     beam_agent_core:native_or(Session, apps_list, [Opts], fun() ->
-        beam_agent_app_core:apps_list(Session, Opts)
+        apps_list_impl(Session, Opts)
     end).
 
 -doc "Return information about the current app or project context.".
 -spec app_info(pid()) -> {ok, term()} | {error, term()}.
 app_info(Session) ->
     beam_agent_core:native_or(Session, app_info, [], fun() ->
-        beam_agent_app_core:app_info(Session)
+        app_info_impl(Session)
     end).
 
 -doc "Initialize the app and project context for a session.".
 -spec app_init(pid()) -> {ok, term()} | {error, term()}.
 app_init(Session) ->
     beam_agent_core:native_or(Session, app_init, [], fun() ->
-        beam_agent_app_core:app_init(Session)
+        app_init_impl(Session)
     end).
 
 -doc "Append a log entry to the session's app log.".
 -spec app_log(pid(), map()) -> {ok, term()} | {error, term()}.
 app_log(Session, Body) ->
     beam_agent_core:native_or(Session, app_log, [Body], fun() ->
-        _ = beam_agent_app_core:app_log(Session, Body),
+        _ = app_log_impl(Session, Body),
         {ok, beam_agent_core:with_universal_source(Session, #{status => logged})}
     end).
 
@@ -709,7 +746,7 @@ app_log(Session, Body) ->
 -spec app_modes(pid()) -> {ok, term()} | {error, term()}.
 app_modes(Session) ->
     beam_agent_core:native_or(Session, app_modes, [], fun() ->
-        beam_agent_app_core:app_modes(Session)
+        app_modes_impl(Session)
     end).
 
 %%--------------------------------------------------------------------
@@ -740,6 +777,186 @@ todo_summary(Todos) ->
         maps:update_with(S, fun(N) -> N + 1 end, 1, Acc)
     end, #{}, Todos),
     Counts#{total => length(Todos)}.
+
+%%--------------------------------------------------------------------
+%% App Registry Implementation (folded from beam_agent_app_core)
+%%--------------------------------------------------------------------
+
+-doc "Ensure the app registry ETS table exists. Idempotent.".
+-spec app_ensure_tables() -> ok.
+app_ensure_tables() ->
+    beam_agent_ets:ensure_table(?APP_TABLE, [set, named_table,
+        {read_concurrency, true}]).
+
+-doc "Clear all app registry data.".
+-spec app_clear() -> ok.
+app_clear() ->
+    app_ensure_tables(),
+    beam_agent_ets:delete_all_objects(?APP_TABLE),
+    ok.
+
+-doc """
+Register or update an app entry for a session.
+
+Creates a new entry if `AppId` is not yet registered under `Session`.
+Updates the existing entry (merging opts) if it already exists.
+
+Opts:
+- `name`: human-readable label (binary)
+- `modes`: list of mode binaries
+- `metadata`: arbitrary map of extra fields
+""".
+-spec app_register(pid() | binary(), binary(), map()) ->
+    {ok, app_entry()}.
+app_register(Session, AppId, Opts)
+  when (is_pid(Session) orelse is_binary(Session)),
+       is_binary(AppId), is_map(Opts) ->
+    app_ensure_tables(),
+    Key = {beam_agent_ets:session_key(Session), AppId},
+    Existing = case ets:lookup(?APP_TABLE, Key) of
+        [{_, E}] -> E;
+        []       -> new_app_entry(Session, AppId)
+    end,
+    Name     = maps:get(name, Opts, maps:get(name, Existing, AppId)),
+    Modes    = maps:get(modes, Opts, maps:get(modes, Existing, ?DEFAULT_APP_MODES)),
+    Meta     = maps:merge(maps:get(metadata, Existing, #{}),
+                          maps:get(metadata, Opts, #{})),
+    Entry    = Existing#{
+        name     => Name,
+        modes    => Modes,
+        metadata => Meta,
+        status   => maps:get(status, Opts, maps:get(status, Existing, active))
+    },
+    beam_agent_ets:insert(?APP_TABLE, {Key, Entry}),
+    {ok, Entry}.
+
+-doc "Remove an app entry for a session. No-op if the entry does not exist.".
+-spec app_unregister(pid() | binary(), binary()) -> ok.
+app_unregister(Session, AppId)
+  when (is_pid(Session) orelse is_binary(Session)), is_binary(AppId) ->
+    app_ensure_tables(),
+    Key = {beam_agent_ets:session_key(Session), AppId},
+    beam_agent_ets:delete(?APP_TABLE, Key),
+    ok.
+
+%% Internal app implementations used as native_or fallbacks.
+
+-spec apps_list_impl(pid() | binary()) -> {ok, [app_entry()]}.
+apps_list_impl(Session) ->
+    apps_list_impl(Session, #{}).
+
+-spec apps_list_impl(pid() | binary(), apps_list_opts()) -> {ok, [app_entry()]}.
+apps_list_impl(Session, Opts)
+  when (is_pid(Session) orelse is_binary(Session)), is_map(Opts) ->
+    app_ensure_tables(),
+    SK = beam_agent_ets:session_key(Session),
+    All = ets:foldl(fun
+        ({{S, _}, Entry}, Acc) when S =:= SK ->
+            case matches_app_status(Entry, Opts) of
+                true  -> [Entry | Acc];
+                false -> Acc
+            end;
+        (_, Acc) ->
+            Acc
+    end, [], ?APP_TABLE),
+    {ok, All}.
+
+-spec app_info_impl(pid() | binary()) -> {ok, app_entry()} | {error, no_app}.
+app_info_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case apps_list_impl(Session) of
+        {ok, []} ->
+            {error, no_app};
+        {ok, [Single]} ->
+            {ok, chronological_log(Single)};
+        {ok, Many} ->
+            Latest = lists:last(
+                lists:sort(fun(A, B) ->
+                    app_registered_at(A) =< app_registered_at(B)
+                end, Many)
+            ),
+            {ok, chronological_log(Latest)}
+    end.
+
+-spec app_init_impl(pid() | binary()) -> {ok, app_entry()}.
+app_init_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case app_info_impl(Session) of
+        {ok, Entry} ->
+            {ok, Entry};
+        {error, no_app} ->
+            DefaultName = default_app_name(Session),
+            app_register(Session, <<"default">>, #{name => DefaultName})
+    end.
+
+-spec app_log_impl(pid() | binary(), term()) -> ok | {error, no_app}.
+app_log_impl(Session, Body) when is_pid(Session) orelse is_binary(Session) ->
+    app_ensure_tables(),
+    SK = beam_agent_ets:session_key(Session),
+    case app_info_impl(Session) of
+        {error, no_app} ->
+            {error, no_app};
+        {ok, Entry} ->
+            AppId = maps:get(id, Entry),
+            Key   = {SK, AppId},
+            LogEntry = #{
+                timestamp => erlang:system_time(millisecond),
+                body      => Body
+            },
+            Log0  = maps:get(log, Entry, []),
+            Entry2 = Entry#{log => [LogEntry | Log0]},
+            beam_agent_ets:insert(?APP_TABLE, {Key, Entry2}),
+            ok
+    end.
+
+-spec app_modes_impl(pid() | binary()) -> {ok, [binary()]}.
+app_modes_impl(Session) when is_pid(Session) orelse is_binary(Session) ->
+    case app_info_impl(Session) of
+        {ok, Entry} ->
+            {ok, maps:get(modes, Entry, ?DEFAULT_APP_MODES)};
+        {error, no_app} ->
+            {ok, ?DEFAULT_APP_MODES}
+    end.
+
+%% App registry internal helpers
+
+-spec new_app_entry(pid() | binary(), binary()) ->
+    #{id := binary(), name := binary(), session := pid() | binary(),
+      status := active, modes := [<<_:40, _:_*16>>, ...], log := [],
+      metadata := #{registered_at := integer()}}.
+new_app_entry(Session, AppId) ->
+    #{
+        id       => AppId,
+        name     => AppId,
+        session  => Session,
+        status   => active,
+        modes    => ?DEFAULT_APP_MODES,
+        log      => [],
+        metadata => #{registered_at => erlang:system_time(millisecond)}
+    }.
+
+-spec chronological_log(app_entry()) -> app_entry().
+chronological_log(#{log := Log} = Entry) ->
+    Entry#{log => lists:reverse(Log)}.
+
+-spec app_registered_at(app_entry()) -> integer().
+app_registered_at(Entry) ->
+    Meta = maps:get(metadata, Entry, #{}),
+    maps:get(registered_at, Meta, 0).
+
+-spec matches_app_status(app_entry(), apps_list_opts()) -> boolean().
+matches_app_status(Entry, Opts) ->
+    case maps:find(status, Opts) of
+        {ok, Expected} ->
+            maps:get(status, Entry, active) =:= Expected;
+        error ->
+            true
+    end.
+
+-spec default_app_name(pid() | binary()) -> <<_:32, _:_*8>>.
+default_app_name(Session) when is_pid(Session) ->
+    PidBin = list_to_binary(pid_to_list(Session)),
+    <<"app-", PidBin/binary>>;
+default_app_name(Session) when is_binary(Session) ->
+    <<"app-", Session/binary>>.
 
 %%--------------------------------------------------------------------
 %% Private Helpers

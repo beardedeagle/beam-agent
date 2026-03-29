@@ -40,7 +40,7 @@ defmodule BeamAgent.File do
   `:beam_agent_catalog` Erlang module's file operations. Zero business logic,
   zero state, zero processes live here -- the Erlang module owns the
   implementation with `native_or` routing and universal fallbacks via
-  `:beam_agent_file_core`.
+  `:beam_agent_catalog`.
 
   See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Search`.
   """

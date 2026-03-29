@@ -116,8 +116,6 @@
         beam_agent_adapter_types,
         beam_agent_artifacts_core,
         beam_agent_artifacts_store,
-        beam_agent_app_core,
-        beam_agent_file_core,
         beam_agent_search_core,
         beam_agent_skills_core,
         beam_agent_registry,
