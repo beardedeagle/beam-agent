@@ -291,6 +291,7 @@ beam_agent_memory:list(Filter)                           -> {ok, [Memory]} | {er
 beam_agent_memory:recall(Scope, Query)                   -> {ok, [Memory]} | {error, Reason}
 beam_agent_memory:search(Query, Filter)                  -> {ok, [Memory]} | {error, Reason}
 beam_agent_memory:forget(MemoryId)                       -> ok | {error, not_found}
+beam_agent_memory:update(MemoryId, Changes)              -> {ok, Memory} | {error, Reason}
 beam_agent_memory:pin(MemoryId)                          -> ok | {error, not_found}
 beam_agent_memory:unpin(MemoryId)                        -> ok | {error, not_found}
 beam_agent_memory:expire(Filter)                         -> {ok, Count} | {error, Reason}
@@ -624,7 +625,7 @@ Representative events:
 - `[beam_agent, run, state_change]`
 - `[beam_agent, artifact, put|search, start|stop|exception]`
 - `[beam_agent, journal, append|stream_from, start|stop|exception]`
-- `[beam_agent, memory, remember|search, start|stop|exception]`
+- `[beam_agent, memory, remember|update|search, start|stop|exception]`
 - `[beam_agent, routing, select_backend, start|stop|exception]`
 - `[beam_agent, context, maybe_compact, start|stop|exception]`
 - `[beam_agent, context, state_change]`

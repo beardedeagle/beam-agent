@@ -38,6 +38,7 @@ end, Matches).
     search/1,
     search/2,
     forget/1,
+    update/2,
     pin/1,
     unpin/1,
     expire/0,
@@ -48,6 +49,7 @@ end, Matches).
     scope/0,
     source_ref/0,
     memory_input/0,
+    update_input/0,
     memory_filter/0,
     memory_record/0
 ]).
@@ -55,6 +57,7 @@ end, Matches).
 -type scope() :: beam_agent_memory_core:scope().
 -type source_ref() :: beam_agent_memory_core:source_ref().
 -type memory_input() :: beam_agent_memory_core:memory_input().
+-type update_input() :: beam_agent_memory_core:update_input().
 -type memory_filter() :: beam_agent_memory_core:memory_filter().
 -type memory_record() :: beam_agent_memory_core:memory_record().
 
@@ -116,6 +119,22 @@ search(Query, Filter) ->
 -spec forget(binary()) -> ok | {error, not_found}.
 forget(MemoryId) ->
     beam_agent_memory_core:forget(MemoryId).
+
+-doc """
+Update mutable fields of an existing memory record.
+
+Accepts a map of fields to change. Mutable fields: `kind`, `content`,
+`attributes`, `source_refs`, `ttl`, `pinned`, `salience`. Immutable fields
+(`memory_id`, `scope`, `created_at`) are rejected with
+`{error, {immutable_field, Field}}`.
+
+When `ttl` is updated, `expires_at` is automatically recalculated from the
+current time. The `updated_at` timestamp is always refreshed.
+""".
+-spec update(binary(), update_input()) ->
+    {ok, memory_record()} | {error, not_found | {immutable_field, atom()} | term()}.
+update(MemoryId, Changes) ->
+    beam_agent_memory_core:update(MemoryId, Changes).
 
 -doc "Pin a memory.".
 -spec pin(binary()) -> ok | {error, not_found}.

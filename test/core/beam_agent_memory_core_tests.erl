@@ -177,6 +177,165 @@ expire_removes_unpinned_memories_only_test() ->
         [maps:get(event_type, Entry) || Entry <- Entries])),
     reset().
 
+update_preserves_immutable_fields_test() ->
+    reset(),
+    SessionId = unique_binary("update-immutable"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        kind => note,
+        content => <<"original content">>,
+        salience => 5
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    OrigCreatedAt = maps:get(created_at, Memory),
+    OrigScope = maps:get(scope, Memory),
+    {ok, Updated} = beam_agent_memory_core:update(MemoryId, #{
+        content => <<"updated content">>,
+        salience => 20
+    }),
+    ?assertEqual(MemoryId, maps:get(memory_id, Updated)),
+    ?assertEqual(OrigScope, maps:get(scope, Updated)),
+    ?assertEqual(OrigCreatedAt, maps:get(created_at, Updated)),
+    ?assertEqual(<<"updated content">>, maps:get(content, Updated)),
+    ?assertEqual(20, maps:get(salience, Updated)),
+    ?assert(maps:get(updated_at, Updated) >= maps:get(updated_at, Memory)),
+    reset().
+
+update_recalculates_expires_at_on_ttl_change_test() ->
+    reset(),
+    SessionId = unique_binary("update-ttl"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"ttl content">>,
+        ttl => 60000
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    ?assert(maps:is_key(expires_at, Memory)),
+    {ok, Updated} = beam_agent_memory_core:update(MemoryId, #{
+        ttl => 120000
+    }),
+    ?assert(maps:get(expires_at, Updated) > maps:get(expires_at, Memory)),
+    {ok, NoExpiry} = beam_agent_memory_core:update(MemoryId, #{
+        ttl => infinity
+    }),
+    ?assertNot(maps:is_key(expires_at, NoExpiry)),
+    reset().
+
+update_non_ttl_change_preserves_expires_at_test() ->
+    reset(),
+    SessionId = unique_binary("update-preserve-expiry"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"expiry content">>,
+        ttl => 60000
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    OrigExpiresAt = maps:get(expires_at, Memory),
+    {ok, Updated} = beam_agent_memory_core:update(MemoryId, #{
+        content => <<"new content">>
+    }),
+    ?assertEqual(OrigExpiresAt, maps:get(expires_at, Updated)),
+    reset().
+
+update_not_found_returns_error_test() ->
+    reset(),
+    ?assertEqual({error, not_found},
+        beam_agent_memory_core:update(<<"nonexistent_memory">>, #{
+            content => <<"new">>
+        })),
+    reset().
+
+update_rejects_immutable_field_scope_test() ->
+    reset(),
+    SessionId = unique_binary("update-reject-scope"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"scope guard">>
+    }),
+    ?assertEqual({error, {immutable_field, scope}},
+        beam_agent_memory_core:update(maps:get(memory_id, Memory), #{
+            scope => #{session_id => <<"other">>}
+        })),
+    reset().
+
+update_rejects_immutable_field_memory_id_test() ->
+    reset(),
+    SessionId = unique_binary("update-reject-id"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"id guard">>
+    }),
+    ?assertEqual({error, {immutable_field, memory_id}},
+        beam_agent_memory_core:update(maps:get(memory_id, Memory), #{
+            memory_id => <<"other_id">>
+        })),
+    reset().
+
+update_rejects_immutable_field_created_at_test() ->
+    reset(),
+    SessionId = unique_binary("update-reject-created"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"created_at guard">>
+    }),
+    ?assertEqual({error, {immutable_field, created_at}},
+        beam_agent_memory_core:update(maps:get(memory_id, Memory), #{
+            created_at => 0
+        })),
+    reset().
+
+update_journals_memory_updated_event_test() ->
+    reset(),
+    SessionId = unique_binary("update-journal"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"journal update">>
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    {ok, _Updated} = beam_agent_memory_core:update(MemoryId, #{
+        content => <<"journal updated">>
+    }),
+    {ok, Entries} = beam_agent_journal_core:list(#{tag => memory}),
+    EventTypes = [maps:get(event_type, Entry) || Entry <- Entries,
+        maps:get(event_type, Entry) =/= <<"audit">>],
+    ?assert(lists:member(<<"memory_updated">>, EventTypes)),
+    reset().
+
+update_pinned_via_update_test() ->
+    reset(),
+    SessionId = unique_binary("update-pinned"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"pin via update">>
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    ?assertEqual(false, maps:get(pinned, Memory)),
+    {ok, Updated} = beam_agent_memory_core:update(MemoryId, #{
+        pinned => true
+    }),
+    ?assertEqual(true, maps:get(pinned, Updated)),
+    {ok, Stored} = beam_agent_memory_core:get(MemoryId),
+    ?assertEqual(true, maps:get(pinned, Stored)),
+    reset().
+
+update_validates_field_values_test() ->
+    reset(),
+    SessionId = unique_binary("update-validate"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"validate fields">>
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    ?assertMatch({error, {invalid_memory, ttl}},
+        beam_agent_memory_core:update(MemoryId, #{ttl => -1})),
+    ?assertMatch({error, {invalid_memory, salience}},
+        beam_agent_memory_core:update(MemoryId, #{salience => -5})),
+    ?assertMatch({error, {invalid_memory, attributes}},
+        beam_agent_memory_core:update(MemoryId, #{attributes => not_a_map})),
+    reset().
+
+update_rejects_unknown_fields_test() ->
+    reset(),
+    SessionId = unique_binary("update-unknown"),
+    {ok, Memory} = beam_agent_memory_core:remember(SessionId, #{
+        content => <<"unknown field">>
+    }),
+    MemoryId = maps:get(memory_id, Memory),
+    ?assertMatch({error, {invalid_memory, bogus_field}},
+        beam_agent_memory_core:update(MemoryId, #{bogus_field => <<"nope">>})),
+    reset().
+
 reset() ->
     ok = beam_agent_memory_core:clear(),
     ok = beam_agent_runs_core:clear(),

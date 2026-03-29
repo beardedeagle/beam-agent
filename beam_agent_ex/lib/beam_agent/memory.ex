@@ -154,6 +154,33 @@ defmodule BeamAgent.Memory do
   @spec forget(binary()) :: :ok | {:error, :not_found}
   defdelegate forget(memory_id), to: :beam_agent_memory
 
+  @typedoc """
+  Map of mutable fields accepted by `update/2`.
+
+  Mutable: `:kind`, `:content`, `:attributes`, `:source_refs`, `:ttl`,
+  `:pinned`, `:salience`. Immutable fields (`:memory_id`, `:scope`,
+  `:created_at`) are rejected with `{:error, {:immutable_field, field}}`.
+  """
+  @type update_input() :: %{
+          optional(:kind) => atom() | binary(),
+          optional(:content) => term(),
+          optional(:attributes) => map(),
+          optional(:source_refs) => [source_ref()],
+          optional(:ttl) => non_neg_integer() | :infinity,
+          optional(:pinned) => boolean(),
+          optional(:salience) => non_neg_integer()
+        }
+
+  @doc """
+  Update mutable fields of an existing memory record.
+
+  When `:ttl` is updated, `:expires_at` is automatically recalculated from
+  the current time. The `:updated_at` timestamp is always refreshed.
+  """
+  @spec update(binary(), update_input()) ::
+          {:ok, memory_record()} | {:error, :not_found | {:immutable_field, atom()} | term()}
+  defdelegate update(memory_id, changes), to: :beam_agent_memory
+
   @doc """
   Pin a memory.
   """
