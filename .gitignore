@@ -38,3 +38,7 @@ AI_SLOP_*
 .beads-credential-key
 .serena
 BEAM_AGENT_HARDENING_*.md
+ARCHITECTURE_REDESIGN_*.md
+CODEBASE_AUDIT_*.md
+*_AUDIT_REPORT*.md
+*_REDESIGN_*.md
