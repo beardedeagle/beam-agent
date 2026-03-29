@@ -215,7 +215,7 @@ compact_now_pre_compact_hook_denies_with_budget_test() ->
             Budget = maps:get(budget, Ctx),
             case maps:get(estimated_token_count, Budget, 0) < 1000 of
                 true -> {deny, <<"tokens too low">>};
-                false -> ok
+                false -> {ok, Ctx}
             end
         end),
     Reg = beam_agent_hooks_core:register_hook(H, beam_agent_hooks_core:new_registry()),

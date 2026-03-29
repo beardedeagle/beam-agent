@@ -271,6 +271,11 @@ maybe_compact(SessionOrThread, Opts) when is_map(Opts) ->
 %% so hook consumers can make informed compaction decisions.  The keys
 %% `event` and `session_id` are always set, overriding any same-named
 %% entries in Extra.
+%%
+%% No -spec: Dialyzer infers a type more precise than any spec we can
+%% write without coupling to budget_estimate internals.  The contract
+%% is: (resolved_scope(), map(), map()) -> {ok, hook_context()} |
+%% {deny, binary()} | {ask, binary()}.
 maybe_fire_pre_compact(#{session_id := SessionId}, Opts, Extra) ->
     HookReg = maps:get(sdk_hook_registry, Opts, undefined),
     beam_agent_hooks_core:fire(pre_compact,
