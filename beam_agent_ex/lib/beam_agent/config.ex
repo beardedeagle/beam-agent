@@ -1,23 +1,28 @@
 defmodule BeamAgent.Config do
   @moduledoc """
-  Configuration management for the BeamAgent SDK.
+  Unified configuration management for the BeamAgent SDK.
 
-  This module provides configuration operations -- reading, updating, writing
-  individual values and batches, querying requirements, and detecting/importing
-  external agent configurations -- across all five agentic coder backends
-  (Claude, Codex, Gemini, OpenCode, Copilot).
+  This module provides both per-session configuration operations (reading,
+  updating, writing individual values and batches, querying requirements,
+  detecting/importing external agent configurations) and global SDK-wide
+  settings (a shared key-value store that applies across all sessions).
+
+  Per-session operations work across all five agentic coder backends
+  (Claude, Codex, Gemini, OpenCode, Copilot) via native-first routing with
+  universal fallbacks. Global operations use an ETS-backed store.
 
   ## When to use directly vs through `BeamAgent`
 
   Most callers interact with configuration through `BeamAgent`. Use this module
   directly when you need focused access to configuration operations -- for
-  example, in a settings UI, a configuration migration script, or a tool that
-  imports `.cursorrules` or `CLAUDE.md` files from other agentic tools.
+  example, in a settings UI, a configuration migration script, a tool that
+  imports `.cursorrules` or `CLAUDE.md` files from other agentic tools, or
+  during application startup to set SDK-wide defaults.
 
   ## Quick example
 
   ```elixir
-  # Read the full config:
+  # Read the full session config:
   {:ok, config} = BeamAgent.Config.read(session)
 
   # Update a setting:
@@ -34,13 +39,18 @@ defmodule BeamAgent.Config do
 
   # Detect external agent configs:
   {:ok, configs} = BeamAgent.Config.external_agent_detect(session)
+
+  # Global SDK config:
+  :ok = BeamAgent.Config.global_set("max_retries", 3)
+  {:ok, 3} = BeamAgent.Config.global_get("max_retries")
   ```
 
   ## Architecture deep dive
 
   This module is a thin Elixir facade that `defdelegate`s every call to the
   Erlang `:beam_agent_config` module. Zero business logic, zero state, zero
-  processes live here -- the Erlang module owns the implementation.
+  processes live here -- the Erlang module owns the implementation. Session
+  config uses native-first routing; global config uses an ETS-backed store.
 
   See also: `BeamAgent`, `BeamAgent.Provider`, `BeamAgent.Runtime`.
   """
@@ -264,4 +274,73 @@ defmodule BeamAgent.Config do
   """
   @spec external_agent_import(pid(), map()) :: {:ok, term()} | {:error, term()}
   defdelegate external_agent_import(session, opts), to: :beam_agent_config
+
+  # -------------------------------------------------------------------
+  # Global SDK Configuration
+  # -------------------------------------------------------------------
+
+  @doc """
+  Create the global SDK config ETS table. Idempotent.
+
+  Call this during application startup or before first use of any
+  `global_*` function.
+  """
+  @spec ensure_table() :: :ok
+  defdelegate ensure_table(), to: :beam_agent_config
+
+  @doc """
+  Set a global SDK config key-value pair.
+
+  Global config is shared across all sessions on the node. Mutations
+  notify the reload bus so live sessions react without restart.
+
+  ## Parameters
+
+  - `key` -- binary config key (e.g., `"default_backend"`, `"max_retries"`).
+  - `value` -- any term to store.
+  """
+  @spec global_set(binary(), term()) :: :ok
+  defdelegate global_set(key, value), to: :beam_agent_config
+
+  @doc """
+  Fetch a global SDK config value by key.
+
+  ## Returns
+
+  - `{:ok, value}` if the key exists.
+  - `{:error, :not_found}` if the key has not been set.
+  """
+  @spec global_get(binary()) :: {:ok, term()} | {:error, :not_found}
+  defdelegate global_get(key), to: :beam_agent_config
+
+  @doc """
+  Fetch a global SDK config value by key, returning a default if not found.
+
+  ## Parameters
+
+  - `key` -- binary config key.
+  - `default` -- value returned when the key does not exist.
+  """
+  @spec global_get(binary(), term()) :: term()
+  defdelegate global_get(key, default), to: :beam_agent_config
+
+  @doc """
+  Delete a global SDK config key. Idempotent.
+  """
+  @spec global_delete(binary()) :: :ok
+  defdelegate global_delete(key), to: :beam_agent_config
+
+  @doc """
+  List all global SDK config entries.
+
+  Returns a list of `{key, value}` tuples.
+  """
+  @spec global_list() :: [{binary(), term()}]
+  defdelegate global_list(), to: :beam_agent_config
+
+  @doc """
+  Remove all global SDK config entries.
+  """
+  @spec global_clear() :: :ok
+  defdelegate global_clear(), to: :beam_agent_config
 end

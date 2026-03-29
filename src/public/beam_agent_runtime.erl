@@ -573,7 +573,7 @@ The universal fallback persists this as a configuration value.
 -spec set_max_thinking_tokens(pid(), pos_integer()) -> {ok, term()} | {error, term()}.
 set_max_thinking_tokens(Session, MaxTokens) ->
     beam_agent_core:native_or(Session, set_max_thinking_tokens, [MaxTokens], fun() ->
-        _ = beam_agent_config_core:config_value_write(
+        _ = beam_agent_config:config_value_write(
             Session, <<"max_thinking_tokens">>, MaxTokens, #{}),
         {ok, beam_agent_core:with_universal_source(Session, #{
             max_thinking_tokens => MaxTokens})}

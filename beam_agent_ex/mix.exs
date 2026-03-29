@@ -74,7 +74,6 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.Agents,
           BeamAgent.Plugins,
           BeamAgent.SlashCommands,
-          BeamAgent.SDKConfig,
           BeamAgent.Telemetry,
           BeamAgent.Threads,
           BeamAgent.Todo
