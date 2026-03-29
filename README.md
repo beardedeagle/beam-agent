@@ -191,8 +191,7 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_file`, `beam_agent_search`, `beam_agent_skills`,
 `beam_agent_account`, `beam_agent_apps`, `beam_agent_artifacts`,
 `beam_agent_audit`, `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
-`beam_agent_orchestrator`, `beam_agent_prompt_cache`, `beam_agent_cassette`,
-`beam_agent_plan_cache`, `beam_agent_tool_cache`, `beam_agent_routing`, `beam_agent_routines`,
+`beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
 `beam_agent_checkpoint`, `beam_agent_policy`, `beam_agent_runs`,
 `beam_agent_agents`, `beam_agent_plugins`, `beam_agent_slash_commands`,
 `beam_agent_sdk_config`). Their status and route shape for each
@@ -221,11 +220,6 @@ All families have universal fallback coverage:
 - attachment materialization: native content blocks for Claude, canonical blocks for Gemini, text fallback for unknown backends
 - catalog accessors for tools/skills/plugins/agents
 - capability introspection (`support_level`, `implementation`, `fidelity`)
-- SDK-layer prompt caching with hash-based deduplication and caller-driven eviction
-- request coalescing (single-flight) to prevent thundering-herd CLI calls
-- VCR-style cassette recording/replay with JSONL (canonical) and BERT (fast) disk formats
-- agentic plan caching with quality tracking and low-quality eviction
-- deterministic tool result caching with per-tool invalidation
 - raw native escape hatches for backend-specific APIs
 - backend event streaming through native transports or the universal event bus
 
@@ -334,48 +328,12 @@ beam_agent_context:context_status(SessionOrThread)       -> {ok, Status} | {erro
 beam_agent_context:budget_estimate(SessionOrThread)      -> {ok, Budget} | {error, Reason}
 beam_agent_context:compact_now(SessionOrThread, Opts)    -> {ok, Result} | {error, Reason}
 beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {error, Reason}
-
-%% SDK-layer prompt caching -- beam_agent_prompt_cache
-beam_agent_prompt_cache:cached_query(Session, Prompt)      -> {ok, [Message]} | {error, Reason}
-beam_agent_prompt_cache:cached_query(Session, Prompt, Opts) -> {ok, [Message]} | {error, Reason}
-beam_agent_prompt_cache:lookup(Session, Prompt)             -> {hit, [Message], Meta} | miss
-beam_agent_prompt_cache:store(Session, Prompt, Messages, Opts) -> ok
-beam_agent_prompt_cache:invalidate(Session, Prompt)         -> ok
-beam_agent_prompt_cache:clear()                             -> ok
-beam_agent_prompt_cache:stats()                             -> #{hits, misses, entries, bytes_estimate}
-beam_agent_prompt_cache:evict_expired()                     -> non_neg_integer()
-
-%% VCR-style cassette recording/replay -- beam_agent_cassette
-beam_agent_cassette:start_recording(SessionId)              -> ok | {error, already_recording}
-beam_agent_cassette:record_entry(Sid, Prompt, Result, Backend, Model) -> ok | {error, not_recording}
-beam_agent_cassette:stop_recording(SessionId)               -> {ok, Cassette} | {error, not_recording}
-beam_agent_cassette:start_replay(SessionId, Cassette)       -> ok | {error, term()}
-beam_agent_cassette:replay_next(SessionId)                  -> {ok, Entry} | done | {error, not_replaying}
-beam_agent_cassette:export(Cassette, FilePath)              -> ok | {error, term()}
-beam_agent_cassette:import(FilePath)                        -> {ok, Cassette} | {error, term()}
-beam_agent_cassette:compile(JsonlPath, BertPath)            -> ok | {error, term()}
-
-%% Agentic plan caching -- beam_agent_plan_cache
-beam_agent_plan_cache:plan_key(Backend, Model, Task)        -> PlanKey
-beam_agent_plan_cache:get(PlanKey)                          -> {hit, Template, Meta} | miss
-beam_agent_plan_cache:put(PlanKey, Template)                -> ok
-beam_agent_plan_cache:record_success(PlanKey)               -> ok
-beam_agent_plan_cache:record_failure(PlanKey)               -> ok
-beam_agent_plan_cache:evict_low_quality(MinRate)            -> non_neg_integer()
-
-%% Deterministic tool result caching -- beam_agent_tool_cache
-beam_agent_tool_cache:cache_key(ToolName, Args)             -> CacheKey
-beam_agent_tool_cache:get(CacheKey)                         -> {hit, Result, Meta} | miss
-beam_agent_tool_cache:put(CacheKey, ToolName, Result)       -> ok
-beam_agent_tool_cache:invalidate_tool(ToolName)             -> ok
-beam_agent_tool_cache:evict_expired()                       -> non_neg_integer()
 ```
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
 `BeamAgent.Artifacts`, `BeamAgent.Audit`, `BeamAgent.Context`,
-`BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`, `BeamAgent.PromptCache`,
-`BeamAgent.Cassette`, `BeamAgent.PlanCache`, `BeamAgent.ToolCache`,
+`BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`,
 `BeamAgent.Routing`, `BeamAgent.Routines`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,
 `BeamAgent.Catalog`, `BeamAgent.Capabilities`, and `BeamAgent.Raw`.
