@@ -7,16 +7,18 @@ This is beam_agent_core's own implementation — every adapter records
 messages here, regardless of whether the underlying CLI has native
 session history support.
 
-Uses ETS for fast in-process storage. Sessions persist for the
+All persistence is routed through `beam_agent_store`, which dispatches to the
+configured adapter (default: `beam_agent_store_ets`). Sessions persist for the
 lifetime of the BEAM node (or until explicitly deleted/cleared).
 
-Two ETS tables:
+Three logical tables (domain `session_store`):
   - `beam_agent_sessions` — session metadata (id, model, cwd, etc.)
   - `beam_agent_session_messages` — messages keyed by {session_id, seq}
+  - `beam_agent_session_counters` — per-session message sequence numbers
 
-Tables are created lazily on first access via `beam_agent_ets` which
-resolves access mode automatically. Named tables allow any process to
-read/write without bottlenecking on a single owner.
+Named tables allow any process to read/write without bottlenecking on a
+single owner. Future durable adapters can be swapped in without modifying
+this module.
 
 Usage:
 ```erlang
@@ -132,6 +134,8 @@ beam_agent_session_store_core:record_message(SessionId, Message),
 -define(MESSAGES_TABLE, beam_agent_session_messages).
 %% Counter table for message sequence numbers per session.
 -define(COUNTERS_TABLE, beam_agent_session_counters).
+%% Store domain for adapter dispatch.
+-define(STORE_DOMAIN, session_store).
 
 %% Default system-wide limits.
 -define(DEFAULT_MAX_SESSIONS, 10_000).
@@ -142,27 +146,27 @@ beam_agent_session_store_core:record_message(SessionId, Message),
 %%--------------------------------------------------------------------
 
 -doc """
-Ensure ETS tables exist. Idempotent -- safe to call multiple times.
-Tables are named so any process can access them. Access mode is
-resolved automatically by `beam_agent_ets`.
+Ensure store tables exist. Idempotent -- safe to call multiple times.
+Tables are named so any process can access them. Persistence is
+resolved automatically by the configured `beam_agent_store` adapter.
 """.
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?SESSIONS_TABLE, [set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?MESSAGES_TABLE, [ordered_set, named_table,
-        {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?COUNTERS_TABLE, [set, named_table,
-        {read_concurrency, true}]),
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?SESSIONS_TABLE, [set,
+        named_table, {read_concurrency, true}]),
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?MESSAGES_TABLE, [ordered_set,
+        named_table, {read_concurrency, true}]),
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?COUNTERS_TABLE, [set,
+        named_table, {read_concurrency, true}]),
     ok.
 
 -doc "Clear all session data. Deletes all entries from both tables.".
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?SESSIONS_TABLE),
-    beam_agent_ets:delete_all_objects(?MESSAGES_TABLE),
-    beam_agent_ets:delete_all_objects(?COUNTERS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?SESSIONS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?MESSAGES_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?COUNTERS_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -190,7 +194,8 @@ register_session(SessionId, Meta) when is_binary(SessionId), is_map(Meta) ->
                 message_count => 0
             },
             %% insert_new: only insert if not already present
-            beam_agent_ets:insert_new(?SESSIONS_TABLE, {SessionId, Entry}),
+            beam_agent_store:insert_new(?STORE_DOMAIN, ?SESSIONS_TABLE,
+                {SessionId, Entry}),
             ok;
         false ->
             {error, session_limit_reached}
@@ -205,10 +210,11 @@ Creates the session if it doesn't exist.
 update_session(SessionId, Updates) when is_binary(SessionId), is_map(Updates) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    case ets:lookup(?SESSIONS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId) of
         [{_, Existing}] ->
             Updated = maps:merge(Existing, Updates#{updated_at => Now}),
-            beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
+            beam_agent_store:insert(?STORE_DOMAIN, ?SESSIONS_TABLE,
+                {SessionId, Updated}),
             ok;
         [] ->
             register_session(SessionId, Updates)
@@ -218,7 +224,7 @@ update_session(SessionId, Updates) when is_binary(SessionId), is_map(Updates) ->
 -spec get_session(binary()) -> {ok, session_meta()} | {error, not_found}.
 get_session(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    case ets:lookup(?SESSIONS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId) of
         [{_, Meta}] -> {ok, Meta};
         [] -> {error, not_found}
     end.
@@ -227,8 +233,8 @@ get_session(SessionId) when is_binary(SessionId) ->
 -spec delete_session(binary()) -> ok.
 delete_session(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    beam_agent_ets:delete(?SESSIONS_TABLE, SessionId),
-    beam_agent_ets:delete(?COUNTERS_TABLE, SessionId),
+    beam_agent_store:delete(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId),
+    beam_agent_store:delete(?STORE_DOMAIN, ?COUNTERS_TABLE, SessionId),
     %% Delete all messages for this session.
     %% Messages are keyed as {SessionId, Seq} in an ordered_set,
     %% so we can efficiently match on the prefix.
@@ -249,7 +255,7 @@ Results are sorted by `updated_at` descending.
 -spec list_sessions(list_opts()) -> {ok, [session_meta()]}.
 list_sessions(Opts) when is_map(Opts) ->
     ensure_tables(),
-    All = ets:foldl(fun({_, Meta}, Acc) ->
+    All = beam_agent_store:foldl(?STORE_DOMAIN, fun({_, Meta}, Acc) ->
         case matches_filters(Meta, Opts) of
             true -> [Meta | Acc];
             false -> Acc
@@ -333,9 +339,10 @@ record_message(SessionId, Message) when is_binary(SessionId), is_map(Message) ->
     Max = max_messages_per_session(),
     case Max =:= infinity orelse message_count(SessionId) < Max of
         true ->
-            Seq = beam_agent_ets:update_counter(?COUNTERS_TABLE, SessionId, {2, 1},
-                {SessionId, 0}),
-            beam_agent_ets:insert(?MESSAGES_TABLE, {{SessionId, Seq}, Message}),
+            Seq = beam_agent_store:update_counter(?STORE_DOMAIN, ?COUNTERS_TABLE,
+                SessionId, {2, 1}, {SessionId, 0}),
+            beam_agent_store:insert(?STORE_DOMAIN, ?MESSAGES_TABLE,
+                {{SessionId, Seq}, Message}),
             %% Update session metadata
             _ = update_message_count(SessionId, Message),
             ok = publish_session_event(SessionId, Message),
@@ -379,7 +386,7 @@ Options:
 get_session_messages(SessionId, Opts)
   when is_binary(SessionId), is_map(Opts) ->
     ensure_tables(),
-    case ets:lookup(?SESSIONS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId) of
         [] ->
             {error, not_found};
         _ ->
@@ -548,13 +555,14 @@ get_summary(SessionId) when is_binary(SessionId) ->
 -spec session_count() -> non_neg_integer().
 session_count() ->
     ensure_tables(),
-    ets:info(?SESSIONS_TABLE, size).
+    beam_agent_store:foldl(?STORE_DOMAIN, fun(_, Acc) -> Acc + 1 end,
+        0, ?SESSIONS_TABLE).
 
 -doc "Get the message count for a specific session.".
 -spec message_count(binary()) -> non_neg_integer().
 message_count(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    case ets:lookup(?COUNTERS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?COUNTERS_TABLE, SessionId) of
         [{_, Count}] -> Count;
         [] -> 0
     end.
@@ -633,11 +641,11 @@ is_terminal_event(_) ->
 -spec collect_from(term(), binary(), [beam_agent_core:message()]) ->
     [beam_agent_core:message()].
 collect_from(Key, SessionId, Acc) ->
-    case ets:next(?MESSAGES_TABLE, Key) of
+    case beam_agent_store:next(?STORE_DOMAIN, ?MESSAGES_TABLE, Key) of
         '$end_of_table' ->
             lists:reverse(Acc);
         {SessionId, _Seq} = NextKey ->
-            case ets:lookup(?MESSAGES_TABLE, NextKey) of
+            case beam_agent_store:lookup(?STORE_DOMAIN, ?MESSAGES_TABLE, NextKey) of
                 [{_, Msg}] ->
                     collect_from(NextKey, SessionId, [Msg | Acc]);
                 [] ->
@@ -692,14 +700,15 @@ apply_session_view(SessionId, Messages, Opts) ->
     ok | {error, session_limit_reached}.
 update_message_count(SessionId, Message) ->
     Now = erlang:system_time(millisecond),
-    case ets:lookup(?SESSIONS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId) of
         [{_, Existing}] ->
             Count = maps:get(message_count, Existing, 0) + 1,
             Updates = #{message_count => Count, updated_at => Now},
             %% Extract model from system init or result messages
             Updates2 = maybe_extract_model(Message, Updates),
             Updated = maps:merge(Existing, Updates2),
-            beam_agent_ets:insert(?SESSIONS_TABLE, {SessionId, Updated}),
+            beam_agent_store:insert(?STORE_DOMAIN, ?SESSIONS_TABLE,
+                {SessionId, Updated}),
             ok;
         [] ->
             %% Auto-create session entry if not registered
@@ -719,7 +728,7 @@ maybe_extract_model(_, Acc) ->
 
 -spec current_visible_count(binary()) -> non_neg_integer() | undefined.
 current_visible_count(SessionId) ->
-    case ets:lookup(?SESSIONS_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?SESSIONS_TABLE, SessionId) of
         [{_, Meta}] ->
             Extra = maps:get(extra, Meta, #{}),
             View = maps:get(view, Extra, #{}),
@@ -869,11 +878,11 @@ delete_session_messages(SessionId) ->
 
 -spec delete_from({binary(), 0}, binary()) -> ok.
 delete_from(Key, SessionId) ->
-    case ets:next(?MESSAGES_TABLE, Key) of
+    case beam_agent_store:next(?STORE_DOMAIN, ?MESSAGES_TABLE, Key) of
         '$end_of_table' ->
             ok;
         {SessionId, _Seq} = NextKey ->
-            beam_agent_ets:delete(?MESSAGES_TABLE, NextKey),
+            beam_agent_store:delete(?STORE_DOMAIN, ?MESSAGES_TABLE, NextKey),
             delete_from(Key, SessionId);
         _OtherSession ->
             ok

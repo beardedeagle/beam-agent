@@ -672,7 +672,7 @@ Children = [
 
 ### Universal Session and Thread Stores
 
-The common session/thread APIs are backed by ETS-based stores inside
+The common session/thread APIs are backed by `beam_agent_store` inside
 `beam_agent` so every adapter can expose the same high-level capability
 surface, even when the underlying SDK does not implement it directly.
 

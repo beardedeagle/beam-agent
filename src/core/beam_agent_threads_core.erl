@@ -5,7 +5,8 @@ Universal thread/conversation management for the BEAM Agent SDK.
 Provides logical conversation threading across all adapters.
 A thread groups related queries into a named conversation context.
 
-Uses the same ETS-backed approach as beam_agent_session_store_core.
+All persistence is routed through `beam_agent_store` (domain `threads`),
+which dispatches to the configured adapter (default: `beam_agent_store_ets`).
 Threads are scoped to a session — each session can have multiple
 threads, and each thread tracks its query history.
 
@@ -92,6 +93,8 @@ Usage:
 -define(THREADS_TABLE, beam_agent_threads_core).
 %% Active thread per session.
 -define(ACTIVE_TABLE, beam_agent_active_threads).
+%% Store domain for adapter dispatch.
+-define(STORE_DOMAIN, threads).
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -100,9 +103,9 @@ Usage:
 -doc "Ensure the threads ETS table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    beam_agent_ets:ensure_table(?THREADS_TABLE,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?THREADS_TABLE,
         [set, named_table, {read_concurrency, true}]),
-    beam_agent_ets:ensure_table(?ACTIVE_TABLE,
+    beam_agent_store:ensure_table(?STORE_DOMAIN, ?ACTIVE_TABLE,
         [set, named_table]),
     ok.
 
@@ -110,8 +113,8 @@ ensure_tables() ->
 -spec clear() -> ok.
 clear() ->
     ensure_tables(),
-    beam_agent_ets:delete_all_objects(?THREADS_TABLE),
-    beam_agent_ets:delete_all_objects(?ACTIVE_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?THREADS_TABLE),
+    beam_agent_store:delete_all_objects(?STORE_DOMAIN, ?ACTIVE_TABLE),
     ok.
 
 %%--------------------------------------------------------------------
@@ -148,7 +151,7 @@ start_thread(SessionId, Opts) when is_binary(SessionId), is_map(Opts) ->
             Thread
     end,
     Key = {SessionId, ThreadId},
-    beam_agent_ets:insert(?THREADS_TABLE, {Key, Thread1}),
+    beam_agent_store:insert(?STORE_DOMAIN, ?THREADS_TABLE, {Key, Thread1}),
     %% Set as active thread for this session
     set_active_thread(SessionId, ThreadId),
     {ok, Thread1}.
@@ -205,14 +208,14 @@ resume_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_tables(),
     Key = {SessionId, ThreadId},
-    case ets:lookup(?THREADS_TABLE, Key) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?THREADS_TABLE, Key) of
         [{_, Thread}] ->
             Now = erlang:system_time(millisecond),
             Updated = Thread#{
                 status => active,
                 updated_at => Now
             },
-            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated}),
+            beam_agent_store:insert(?STORE_DOMAIN, ?THREADS_TABLE, {Key, Updated}),
             set_active_thread(SessionId, ThreadId),
             {ok, Updated};
         [] ->
@@ -223,7 +226,7 @@ resume_thread(SessionId, ThreadId)
 -spec list_threads(binary()) -> {ok, [thread_meta()]}.
 list_threads(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    Threads = ets:foldl(fun
+    Threads = beam_agent_store:foldl(?STORE_DOMAIN, fun
         ({{SId, _}, Thread}, Acc) when SId =:= SessionId ->
             [Thread | Acc];
         (_, Acc) ->
@@ -241,7 +244,7 @@ get_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_tables(),
     Key = {SessionId, ThreadId},
-    case ets:lookup(?THREADS_TABLE, Key) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?THREADS_TABLE, Key) of
         [{_, Thread}] -> {ok, Thread};
         [] -> {error, not_found}
     end.
@@ -280,7 +283,7 @@ delete_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_tables(),
     Key = {SessionId, ThreadId},
-    beam_agent_ets:delete(?THREADS_TABLE, Key),
+    beam_agent_store:delete(?STORE_DOMAIN, ?THREADS_TABLE, Key),
     %% Clear active thread if this was it
     case active_thread(SessionId) of
         {ok, ThreadId} -> clear_active_thread(SessionId);
@@ -382,7 +385,7 @@ record_thread_message(SessionId, ThreadId, Message)
   when is_binary(SessionId), is_binary(ThreadId), is_map(Message) ->
     ensure_tables(),
     Key = {SessionId, ThreadId},
-    case ets:lookup(?THREADS_TABLE, Key) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?THREADS_TABLE, Key) of
         [{_, Thread}] ->
             Now = erlang:system_time(millisecond),
             Count = maps:get(message_count, Thread, 0) + 1,
@@ -391,7 +394,7 @@ record_thread_message(SessionId, ThreadId, Message)
                 visible_message_count => Count,
                 updated_at => Now
             },
-            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated});
+            beam_agent_store:insert(?STORE_DOMAIN, ?THREADS_TABLE, {Key, Updated});
         [] ->
             ok
     end,
@@ -441,7 +444,7 @@ thread_count(SessionId) when is_binary(SessionId) ->
 -spec active_thread(binary()) -> {ok, binary()} | {error, none}.
 active_thread(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    case ets:lookup(?ACTIVE_TABLE, SessionId) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?ACTIVE_TABLE, SessionId) of
         [{_, ThreadId}] -> {ok, ThreadId};
         [] -> {error, none}
     end.
@@ -451,14 +454,14 @@ active_thread(SessionId) when is_binary(SessionId) ->
 set_active_thread(SessionId, ThreadId)
   when is_binary(SessionId), is_binary(ThreadId) ->
     ensure_tables(),
-    beam_agent_ets:insert(?ACTIVE_TABLE, {SessionId, ThreadId}),
+    beam_agent_store:insert(?STORE_DOMAIN, ?ACTIVE_TABLE, {SessionId, ThreadId}),
     ok.
 
 -doc "Clear the active thread for a session.".
 -spec clear_active_thread(binary()) -> ok.
 clear_active_thread(SessionId) when is_binary(SessionId) ->
     ensure_tables(),
-    beam_agent_ets:delete(?ACTIVE_TABLE, SessionId),
+    beam_agent_store:delete(?STORE_DOMAIN, ?ACTIVE_TABLE, SessionId),
     ok.
 
 %%--------------------------------------------------------------------
@@ -474,10 +477,10 @@ generate_thread_id() ->
 update_thread(SessionId, ThreadId, Fun)
   when is_binary(SessionId), is_binary(ThreadId), is_function(Fun, 1) ->
     Key = {SessionId, ThreadId},
-    case ets:lookup(?THREADS_TABLE, Key) of
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?THREADS_TABLE, Key) of
         [{_, Thread}] ->
             Updated = Fun(Thread),
-            beam_agent_ets:insert(?THREADS_TABLE, {Key, Updated}),
+            beam_agent_store:insert(?STORE_DOMAIN, ?THREADS_TABLE, {Key, Updated}),
             {ok, Updated};
         [] ->
             {error, not_found}

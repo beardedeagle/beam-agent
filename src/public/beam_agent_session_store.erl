@@ -2,7 +2,7 @@
 -moduledoc """
 Public API for the unified session history store.
 
-This module provides ETS-backed session tracking and message history
+This module provides store-backed session tracking and message history
 across all agentic coder backends (Claude, Codex, Gemini, OpenCode,
 Copilot). Every adapter records messages here regardless of whether
 the underlying CLI has native session history support, giving callers
@@ -16,7 +16,7 @@ summarization.
 ## Getting Started
 
 ```erlang
-%% Ensure ETS tables exist (idempotent, safe to call repeatedly):
+%% Ensure store tables exist (idempotent, safe to call repeatedly):
 ok = beam_agent_session_store:ensure_tables(),
 
 %% Register a new session:
@@ -40,10 +40,10 @@ ok = beam_agent_session_store:record_message(<<"sess_abc123">>, #{
 - Session metadata: each session is identified by a binary session ID and
   carries metadata such as the adapter name, model, working directory,
   timestamps, and a message count. Metadata is stored in the
-  beam_agent_sessions ETS table.
+  beam_agent_sessions table via `beam_agent_store`.
 
 - Message recording: messages are stored with auto-incrementing sequence
-  numbers in the beam_agent_session_messages ordered-set ETS table. This
+  numbers in the beam_agent_session_messages ordered-set table. This
   preserves insertion order and enables efficient prefix scans per session.
 
 - Forking: fork_session/2 creates a deep copy of a session (metadata and
@@ -62,9 +62,10 @@ ok = beam_agent_session_store:record_message(<<"sess_abc123">>, #{
 ## Architecture
 
 This module is a thin public wrapper that delegates every call to
-beam_agent_session_store_core. The core module owns the ETS tables
+beam_agent_session_store_core. The core module owns the store tables
 (beam_agent_sessions, beam_agent_session_messages,
-beam_agent_session_counters) and all implementation logic. Types are
+beam_agent_session_counters) routed through `beam_agent_store`
+(domain `session_store`) and all implementation logic. Types are
 re-exported from the core for caller convenience.
 
 Tables are public and named so any process can read and write without
@@ -90,11 +91,12 @@ conversation history.
 
 ## Architecture deep dive
 
-The store is backed by three ETS tables: beam_agent_sessions (metadata),
+The store is backed by three tables routed through `beam_agent_store`
+(domain `session_store`): beam_agent_sessions (metadata),
 beam_agent_session_messages (ordered-set with auto-incrementing sequence
 numbers), and beam_agent_session_counters (atomic message counters).
-All tables are public and named so any process can read/write without
-bottlenecking on a single owner.
+The default adapter is `beam_agent_store_ets`. All tables are public and
+named so any process can read/write without bottlenecking on a single owner.
 
 Session forking performs a deep copy of metadata and all messages under
 a new session ID, recording the parent relationship in extra.fork.
@@ -202,7 +204,7 @@ message count at generation time, and the generator identifier.
 %%--------------------------------------------------------------------
 
 -doc """
-Ensure all session store ETS tables exist.
+Ensure all session store tables exist.
 
 Creates the beam_agent_sessions, beam_agent_session_messages, and
 beam_agent_session_counters tables if they do not already exist. This
