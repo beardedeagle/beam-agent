@@ -491,6 +491,8 @@ defmodule BeamAgent do
   > Files larger than 512 KB are rejected with a descriptive text block
   > instead of being read into memory. Override the default via
   > `Application.put_env(:beam_agent, :max_attachment_size, bytes)`.
+  > Set to `:infinity` to disable size gating entirely.
+  > Invalid values fall back to the 512 KB default.
 
   > #### Security {: .warning}
   >

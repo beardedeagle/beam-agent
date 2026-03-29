@@ -418,7 +418,7 @@ read_local_file(Path) ->
             PathStr = ensure_list(Path),
             MaxSize = max_attachment_size(),
             case file:read_file_info(PathStr) of
-                {ok, #file_info{size = Size}} when Size > MaxSize ->
+                {ok, #file_info{size = Size}} when MaxSize =/= infinity, Size > MaxSize ->
                     {error, {file_too_large, Path, Size, MaxSize}};
                 {ok, #file_info{}} ->
                     case file:read_file(PathStr) of
@@ -647,9 +647,13 @@ normalize_type(_) ->
 %% Internal: Attachment size gating
 %%--------------------------------------------------------------------
 
--spec max_attachment_size() -> pos_integer().
+-spec max_attachment_size() -> pos_integer() | infinity.
 max_attachment_size() ->
-    application:get_env(beam_agent, max_attachment_size, ?DEFAULT_MAX_ATTACHMENT_SIZE).
+    case application:get_env(beam_agent, max_attachment_size) of
+        {ok, infinity} -> infinity;
+        {ok, N} when is_integer(N), N > 0 -> N;
+        _ -> ?DEFAULT_MAX_ATTACHMENT_SIZE
+    end.
 
 -spec rejection_text(binary(), non_neg_integer(), pos_integer()) -> binary().
 rejection_text(Name, Size, Limit) ->
