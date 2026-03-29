@@ -476,7 +476,7 @@ Realtime sessions support the full SDK hook lifecycle — `session_start`,
 sessions fire in realtime mode as well:
 
 ```erlang
-Hook = beam_agent_hooks_core:hook(user_prompt_submit, fun(Ctx) ->
+Hook = beam_agent_hooks:hook(user_prompt_submit, fun(Ctx) ->
     %% Inspect or modify the prompt before it's sent over WebSocket
     {ok, Ctx}
 end),

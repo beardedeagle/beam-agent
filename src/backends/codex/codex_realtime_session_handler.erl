@@ -139,7 +139,10 @@ encode_query(_Prompt, _Params, #hstate{ws_ref = undefined}) ->
     {error, not_connected};
 encode_query(Prompt, Params, #hstate{ws_ref = WsRef,
                                      session_id = SessionId} = HState) ->
-    %% Fire user_prompt_submit hook before encoding
+    %% Fire user_prompt_submit hook before encoding.
+    %% params is included for hook observability (logging, auditing) but the
+    %% realtime WebSocket protocol only encodes the prompt — hooks that modify
+    %% params will not affect the wire message.
     HookCtx = #{event => user_prompt_submit,
                 prompt => Prompt, params => Params,
                 session_id => SessionId},
@@ -306,13 +309,14 @@ handle_set_permission_mode(Mode, #hstate{opts = Opts} = HState) ->
 -doc """
 Perform side effects on state transitions.
 
-Fires session_start hook when the WebSocket session enters the ready state.
+Fires session_start hook on the first transition into ready (from connecting).
+Subsequent ready re-entries (e.g., active_query -> ready) are ignored.
 """.
 -spec on_state_enter(beam_agent_session_handler:state_name(),
                      beam_agent_session_handler:state_name() | undefined,
                      #hstate{}) ->
     {ok, [beam_agent_session_handler:handler_action()], #hstate{}}.
-on_state_enter(ready, _OldState, #hstate{session_id = SessionId} = HState) ->
+on_state_enter(ready, connecting, #hstate{session_id = SessionId} = HState) ->
     _ = fire_hook(session_start,
             #{event => session_start,
               session_id => SessionId,
