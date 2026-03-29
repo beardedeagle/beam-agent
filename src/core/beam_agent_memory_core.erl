@@ -288,12 +288,12 @@ update(MemoryId, Changes) when is_binary(MemoryId), is_map(Changes) ->
                     end;
                 {error, _} = Error ->
                     telemetry_stop(update, StartTime,
-                        #{memory_id => MemoryId, found => false}),
+                        #{memory_id => MemoryId}),
                     Error
             end;
         {error, _} = Error ->
             telemetry_stop(update, StartTime,
-                #{memory_id => MemoryId, found => false}),
+                #{memory_id => MemoryId}),
             Error
     end.
 
@@ -467,7 +467,6 @@ update_pinned(MemoryId, DesiredPinned, EventType) ->
     end.
 
 -define(IMMUTABLE_FIELDS, [memory_id, scope, created_at]).
--define(MUTABLE_FIELDS, [kind, content, attributes, source_refs, ttl, pinned, salience]).
 
 -spec reject_immutable_fields(map()) ->
     ok | {error, {immutable_field, memory_id | scope | created_at}}.
