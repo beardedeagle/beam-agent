@@ -6,18 +6,15 @@ This module manages session lifecycle: starting, restoring, stopping,
 querying, and event streaming. Domain-specific operations live in dedicated
 public modules:
 
-- beam_agent_account: login, logout, rate limits
 - beam_agent_artifacts: typed artifact and context storage
 - beam_agent_audit: durable audit records layered on the journal
-- beam_agent_apps: app/project management
 - beam_agent_capabilities: feature introspection
-- beam_agent_catalog: tools, skills, plugins, agents, models
+- beam_agent_catalog: tools, skills, plugins, agents, models, files, search
 - beam_agent_checkpoint: checkpoint and rewind
 - beam_agent_command: command execution, stdin, shell, async prompts
 - beam_agent_config: session configuration read/write
 - beam_agent_control: collaboration, review, realtime, server admin
 - beam_agent_context: context pressure, summaries, and policy-driven compaction
-- beam_agent_file: text search, file search, directory listing
 - beam_agent_journal: durable canonical domain-event journal
 - beam_agent_memory: long-term memory and recall
 - beam_agent_mcp: MCP server management
@@ -26,9 +23,8 @@ public modules:
 - beam_agent_provider: provider and agent selection, OAuth
 - beam_agent_routing: backend routing and policy-driven selection
 - beam_agent_routines: durable routines and caller-driven scheduled execution
-- beam_agent_runtime: model, permissions, status, interrupts
+- beam_agent_runtime: model, permissions, status, interrupts, account, apps, todos
 - beam_agent_runs: canonical run and step lifecycle
-- beam_agent_search: fuzzy file search
 - beam_agent_session_store: session history and thread storage
 - beam_agent_skills: skill listing and configuration
 - beam_agent_threads: thread lifecycle and management

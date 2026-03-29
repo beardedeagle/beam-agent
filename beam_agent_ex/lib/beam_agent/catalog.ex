@@ -1,37 +1,47 @@
 defmodule BeamAgent.Catalog do
   @moduledoc """
-  Catalog accessors for tools, skills, plugins, MCP servers, and agents.
+  Catalog accessors and global registry for tools, skills, plugins, MCP
+  servers, agents, and slash commands.
 
-  This module provides a read-only view of the extensions available to a live
-  session. It queries the session's backend for native catalog listings when
-  available, and falls back to normalised metadata extracted from the session
-  info map otherwise.
+  This module serves two purposes:
 
-  The catalog is always specific to a session (identified by pid). Different
-  sessions may expose different catalogs depending on their backend, MCP server
-  configuration, and installed extensions.
+  1. **Session Catalog** -- a read-only view of the extensions available to a
+     live session. It queries the session's backend for native catalog listings
+     when available, and falls back to normalised metadata extracted from the
+     session info map otherwise.
+
+  2. **Global Registry** -- CRUD operations for agent types, plugins, and slash
+     commands that are shared across all sessions. Mutations notify the reload
+     bus so live sessions react without restart.
 
   ## When to use directly vs through `BeamAgent`
 
   Use this module directly when you need to inspect or switch the tooling
-  available to a session — for example, in a capability-discovery UI, an
-  orchestrator that selects agents dynamically, or a test that verifies tool
-  availability.
+  available to a session, or when you need focused access to global registry
+  operations -- for example, in a capability-discovery UI, an orchestrator that
+  selects agents dynamically, a plugin marketplace, or a command palette.
 
   ## Quick example
 
   ```elixir
+  # --- Session Catalog ---
+
   # List all available tools for a session:
   {:ok, tools} = BeamAgent.Catalog.list_tools(session)
 
   # Look up a specific tool by name or ID:
   {:ok, tool} = BeamAgent.Catalog.get_tool(session, "file_read")
 
-  # Check which agent is currently selected:
-  {:ok, agent_id} = BeamAgent.Catalog.current_agent(session)
+  # --- Global Registry ---
 
-  # Override the default agent for future queries:
-  :ok = BeamAgent.Catalog.set_default_agent(session, "claude-sonnet-4-6")
+  # Register an agent type globally:
+  :ok = BeamAgent.Catalog.register_agent("code-reviewer", %{
+    name: "Code Reviewer",
+    description: "Reviews code for quality"
+  })
+
+  # List all registered plugins:
+  plugins = BeamAgent.Catalog.registered_plugins()
   ```
 
   ## Core concepts
@@ -44,17 +54,21 @@ defmodule BeamAgent.Catalog do
     queried first. When native listings are unavailable, the catalog falls back to
     metadata extracted from the session info's `system_info` map.
 
-  - **Default agent**: the one mutable operation in the catalog — setting the
-    default agent. This is supported because agent selection is part of the
-    unified query option shape and can be merged into future requests without
-    backend-specific logic.
+  - **Default agent**: setting the default agent for a session. This is supported
+    because agent selection is part of the unified query option shape and can be
+    merged into future requests without backend-specific logic.
+
+  - **Global registry**: agent types, plugins, and slash commands registered
+    globally via `register_agent/2`, `register_plugin/2`, and
+    `register_command/2`. These are stored in `:beam_agent_registry` with
+    composite keys `{Kind, Id}` and are shared across all sessions.
 
   ## Architecture deep dive
 
-  This module delegates every call to `:beam_agent_catalog`. The underlying
-  implementation (`:beam_agent_catalog_core`) queries native backend APIs first
-  and falls back to `:gen_statem.call` session info extraction. The `session`
-  argument is always a pid pointing to a live session process.
+  This module delegates every call to `:beam_agent_catalog`. Session catalog
+  queries go through `:beam_agent_catalog_core` (native backend APIs with
+  `:gen_statem.call` fallback). Global registry operations go through
+  `:beam_agent_registry` (unified ETS store).
 
   See also: `BeamAgent.Runtime`, `BeamAgent.Control`, `BeamAgent`.
   """
@@ -187,6 +201,207 @@ defmodule BeamAgent.Catalog do
   """
   @spec clear_default_agent(pid()) :: :ok
   defdelegate clear_default_agent(session), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # Global Registry — Agent Types
+  # -------------------------------------------------------------------
+
+  @doc """
+  Create the global registry ETS table. Idempotent.
+  """
+  @spec ensure_registry() :: :ok
+  defdelegate ensure_registry(), to: :beam_agent_catalog
+
+  @doc """
+  Register an agent type globally (shared across all sessions).
+
+  ## Parameters
+
+  - `id` -- unique binary identifier for the agent type.
+  - `opts` -- map of agent options (`:name`, `:description`, `:role`, `:enabled`, `:config`).
+  """
+  @spec register_agent(binary(), map()) :: :ok
+  defdelegate register_agent(id, opts), to: :beam_agent_catalog
+
+  @doc """
+  Unregister an agent type by id. Idempotent.
+  """
+  @spec unregister_agent(binary()) :: :ok
+  defdelegate unregister_agent(id), to: :beam_agent_catalog
+
+  @doc """
+  Fetch a single registered agent type by id.
+  """
+  @spec get_registered_agent(binary()) :: {:ok, map()} | {:error, :not_found}
+  defdelegate get_registered_agent(id), to: :beam_agent_catalog
+
+  @doc """
+  List all globally registered agent types.
+  """
+  @spec registered_agents() :: [map()]
+  defdelegate registered_agents(), to: :beam_agent_catalog
+
+  @doc """
+  Remove all globally registered agent types.
+  """
+  @spec clear_registered_agents() :: :ok
+  defdelegate clear_registered_agents(), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # Global Registry — Plugins
+  # -------------------------------------------------------------------
+
+  @doc """
+  Register a plugin globally (shared across all sessions).
+
+  ## Parameters
+
+  - `id` -- unique binary identifier for the plugin.
+  - `opts` -- map of plugin options (`:name`, `:description`, `:version`, `:enabled`, `:config`).
+  """
+  @spec register_plugin(binary(), map()) :: :ok
+  defdelegate register_plugin(id, opts), to: :beam_agent_catalog
+
+  @doc """
+  Unregister a plugin by id. Idempotent.
+  """
+  @spec unregister_plugin(binary()) :: :ok
+  defdelegate unregister_plugin(id), to: :beam_agent_catalog
+
+  @doc """
+  Fetch a single registered plugin by id.
+  """
+  @spec get_registered_plugin(binary()) :: {:ok, map()} | {:error, :not_found}
+  defdelegate get_registered_plugin(id), to: :beam_agent_catalog
+
+  @doc """
+  List all globally registered plugins.
+  """
+  @spec registered_plugins() :: [map()]
+  defdelegate registered_plugins(), to: :beam_agent_catalog
+
+  @doc """
+  Remove all globally registered plugins.
+  """
+  @spec clear_registered_plugins() :: :ok
+  defdelegate clear_registered_plugins(), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # Global Registry — Slash Commands
+  # -------------------------------------------------------------------
+
+  @doc """
+  Register a slash command globally (shared across all sessions).
+
+  ## Parameters
+
+  - `id` -- unique binary identifier for the command.
+  - `opts` -- map of command options (`:name`, `:description`, `:handler`, `:enabled`, `:config`).
+  """
+  @spec register_command(binary(), map()) :: :ok
+  defdelegate register_command(id, opts), to: :beam_agent_catalog
+
+  @doc """
+  Unregister a slash command by id. Idempotent.
+  """
+  @spec unregister_command(binary()) :: :ok
+  defdelegate unregister_command(id), to: :beam_agent_catalog
+
+  @doc """
+  Fetch a single registered slash command by id.
+  """
+  @spec get_registered_command(binary()) :: {:ok, map()} | {:error, :not_found}
+  defdelegate get_registered_command(id), to: :beam_agent_catalog
+
+  @doc """
+  List all globally registered slash commands.
+  """
+  @spec registered_commands() :: [map()]
+  defdelegate registered_commands(), to: :beam_agent_catalog
+
+  @doc """
+  Remove all globally registered slash commands.
+  """
+  @spec clear_registered_commands() :: :ok
+  defdelegate clear_registered_commands(), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # File Operations — per-session, native_or routing
+  # -------------------------------------------------------------------
+
+  @doc """
+  Search for text matching `pattern` in the session's working directory.
+  """
+  @spec find_text(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate find_text(session, pattern), to: :beam_agent_catalog
+
+  @doc """
+  Find files matching a pattern in the session's working directory.
+  """
+  @spec find_files(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate find_files(session, opts), to: :beam_agent_catalog
+
+  @doc """
+  Search for code symbols matching `query` in the session's project.
+  """
+  @spec find_symbols(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate find_symbols(session, query), to: :beam_agent_catalog
+
+  @doc """
+  List files and directories at the given path.
+  """
+  @spec file_list(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate file_list(session, path), to: :beam_agent_catalog
+
+  @doc """
+  Read the contents of a file at the given path.
+  """
+  @spec file_read(pid(), binary()) :: {:ok, binary()} | {:error, :enoent | term()}
+  defdelegate file_read(session, path), to: :beam_agent_catalog
+
+  @doc """
+  Get the version-control status of files in the session's project.
+  """
+  @spec file_status(pid()) :: {:ok, term()} | {:error, term()}
+  defdelegate file_status(session), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # Fuzzy Search — per-session, native_or routing
+  # -------------------------------------------------------------------
+
+  @doc """
+  Fuzzy-search for files by name in the session's project.
+  """
+  @spec fuzzy_search(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate fuzzy_search(session, query), to: :beam_agent_catalog
+
+  @doc """
+  Fuzzy-search for files by name with options.
+  """
+  @spec fuzzy_search(pid(), binary(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate fuzzy_search(session, query, opts), to: :beam_agent_catalog
+
+  @doc """
+  Start a stateful fuzzy file search session.
+  """
+  @spec search_session_start(pid(), binary(), [binary()]) :: {:ok, term()} | {:error, term()}
+  defdelegate search_session_start(session, search_session_id, roots), to: :beam_agent_catalog
+
+  @doc """
+  Update a search session with a new query string.
+  """
+  @spec search_session_update(pid(), binary(), binary()) :: {:ok, [map()]} | {:error, :not_found}
+  defdelegate search_session_update(session, search_session_id, query), to: :beam_agent_catalog
+
+  @doc """
+  Stop and clean up a fuzzy file search session.
+  """
+  @spec search_session_stop(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate search_session_stop(session, search_session_id), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
+  # Session Catalog — Static Listings
+  # -------------------------------------------------------------------
 
   @doc """
   Return the static list of CLI commands that the session's backend supports.

@@ -34,20 +34,20 @@ defmodule BeamAgent.Plugins do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_plugins` module. Zero business logic, zero state, zero
-  processes live here -- the Erlang module owns the implementation. The
-  underlying plugin data is stored in the unified ETS table managed by
-  `:beam_agent_registry`.
+  This module is a thin Elixir facade that delegates every call to the
+  `:beam_agent_catalog` Erlang module's global registry functions. Zero
+  business logic, zero state, zero processes live here -- the Erlang module
+  owns the implementation. The underlying plugin data is stored in the
+  unified ETS table managed by `:beam_agent_registry`.
 
-  See also: `BeamAgent`, `BeamAgent.Skills`, `BeamAgent.Agents`.
+  See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.Agents`.
   """
 
   @doc """
-  Create the global plugins ETS table. Idempotent.
+  Create the global registry ETS table. Idempotent.
   """
   @spec ensure_table() :: :ok
-  defdelegate ensure_table(), to: :beam_agent_plugins
+  defdelegate ensure_table(), to: :beam_agent_catalog, as: :ensure_registry
 
   @doc """
   Register a plugin globally (shared across all sessions).
@@ -58,29 +58,29 @@ defmodule BeamAgent.Plugins do
   - `opts` -- map of plugin options (`:name`, `:description`, `:version`, `:enabled`, `:config`).
   """
   @spec register(binary(), map()) :: :ok
-  defdelegate register(id, opts), to: :beam_agent_plugins
+  defdelegate register(id, opts), to: :beam_agent_catalog, as: :register_plugin
 
   @doc """
   Unregister a plugin by id. Idempotent.
   """
   @spec unregister(binary()) :: :ok
-  defdelegate unregister(id), to: :beam_agent_plugins
+  defdelegate unregister(id), to: :beam_agent_catalog, as: :unregister_plugin
 
   @doc """
   Fetch a single plugin by id.
   """
   @spec get(binary()) :: {:ok, map()} | {:error, :not_found}
-  defdelegate get(id), to: :beam_agent_plugins
+  defdelegate get(id), to: :beam_agent_catalog, as: :get_registered_plugin
 
   @doc """
   List all registered plugins.
   """
   @spec list() :: [map()]
-  defdelegate list(), to: :beam_agent_plugins
+  defdelegate list(), to: :beam_agent_catalog, as: :registered_plugins
 
   @doc """
   Remove all registered plugins.
   """
   @spec clear() :: :ok
-  defdelegate clear(), to: :beam_agent_plugins
+  defdelegate clear(), to: :beam_agent_catalog, as: :clear_registered_plugins
 end

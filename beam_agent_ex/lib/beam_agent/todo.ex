@@ -9,7 +9,7 @@ defmodule BeamAgent.Todo do
 
   ## When to use directly vs through `BeamAgent`
 
-  Use this module when you need to inspect task progress in a session — for
+  Use this module when you need to inspect task progress in a session -- for
   example, to display a task dashboard, poll for completion, or gate downstream
   actions on todo status.
 
@@ -38,8 +38,8 @@ defmodule BeamAgent.Todo do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that delegates to `:beam_agent_todo`. All
-  functions are pure — no ETS, no processes, no side effects.
+  This module is a thin Elixir facade that delegates to `:beam_agent_runtime`. All
+  functions are pure -- no ETS, no processes, no side effects.
   """
 
   @type todo_status :: :pending | :in_progress | :completed
@@ -63,7 +63,7 @@ defmodule BeamAgent.Todo do
   ```
   """
   @spec extract_todos([BeamAgent.message()]) :: [todo_item()]
-  defdelegate extract_todos(messages), to: :beam_agent_todo
+  defdelegate extract_todos(messages), to: :beam_agent_runtime
 
   @doc """
   Filter a todo list by status.
@@ -78,7 +78,7 @@ defmodule BeamAgent.Todo do
   ```
   """
   @spec filter_by_status([todo_item()], todo_status()) :: [todo_item()]
-  defdelegate filter_by_status(todos, status), to: :beam_agent_todo
+  defdelegate filter_by_status(todos, status), to: :beam_agent_runtime
 
   @doc """
   Summarize a todo list as a count map.
@@ -94,5 +94,5 @@ defmodule BeamAgent.Todo do
   ```
   """
   @spec todo_summary([todo_item()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
-  defdelegate todo_summary(todos), to: :beam_agent_todo
+  defdelegate todo_summary(todos), to: :beam_agent_runtime
 end

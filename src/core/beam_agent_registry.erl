@@ -48,10 +48,7 @@ ok = beam_agent_registry:clear().
 
 ## See Also
 
-  - `beam_agent_agents` — public facade for agent registration
-  - `beam_agent_plugins` — public facade for plugin registration
-  - `beam_agent_slash_commands` — public facade for slash command registration
-  - `beam_agent_catalog` — unified catalog query interface
+  - `beam_agent_catalog` — public API for both session catalog and global registry
 """.
 
 -export([

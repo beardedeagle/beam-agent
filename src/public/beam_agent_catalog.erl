@@ -1,19 +1,25 @@
 -module(beam_agent_catalog).
 -moduledoc """
-Catalog accessors for tools, skills, plugins, MCP servers, and agents.
+Catalog accessors and global registry for tools, skills, plugins, MCP
+servers, agents, and slash commands.
 
-This module provides a read-only view of the extensions available to a
-live session. It queries the session's backend for native catalog listings
-when available, and falls back to normalized metadata extracted from the
-session info map otherwise.
+This module serves two purposes:
 
-The catalog is always specific to a session (identified by pid). Different
-sessions may expose different catalogs depending on their backend, MCP
-server configuration, and installed extensions.
+1. **Session Catalog** — a read-only view of the extensions available to a
+   live session. It queries the session's backend for native catalog listings
+   when available, and falls back to normalized metadata extracted from the
+   session info map otherwise.
+
+2. **Global Registry** — CRUD operations for agent types, plugins, and slash
+   commands that are shared across all sessions. Mutations notify the reload
+   bus so live sessions react without restart. The underlying data is stored
+   in a unified ETS table managed by `beam_agent_registry`.
 
 ## Getting Started
 
 ```erlang
+%% --- Session Catalog ---
+
 %% List all available tools for a session
 {ok, Tools} = beam_agent_catalog:list_tools(Session),
 
@@ -25,6 +31,20 @@ server configuration, and installed extensions.
 
 %% Override the default agent for future queries
 ok = beam_agent_catalog:set_default_agent(Session, <<"claude-sonnet-4-6">>).
+
+%% --- Global Registry ---
+
+%% Register a global agent type
+ok = beam_agent_catalog:register_agent(<<"code-reviewer">>, #{
+    name => <<"Code Reviewer">>,
+    description => <<"Reviews code for quality">>
+}).
+
+%% List all registered plugins
+Plugins = beam_agent_catalog:registered_plugins().
+
+%% Unregister a slash command
+ok = beam_agent_catalog:unregister_command(<<"review">>).
 ```
 
 ## Key Concepts
@@ -38,69 +58,45 @@ ok = beam_agent_catalog:set_default_agent(Session, <<"claude-sonnet-4-6">>).
     When native listings are unavailable, the catalog falls back to metadata
     extracted from the session info's system_info map.
 
-  - Default Agent: The one mutable operation in the catalog -- setting the
-    default agent. This is supported because agent selection is already part
-    of the unified query option shape and can be merged into future requests
-    without backend-specific logic.
+  - Default Agent: Setting the default agent for a session. This is
+    supported because agent selection is already part of the unified query
+    option shape and can be merged into future requests without
+    backend-specific logic.
+
+  - Global Registry: Agent types, plugins, and slash commands registered
+    globally via `register_agent/2`, `register_plugin/2`, and
+    `register_command/2`. These are stored in `beam_agent_registry` with
+    composite keys `{Kind, Id}` and are shared across all sessions.
 
 ## Architecture
 
 ```
 beam_agent_catalog (public API)
         |
-        v
-beam_agent_catalog_core (native listing, fallback metadata, entry lookup)
+        +--- Session Catalog ---+
+        |                       |
+        v                       v
+beam_agent_catalog_core     beam_agent_registry
+  (native listing,            (global ETS store,
+   fallback metadata,          agent/plugin/slash
+   entry lookup)               registration)
         |
         +-- beam_agent_raw_core (native backend calls)
         +-- beam_agent_runtime_core (agent state)
         +-- gen_statem:call (session_info fallback)
 ```
 
-## Core concepts
-
-The catalog is the directory of everything a session can use: tools
-(functions the agent can call), skills (higher-level capabilities),
-plugins (extensions), MCP servers (tool providers), and agents
-(AI model identities).
-
-Use list_tools/1 to see all available tools, get_tool/2 to look up a
-specific one by name or ID. The catalog is populated automatically when
-a session starts -- the backend tells the SDK what is available, and
-the catalog stores it for easy lookup.
-
-Each session has its own catalog. Different sessions may have different
-tools available depending on their backend and MCP server configuration.
-
-## Architecture deep dive
-
-Catalog data is stored in ETS tables managed by beam_agent_catalog_core.
-The tables are populated during session init and updated in handle_data
-as the backend reports new tool registrations or changes.
-
-Native catalog queries go through beam_agent_raw_core:call/3 first. If
-the backend does not support native listing, the fallback extracts
-metadata from the session info system_info map. Registration order is
-preserved in the ETS tables.
-
-The default agent is the sole mutable operation -- it updates
-beam_agent_runtime_core state and merges into future query options.
-
 ## See Also
 
-  - `beam_agent` -- Main SDK entry point
-  - `beam_agent_runtime` -- Provider and agent state management
-  - `beam_agent_control` -- Session configuration and permissions
-  - `beam_agent_catalog_core` -- Core implementation (internal)
-
-## Backend Integration
-
-The catalog stores tool, skill, plugin, and agent definitions in ETS tables
-managed by the session engine. Backend handlers populate the catalog during
-init and handle_data. See docs/guides/backend_integration_guide.md for how
-catalog population works.
+  - `beam_agent` — Main SDK entry point
+  - `beam_agent_runtime` — Provider and agent state management
+  - `beam_agent_control` — Session configuration and permissions
+  - `beam_agent_catalog_core` — Session catalog implementation (internal)
+  - `beam_agent_registry` — Unified global registry (internal)
 """.
 
 -export([
+    %% Session Catalog — per-session queries
     supported_commands/1,
     supported_models/1,
     supported_agents/1,
@@ -118,7 +114,39 @@ catalog population works.
     get_agent/2,
     current_agent/1,
     set_default_agent/2,
-    clear_default_agent/1
+    clear_default_agent/1,
+    %% Global Registry — agent types
+    ensure_registry/0,
+    register_agent/2,
+    unregister_agent/1,
+    get_registered_agent/1,
+    registered_agents/0,
+    clear_registered_agents/0,
+    %% Global Registry — plugins
+    register_plugin/2,
+    unregister_plugin/1,
+    get_registered_plugin/1,
+    registered_plugins/0,
+    clear_registered_plugins/0,
+    %% Global Registry — slash commands
+    register_command/2,
+    unregister_command/1,
+    get_registered_command/1,
+    registered_commands/0,
+    clear_registered_commands/0,
+    %% File Operations — per-session, native_or routing
+    find_text/2,
+    find_files/2,
+    find_symbols/2,
+    file_list/2,
+    file_read/2,
+    file_status/1,
+    %% Fuzzy Search — per-session, native_or routing
+    fuzzy_search/2,
+    fuzzy_search/3,
+    search_session_start/3,
+    search_session_update/3,
+    search_session_stop/2
 ]).
 
 %%--------------------------------------------------------------------
@@ -382,3 +410,247 @@ selects by default or infers from session metadata.
 """.
 -spec clear_default_agent(pid()) -> ok.
 clear_default_agent(Session) -> beam_agent_catalog_core:clear_default_agent(Session).
+
+%%--------------------------------------------------------------------
+%% Global Registry
+%%--------------------------------------------------------------------
+
+-doc "Create the global registry ETS table. Idempotent.".
+-spec ensure_registry() -> ok.
+ensure_registry() -> beam_agent_registry:ensure_table().
+
+%%--------------------------------------------------------------------
+%% Global Registry — Agent Types
+%%--------------------------------------------------------------------
+
+-doc """
+Register an agent type globally (shared across all sessions).
+
+The `Id` becomes the `id` field in the stored definition. If an entry
+with the same id already exists, it is overwritten. `Opts` may include
+any optional fields from `beam_agent_registry:registry_entry()` except
+`id` and `kind`, which are set automatically.
+
+Emits `{beam_agent_reload, agents, Version}` via the reload bus.
+""".
+-spec register_agent(binary(), map()) -> ok.
+register_agent(Id, Opts) -> beam_agent_registry:register(agent, Id, Opts).
+
+-doc """
+Unregister an agent type by id. Idempotent.
+
+Emits `{beam_agent_reload, agents, Version}` via the reload bus.
+""".
+-spec unregister_agent(binary()) -> ok.
+unregister_agent(Id) -> beam_agent_registry:unregister(agent, Id).
+
+-doc "Fetch a single registered agent type by id.".
+-spec get_registered_agent(binary()) ->
+    {ok, beam_agent_registry:agent_def()} | {error, not_found}.
+get_registered_agent(Id) -> beam_agent_registry:get(agent, Id).
+
+-doc "List all globally registered agent types.".
+-spec registered_agents() -> [beam_agent_registry:agent_def()].
+registered_agents() -> beam_agent_registry:list(agent).
+
+-doc """
+Remove all globally registered agent types.
+
+Emits `{beam_agent_reload, agents, Version}` via the reload bus.
+""".
+-spec clear_registered_agents() -> ok.
+clear_registered_agents() -> beam_agent_registry:clear(agent).
+
+%%--------------------------------------------------------------------
+%% Global Registry — Plugins
+%%--------------------------------------------------------------------
+
+-doc """
+Register a plugin globally (shared across all sessions).
+
+The `Id` becomes the `id` field in the stored definition. If an entry
+with the same id already exists, it is overwritten. `Opts` may include
+any optional fields from `beam_agent_registry:registry_entry()` except
+`id` and `kind`, which are set automatically.
+
+Emits `{beam_agent_reload, plugins, Version}` via the reload bus.
+""".
+-spec register_plugin(binary(), map()) -> ok.
+register_plugin(Id, Opts) -> beam_agent_registry:register(plugin, Id, Opts).
+
+-doc """
+Unregister a plugin by id. Idempotent.
+
+Emits `{beam_agent_reload, plugins, Version}` via the reload bus.
+""".
+-spec unregister_plugin(binary()) -> ok.
+unregister_plugin(Id) -> beam_agent_registry:unregister(plugin, Id).
+
+-doc "Fetch a single registered plugin by id.".
+-spec get_registered_plugin(binary()) ->
+    {ok, beam_agent_registry:plugin_def()} | {error, not_found}.
+get_registered_plugin(Id) -> beam_agent_registry:get(plugin, Id).
+
+-doc "List all globally registered plugins.".
+-spec registered_plugins() -> [beam_agent_registry:plugin_def()].
+registered_plugins() -> beam_agent_registry:list(plugin).
+
+-doc """
+Remove all globally registered plugins.
+
+Emits `{beam_agent_reload, plugins, Version}` via the reload bus.
+""".
+-spec clear_registered_plugins() -> ok.
+clear_registered_plugins() -> beam_agent_registry:clear(plugin).
+
+%%--------------------------------------------------------------------
+%% Global Registry — Slash Commands
+%%--------------------------------------------------------------------
+
+-doc """
+Register a slash command globally (shared across all sessions).
+
+The `Id` becomes the `id` field in the stored definition. If an entry
+with the same id already exists, it is overwritten. `Opts` may include
+any optional fields from `beam_agent_registry:registry_entry()` except
+`id` and `kind`, which are set automatically.
+
+Emits `{beam_agent_reload, commands, Version}` via the reload bus.
+""".
+-spec register_command(binary(), map()) -> ok.
+register_command(Id, Opts) -> beam_agent_registry:register(slash, Id, Opts).
+
+-doc """
+Unregister a slash command by id. Idempotent.
+
+Emits `{beam_agent_reload, commands, Version}` via the reload bus.
+""".
+-spec unregister_command(binary()) -> ok.
+unregister_command(Id) -> beam_agent_registry:unregister(slash, Id).
+
+-doc "Fetch a single registered slash command by id.".
+-spec get_registered_command(binary()) ->
+    {ok, beam_agent_registry:command_def()} | {error, not_found}.
+get_registered_command(Id) -> beam_agent_registry:get(slash, Id).
+
+-doc "List all globally registered slash commands.".
+-spec registered_commands() -> [beam_agent_registry:command_def()].
+registered_commands() -> beam_agent_registry:list(slash).
+
+-doc """
+Remove all globally registered slash commands.
+
+Emits `{beam_agent_reload, commands, Version}` via the reload bus.
+""".
+-spec clear_registered_commands() -> ok.
+clear_registered_commands() -> beam_agent_registry:clear(slash).
+
+%%--------------------------------------------------------------------
+%% File Operations
+%%--------------------------------------------------------------------
+
+-doc "Search for text matching Pattern in the session's working directory.".
+-spec find_text(pid(), binary()) -> {ok, term()} | {error, term()}.
+find_text(Session, Pattern) ->
+    beam_agent_core:native_or(Session, find_text, [Pattern], fun() ->
+        beam_agent_file_core:find_text(Pattern, session_file_opts(Session))
+    end).
+
+-doc "Find files matching a pattern in the session's working directory.".
+-spec find_files(pid(), map()) -> {ok, term()} | {error, term()}.
+find_files(Session, Opts) ->
+    beam_agent_core:native_or(Session, find_files, [Opts], fun() ->
+        beam_agent_file_core:find_files(maps:merge(session_file_opts(Session), Opts))
+    end).
+
+-doc "Search for code symbols matching Query in the session's project.".
+-spec find_symbols(pid(), binary()) -> {ok, term()} | {error, term()}.
+find_symbols(Session, Query) ->
+    beam_agent_core:native_or(Session, find_symbols, [Query], fun() ->
+        beam_agent_file_core:find_symbols(Query, session_file_opts(Session))
+    end).
+
+-doc "List files and directories at the given Path.".
+-spec file_list(pid(), binary()) -> {ok, term()} | {error, term()}.
+file_list(Session, Path) ->
+    beam_agent_core:native_or(Session, file_list, [Path], fun() ->
+        beam_agent_file_core:file_list(Path)
+    end).
+
+-doc "Read the contents of a file at the given Path.".
+-spec file_read(pid(), binary()) -> {ok, term()} | {error, term()}.
+file_read(Session, Path) ->
+    beam_agent_core:native_or(Session, file_read, [Path], fun() ->
+        beam_agent_file_core:file_read(Path)
+    end).
+
+-doc "Get the version-control status of files in the session's project.".
+-spec file_status(pid()) -> {ok, term()} | {error, term()}.
+file_status(Session) ->
+    beam_agent_core:native_or(Session, file_status, [], fun() ->
+        beam_agent_file_core:file_status(session_file_opts(Session))
+    end).
+
+%%--------------------------------------------------------------------
+%% Fuzzy Search
+%%--------------------------------------------------------------------
+
+-doc "Fuzzy-search for files by name in the session's project.".
+-spec fuzzy_search(pid(), binary()) -> {ok, term()} | {error, term()}.
+fuzzy_search(Session, Query) ->
+    fuzzy_search(Session, Query, #{}).
+
+-doc "Fuzzy-search for files by name with options.".
+-spec fuzzy_search(pid(), binary(), map()) -> {ok, term()} | {error, term()}.
+fuzzy_search(Session, Query, Opts) ->
+    beam_agent_core:native_or(Session, fuzzy_file_search, [Query, Opts], fun() ->
+        beam_agent_search_core:fuzzy_file_search(Query, Opts)
+    end).
+
+-doc "Start a stateful fuzzy file search session.".
+-spec search_session_start(pid(), binary(), [term()]) -> {ok, term()} | {error, term()}.
+search_session_start(Session, SearchSessionId, Roots) ->
+    beam_agent_core:native_or(Session, fuzzy_file_search_session_start,
+              [SearchSessionId, Roots], fun() ->
+        beam_agent_search_core:session_start(Session, SearchSessionId, Roots)
+    end).
+
+-doc "Update a search session with a new query string.".
+-spec search_session_update(pid(), binary(), binary()) -> {ok, term()} | {error, term()}.
+search_session_update(Session, SearchSessionId, Query) ->
+    beam_agent_core:native_or(Session, fuzzy_file_search_session_update,
+              [SearchSessionId, Query], fun() ->
+        beam_agent_search_core:session_update(Session, SearchSessionId, Query)
+    end).
+
+-doc "Stop and clean up a fuzzy file search session.".
+-spec search_session_stop(pid(), binary()) -> {ok, term()} | {error, term()}.
+search_session_stop(Session, SearchSessionId) ->
+    beam_agent_core:native_or(Session, fuzzy_file_search_session_stop,
+              [SearchSessionId], fun() ->
+        beam_agent_search_core:session_stop(Session, SearchSessionId),
+        {ok, beam_agent_core:with_universal_source(Session, #{
+            status => stopped,
+            search_session_id => SearchSessionId})}
+    end).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
+
+-spec session_file_opts(pid()) -> beam_agent_file_core:search_opts().
+session_file_opts(Session) ->
+    case beam_agent_core:session_info(Session) of
+        {ok, Info} ->
+            Cwd = maps:get(cwd, Info,
+                    maps:get(working_directory, Info,
+                    maps:get(project_path, Info, undefined))),
+            case Cwd of
+                CwdBin when is_binary(CwdBin), byte_size(CwdBin) > 0 ->
+                    #{cwd => CwdBin};
+                _ ->
+                    #{}
+            end;
+        {error, _} ->
+            #{}
+    end.

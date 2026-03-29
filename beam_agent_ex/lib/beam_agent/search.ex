@@ -30,13 +30,13 @@ defmodule BeamAgent.Search do
 
   ## Architecture deep dive
 
-  This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_search` module. Zero business logic, zero state, zero
-  processes live here -- the Erlang module owns the implementation. The
-  underlying search data is stored in ETS tables managed by
+  This module is a thin Elixir facade that delegates every call to the
+  `:beam_agent_catalog` Erlang module's fuzzy search operations. Zero business
+  logic, zero state, zero processes live here -- the Erlang module owns the
+  implementation with `native_or` routing and universal fallbacks via
   `:beam_agent_search_core`.
 
-  See also: `BeamAgent`, `BeamAgent.File`.
+  See also: `BeamAgent`, `BeamAgent.Catalog`, `BeamAgent.File`.
   """
 
   @doc """
@@ -55,7 +55,7 @@ defmodule BeamAgent.Search do
   - `{:ok, matches}` sorted by score descending.
   """
   @spec fuzzy(pid(), binary()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate fuzzy(session, query), to: :beam_agent_search
+  defdelegate fuzzy(session, query), to: :beam_agent_catalog, as: :fuzzy_search
 
   @doc """
   Fuzzy-search for files by name with options.
@@ -78,7 +78,7 @@ defmodule BeamAgent.Search do
   - `{:ok, matches}` or `{:error, reason}`.
   """
   @spec fuzzy(pid(), binary(), map()) :: {:ok, [map()]} | {:error, term()}
-  defdelegate fuzzy(session, query, opts), to: :beam_agent_search
+  defdelegate fuzzy(session, query, opts), to: :beam_agent_catalog, as: :fuzzy_search
 
   @doc """
   Start a stateful fuzzy file search session.
@@ -100,7 +100,8 @@ defmodule BeamAgent.Search do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec session_start(pid(), binary(), [binary()]) :: {:ok, term()} | {:error, term()}
-  defdelegate session_start(session, search_session_id, roots), to: :beam_agent_search
+  defdelegate session_start(session, search_session_id, roots),
+    to: :beam_agent_catalog, as: :search_session_start
 
   @doc """
   Update a search session with a new query string.
@@ -119,7 +120,8 @@ defmodule BeamAgent.Search do
   - `{:ok, matches}` or `{:error, :not_found}`.
   """
   @spec session_update(pid(), binary(), binary()) :: {:ok, [map()]} | {:error, :not_found}
-  defdelegate session_update(session, search_session_id, query), to: :beam_agent_search
+  defdelegate session_update(session, search_session_id, query),
+    to: :beam_agent_catalog, as: :search_session_update
 
   @doc """
   Stop and clean up a fuzzy file search session.
@@ -138,5 +140,6 @@ defmodule BeamAgent.Search do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec session_stop(pid(), binary()) :: {:ok, term()} | {:error, term()}
-  defdelegate session_stop(session, search_session_id), to: :beam_agent_search
+  defdelegate session_stop(session, search_session_id),
+    to: :beam_agent_catalog, as: :search_session_stop
 end

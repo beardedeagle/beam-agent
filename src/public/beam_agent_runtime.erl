@@ -135,8 +135,39 @@ level deep. The built-in provider catalog is compiled-in static data.
     get_last_session_id/1,
     windows_sandbox_setup_start/2,
     set_max_thinking_tokens/2,
-    stop_task/2
+    stop_task/2,
+    %% Account Management — per-session, native_or routing
+    account_login/2,
+    account_cancel/2,
+    account_logout/1,
+    account_rate_limits/1,
+    account_info/1,
+    %% App/Project Management — per-session, native_or routing
+    apps_list/1,
+    apps_list/2,
+    app_info/1,
+    app_init/1,
+    app_log/2,
+    app_modes/1,
+    %% Todo Tracking — pure functions
+    extract_todos/1,
+    filter_by_status/2,
+    todo_summary/1
 ]).
+
+-export_type([todo_item/0, todo_status/0]).
+
+%%--------------------------------------------------------------------
+%% Todo Types
+%%--------------------------------------------------------------------
+
+-type todo_status() :: pending | in_progress | completed.
+
+-type todo_item() :: #{
+    content := binary(),
+    status := todo_status(),
+    active_form => binary()
+}.
 
 %%--------------------------------------------------------------------
 %% Table Lifecycle
@@ -596,6 +627,121 @@ stop_task(Session, TaskId) ->
     end).
 
 %%--------------------------------------------------------------------
+%% Account Management
+%%--------------------------------------------------------------------
+
+-doc "Initiate an account login flow.".
+-spec account_login(pid(), map()) -> {ok, term()} | {error, term()}.
+account_login(Session, Params) ->
+    beam_agent_core:native_or(Session, account_login, [Params], fun() ->
+        beam_agent_account_core:account_login(Session, Params)
+    end).
+
+-doc "Cancel an in-progress account login flow.".
+-spec account_cancel(pid(), map()) -> {ok, term()} | {error, term()}.
+account_cancel(Session, Params) ->
+    beam_agent_core:native_or(Session, account_login_cancel, [Params], fun() ->
+        beam_agent_account_core:account_login_cancel(Session, Params)
+    end).
+
+-doc "Log out of the current account.".
+-spec account_logout(pid()) -> {ok, term()} | {error, term()}.
+account_logout(Session) ->
+    beam_agent_core:native_or(Session, account_logout, [], fun() ->
+        beam_agent_account_core:account_logout(Session)
+    end).
+
+-doc "Get rate limit information for the current account.".
+-spec account_rate_limits(pid()) -> {ok, term()} | {error, term()}.
+account_rate_limits(Session) ->
+    beam_agent_core:native_or(Session, account_rate_limits, [], fun() ->
+        account_info(Session)
+    end).
+
+-doc "Return account and authentication information for the session.".
+-spec account_info(pid()) -> {ok, map()} | {error, term()}.
+account_info(Session) ->
+    beam_agent_core:native_or(Session, account_info, [], fun() ->
+        beam_agent_core:account_info(Session)
+    end).
+
+%%--------------------------------------------------------------------
+%% App/Project Management
+%%--------------------------------------------------------------------
+
+-doc "List apps and projects registered for a session.".
+-spec apps_list(pid()) -> {ok, term()} | {error, term()}.
+apps_list(Session) ->
+    beam_agent_core:native_or(Session, apps_list, [], fun() ->
+        beam_agent_app_core:apps_list(Session)
+    end).
+
+-doc "List apps and projects with optional filter criteria.".
+-spec apps_list(pid(), map()) -> {ok, term()} | {error, term()}.
+apps_list(Session, Opts) ->
+    beam_agent_core:native_or(Session, apps_list, [Opts], fun() ->
+        beam_agent_app_core:apps_list(Session, Opts)
+    end).
+
+-doc "Return information about the current app or project context.".
+-spec app_info(pid()) -> {ok, term()} | {error, term()}.
+app_info(Session) ->
+    beam_agent_core:native_or(Session, app_info, [], fun() ->
+        beam_agent_app_core:app_info(Session)
+    end).
+
+-doc "Initialize the app and project context for a session.".
+-spec app_init(pid()) -> {ok, term()} | {error, term()}.
+app_init(Session) ->
+    beam_agent_core:native_or(Session, app_init, [], fun() ->
+        beam_agent_app_core:app_init(Session)
+    end).
+
+-doc "Append a log entry to the session's app log.".
+-spec app_log(pid(), map()) -> {ok, term()} | {error, term()}.
+app_log(Session, Body) ->
+    beam_agent_core:native_or(Session, app_log, [Body], fun() ->
+        _ = beam_agent_app_core:app_log(Session, Body),
+        {ok, beam_agent_core:with_universal_source(Session, #{status => logged})}
+    end).
+
+-doc "List available app modes for a session.".
+-spec app_modes(pid()) -> {ok, term()} | {error, term()}.
+app_modes(Session) ->
+    beam_agent_core:native_or(Session, app_modes, [], fun() ->
+        beam_agent_app_core:app_modes(Session)
+    end).
+
+%%--------------------------------------------------------------------
+%% Todo Tracking
+%%--------------------------------------------------------------------
+
+-doc """
+Extract all `TodoWrite` tool use blocks from a list of messages.
+Scans assistant messages for `tool_use` content blocks where the
+tool name is `TodoWrite`. Returns a flat list of todo items.
+""".
+-spec extract_todos([beam_agent_core:message()]) -> [todo_item()].
+extract_todos(Messages) when is_list(Messages) ->
+    lists:flatmap(fun extract_from_message/1, Messages).
+
+-doc "Filter todo items by status.".
+-spec filter_by_status([todo_item()], todo_status()) -> [todo_item()].
+filter_by_status(Todos, Status) ->
+    [T || #{status := S} = T <- Todos, S =:= Status].
+
+-doc """
+Return a summary map of todo counts by status.
+Example: `#{pending => 2, in_progress => 1, completed => 3, total => 6}`
+""".
+-spec todo_summary([todo_item()]) -> #{atom() => non_neg_integer()}.
+todo_summary(Todos) ->
+    Counts = lists:foldl(fun(#{status := S}, Acc) ->
+        maps:update_with(S, fun(N) -> N + 1 end, 1, Acc)
+    end, #{}, Todos),
+    Counts#{total => length(Todos)}.
+
+%%--------------------------------------------------------------------
 %% Private Helpers
 %%--------------------------------------------------------------------
 
@@ -616,3 +762,35 @@ universal_get_status(Session) ->
 universal_get_auth_status(Session) ->
     {ok, Status} = beam_agent_runtime_core:provider_status(Session),
     {ok, beam_agent_core:with_universal_source(Session, Status)}.
+
+%%--------------------------------------------------------------------
+%% Todo Internals
+%%--------------------------------------------------------------------
+
+-spec extract_from_message(beam_agent_core:message()) -> [todo_item()].
+extract_from_message(#{type := assistant, content_blocks := Blocks})
+  when is_list(Blocks) ->
+    lists:filtermap(fun parse_todo_block/1, Blocks);
+extract_from_message(_) ->
+    [].
+
+-spec parse_todo_block(beam_agent_content_core:content_block()) ->
+    {true, todo_item()} | false.
+parse_todo_block(#{type := tool_use, name := <<"TodoWrite">>,
+                   input := Input}) when is_map(Input) ->
+    Content = maps:get(<<"content">>, Input,
+                  maps:get(<<"subject">>, Input, <<>>)),
+    Status = parse_todo_status(maps:get(<<"status">>, Input, <<"pending">>)),
+    Item = #{content => Content, status => Status},
+    Item2 = case maps:get(<<"activeForm">>, Input, undefined) of
+        undefined -> Item;
+        AF -> Item#{active_form => AF}
+    end,
+    {true, Item2};
+parse_todo_block(_) ->
+    false.
+
+-spec parse_todo_status(binary()) -> todo_status().
+parse_todo_status(<<"in_progress">>) -> in_progress;
+parse_todo_status(<<"completed">>)   -> completed;
+parse_todo_status(_)                 -> pending.

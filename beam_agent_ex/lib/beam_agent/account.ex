@@ -33,7 +33,7 @@ defmodule BeamAgent.Account do
   ## Architecture deep dive
 
   This module is a thin Elixir facade that `defdelegate`s every call to the
-  Erlang `:beam_agent_account` module. Zero business logic, zero state, zero
+  Erlang `:beam_agent_runtime` module. Zero business logic, zero state, zero
   processes live here -- the Erlang module owns the implementation. The
   underlying account data is stored in ETS tables managed by
   `:beam_agent_account_core`.
@@ -67,7 +67,7 @@ defmodule BeamAgent.Account do
       IO.puts("Plan: \#{info.plan}, Email: \#{info.email}")
   """
   @spec info(pid()) :: {:ok, map()} | {:error, term()}
-  defdelegate info(session), to: :beam_agent_account
+  defdelegate info(session), to: :beam_agent_runtime, as: :account_info
 
   @doc """
   Initiate an account login flow.
@@ -86,7 +86,7 @@ defmodule BeamAgent.Account do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec login(pid(), map()) :: {:ok, term()} | {:error, term()}
-  defdelegate login(session, opts), to: :beam_agent_account
+  defdelegate login(session, opts), to: :beam_agent_runtime, as: :account_login
 
   @doc """
   Cancel an in-progress account login flow.
@@ -104,7 +104,7 @@ defmodule BeamAgent.Account do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec cancel(pid(), map()) :: {:ok, term()} | {:error, term()}
-  defdelegate cancel(session, opts), to: :beam_agent_account
+  defdelegate cancel(session, opts), to: :beam_agent_runtime, as: :account_cancel
 
   @doc """
   Log out of the current account.
@@ -118,7 +118,7 @@ defmodule BeamAgent.Account do
   - `{:ok, result}` or `{:error, reason}`.
   """
   @spec logout(pid()) :: {:ok, term()} | {:error, term()}
-  defdelegate logout(session), to: :beam_agent_account
+  defdelegate logout(session), to: :beam_agent_runtime, as: :account_logout
 
   @doc """
   Get rate limit information for the current account.
@@ -135,5 +135,5 @@ defmodule BeamAgent.Account do
   - `{:ok, rate_limit_info}` or `{:error, reason}`.
   """
   @spec rate_limits(pid()) :: {:ok, term()} | {:error, term()}
-  defdelegate rate_limits(session), to: :beam_agent_account
+  defdelegate rate_limits(session), to: :beam_agent_runtime, as: :account_rate_limits
 end

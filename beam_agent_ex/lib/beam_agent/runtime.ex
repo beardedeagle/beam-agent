@@ -427,4 +427,223 @@ defmodule BeamAgent.Runtime do
   """
   @spec stop_task(pid(), binary()) :: {:ok, term()} | {:error, term()}
   defdelegate stop_task(session, task_id), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Account operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Retrieve account and authentication information for the session's backend.
+
+  Returns details about the authenticated user including identity,
+  subscription plan, usage quotas, and the authentication method in use.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, info_map}` or `{:error, reason}`.
+  """
+  @spec account_info(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_info(session), to: :beam_agent_runtime
+
+  @doc """
+  Initiate an account login flow.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- credentials/OAuth parameters map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_login(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate account_login(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Cancel an in-progress account login flow.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- should match the original login parameters.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_cancel(pid(), map()) :: {:ok, term()} | {:error, term()}
+  defdelegate account_cancel(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Log out of the current account.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec account_logout(pid()) :: {:ok, term()} | {:error, term()}
+  defdelegate account_logout(session), to: :beam_agent_runtime
+
+  @doc """
+  Get rate limit information for the current account.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, rate_limit_info}` or `{:error, reason}`.
+  """
+  @spec account_rate_limits(pid()) :: {:ok, term()} | {:error, term()}
+  defdelegate account_rate_limits(session), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # App/project operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  List apps and projects registered for the session.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, apps}` or `{:error, reason}`.
+  """
+  @spec apps_list(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate apps_list(session), to: :beam_agent_runtime
+
+  @doc """
+  List apps and projects for the session with filter options.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `opts` -- filter options map.
+
+  ## Returns
+
+  - `{:ok, apps}` or `{:error, reason}`.
+  """
+  @spec apps_list(pid(), map()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate apps_list(session, opts), to: :beam_agent_runtime
+
+  @doc """
+  Get information about the current app or project context.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, app_info}` or `{:error, reason}`.
+  """
+  @spec app_info(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate app_info(session), to: :beam_agent_runtime
+
+  @doc """
+  Initialize the app/project context by scanning the working directory.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, result_map}` or `{:error, reason}`.
+  """
+  @spec app_init(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate app_init(session), to: :beam_agent_runtime
+
+  @doc """
+  Append a log entry to the session's app log.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+  - `body` -- log entry map.
+
+  ## Returns
+
+  - `{:ok, result}` or `{:error, reason}`.
+  """
+  @spec app_log(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate app_log(session, body), to: :beam_agent_runtime
+
+  @doc """
+  List available app modes for the session.
+
+  ## Parameters
+
+  - `session` -- pid of a running session.
+
+  ## Returns
+
+  - `{:ok, modes}` or `{:error, reason}`.
+  """
+  @spec app_modes(pid()) :: {:ok, [map()]} | {:error, term()}
+  defdelegate app_modes(session), to: :beam_agent_runtime
+
+  # ---------------------------------------------------------------------------
+  # Todo operations
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Extract all todo items from a flat list of messages.
+
+  Scans the message list for messages that carry todo arrays and returns
+  all todo items in order. Pure function -- no ETS, no side effects.
+
+  ## Parameters
+
+  - `messages` -- list of session messages.
+
+  ## Returns
+
+  A list of todo item maps.
+  """
+  @spec extract_todos([BeamAgent.message()]) :: [map()]
+  defdelegate extract_todos(messages), to: :beam_agent_runtime
+
+  @doc """
+  Filter a todo list by status.
+
+  ## Parameters
+
+  - `todos` -- list of todo item maps.
+  - `status` -- atom (`:pending`, `:in_progress`, or `:completed`).
+
+  ## Returns
+
+  Filtered list of todo items.
+  """
+  @spec filter_by_status([map()], atom()) :: [map()]
+  defdelegate filter_by_status(todos, status), to: :beam_agent_runtime
+
+  @doc """
+  Summarize a todo list as a count map.
+
+  ## Parameters
+
+  - `todos` -- list of todo item maps.
+
+  ## Returns
+
+  A map with `:total` and one key per distinct status.
+  """
+  @spec todo_summary([map()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
+  defdelegate todo_summary(todos), to: :beam_agent_runtime
 end
