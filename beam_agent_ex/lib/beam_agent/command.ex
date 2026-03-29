@@ -142,7 +142,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_init(pid(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec session_init(pid(), map()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate session_init(session, opts), to: :beam_agent_command
 
   @doc """
@@ -235,7 +236,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec shell_command(pid() | binary(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec shell_command(pid() | binary(), binary()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate shell_command(session, command), to: :beam_agent_command
 
   @doc """
@@ -253,7 +255,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec shell_command(pid() | binary(), binary(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec shell_command(pid() | binary(), binary(), map()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate shell_command(session, command, opts), to: :beam_agent_command
 
   @doc """
@@ -271,7 +274,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec tui_append_prompt(pid(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec tui_append_prompt(pid(), binary()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate tui_append_prompt(session, text), to: :beam_agent_command
 
   @doc """
@@ -288,7 +292,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec tui_open_help(pid()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec tui_open_help(pid()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate tui_open_help(session), to: :beam_agent_command
 
   @doc """
@@ -388,7 +393,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_write_stdin(pid(), binary(), binary()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec command_write_stdin(pid(), binary(), binary()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate command_write_stdin(session, process_id, stdin), to: :beam_agent_command
 
   @doc """
@@ -405,7 +411,8 @@ defmodule BeamAgent.Command do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec command_write_stdin(pid(), binary(), binary(), map()) :: {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
+  @spec command_write_stdin(pid(), binary(), binary(), map()) ::
+          {:ok, %{:source => :universal, optional(atom()) => any()}} | {:error, term()}
   defdelegate command_write_stdin(session, process_id, stdin, opts), to: :beam_agent_command
 
   @doc """

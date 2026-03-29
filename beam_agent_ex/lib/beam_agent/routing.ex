@@ -113,7 +113,8 @@ defmodule BeamAgent.Routing do
   @doc """
   Send a query and return the live query reference.
   """
-  @spec send_query(pid(), binary(), :beam_agent_core.query_opts(), timeout()) :: {:ok, reference()} | {:error, any()}
+  @spec send_query(pid(), binary(), :beam_agent_core.query_opts(), timeout()) ::
+          {:ok, reference()} | {:error, any()}
   defdelegate send_query(session, prompt, params, timeout), to: :beam_agent_routing
 
   @doc """
@@ -139,7 +140,8 @@ defmodule BeamAgent.Routing do
   Resolve the backend for a live session.
   """
   @spec backend(pid()) ::
-          {:ok, :beam_agent_backend.backend()} | {:error, :beam_agent_backend.backend_lookup_error()}
+          {:ok, :beam_agent_backend.backend()}
+          | {:error, :beam_agent_backend.backend_lookup_error()}
   defdelegate backend(session), to: :beam_agent_routing
 
   @doc """

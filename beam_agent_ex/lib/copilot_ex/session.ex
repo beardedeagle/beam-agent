@@ -68,7 +68,8 @@ defmodule CopilotEx.Session do
   @doc """
   Change the model at runtime during a session.
   """
-  @spec set_model(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
+  @spec set_model(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_model(session, model) do
     :copilot_session.set_model(session, model)
   end

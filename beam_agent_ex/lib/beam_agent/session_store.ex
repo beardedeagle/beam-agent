@@ -747,6 +747,7 @@ defmodule BeamAgent.SessionStore do
   meta.session_id  # => "sess_copy_001"
   ```
   """
-  @spec import_session(exported_session(), import_opts()) :: {:ok, session_meta()} | {:error, term()}
+  @spec import_session(exported_session(), import_opts()) ::
+          {:ok, session_meta()} | {:error, term()}
   defdelegate import_session(exported, opts), to: :beam_agent_session_store
 end

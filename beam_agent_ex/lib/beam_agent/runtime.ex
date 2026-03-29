@@ -356,7 +356,8 @@ defmodule BeamAgent.Runtime do
   - `{:ok, mode}` on success.
   - `{:error, reason}` on failure.
   """
-  @spec set_permission_mode(pid(), binary()) :: {:ok, binary() | map()} | {:error, :not_supported | term()}
+  @spec set_permission_mode(pid(), binary()) ::
+          {:ok, binary() | map()} | {:error, :not_supported | term()}
   defdelegate set_permission_mode(session, mode), to: :beam_agent_runtime
 
   @doc """

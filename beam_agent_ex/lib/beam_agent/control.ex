@@ -114,7 +114,11 @@ defmodule BeamAgent.Control do
   ```
   """
   @spec dispatch(binary(), binary(), map()) ::
-          {:ok, %{optional(:model) => atom() | binary() | map(), optional(:permission_mode) => atom() | binary()}}
+          {:ok,
+           %{
+             optional(:model) => atom() | binary() | map(),
+             optional(:permission_mode) => atom() | binary()
+           }}
           | {:error,
              :not_found
              | {:invalid_param, :max_thinking_tokens}
@@ -128,7 +132,8 @@ defmodule BeamAgent.Control do
   Returns `{:ok, value}` or `{:error, :not_set}` when the key has not been
   written.
   """
-  @spec get_config(binary(), atom()) :: {:ok, atom() | binary() | map() | pos_integer()} | {:error, :not_set}
+  @spec get_config(binary(), atom()) ::
+          {:ok, atom() | binary() | map() | pos_integer()} | {:error, :not_set}
   defdelegate get_config(session_id, key), to: :beam_agent_control
 
   @doc """
@@ -367,7 +372,10 @@ defmodule BeamAgent.Control do
            %{
              required(:backend) => any(),
              required(:event_count) => 1,
-             required(:input_summary) => %{required(:audio_chunks) => 0, required(:text_chunks) => 0},
+             required(:input_summary) => %{
+               required(:audio_chunks) => 0,
+               required(:text_chunks) => 0
+             },
              required(:inputs) => [],
              required(:mode) => any(),
              required(:output_events) => [map(), ...],
@@ -633,7 +641,8 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_audio(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_append_audio(pid() | binary(), binary(), map()) ::
+          {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_audio(session, thread_id, opts), to: :beam_agent_control
 
   @doc """
@@ -649,7 +658,8 @@ defmodule BeamAgent.Control do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec thread_realtime_append_text(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_realtime_append_text(pid() | binary(), binary(), map()) ::
+          {:ok, map()} | {:error, term()}
   defdelegate thread_realtime_append_text(session, thread_id, opts), to: :beam_agent_control
 
   @doc """

@@ -359,7 +359,8 @@ defmodule BeamAgent.Config do
   This is the universal (non-native) implementation exported so backend facades
   can delegate to it directly.
   """
-  @spec config_read(pid() | binary()) :: {:ok, :beam_agent_config.config_view()} | {:error, term()}
+  @spec config_read(pid() | binary()) ::
+          {:ok, :beam_agent_config.config_view()} | {:error, term()}
   defdelegate config_read(session), to: :beam_agent_config
 
   @doc """

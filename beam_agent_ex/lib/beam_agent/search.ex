@@ -54,7 +54,8 @@ defmodule BeamAgent.Search do
 
   - `{:ok, matches}` sorted by score descending.
   """
-  @spec fuzzy(pid(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec fuzzy(pid(), binary()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy(session, query), to: :beam_agent_catalog, as: :fuzzy_search
 
   @doc """
@@ -77,7 +78,8 @@ defmodule BeamAgent.Search do
 
   - `{:ok, matches}` or `{:error, reason}`.
   """
-  @spec fuzzy(pid(), binary(), map()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec fuzzy(pid(), binary(), map()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy(session, query, opts), to: :beam_agent_catalog, as: :fuzzy_search
 
   @doc """
@@ -99,9 +101,11 @@ defmodule BeamAgent.Search do
 
   - `{:ok, result}` or `{:error, reason}`.
   """
-  @spec session_start(pid(), binary(), [binary()]) :: {:ok, :beam_agent_search_core.search_session()} | {:error, term()}
+  @spec session_start(pid(), binary(), [binary()]) ::
+          {:ok, :beam_agent_search_core.search_session()} | {:error, term()}
   defdelegate session_start(session, search_session_id, roots),
-    to: :beam_agent_catalog, as: :search_session_start
+    to: :beam_agent_catalog,
+    as: :search_session_start
 
   @doc """
   Update a search session with a new query string.
@@ -119,9 +123,11 @@ defmodule BeamAgent.Search do
 
   - `{:ok, matches}` or `{:error, :not_found}`.
   """
-  @spec session_update(pid(), binary(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec session_update(pid(), binary(), binary()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate session_update(session, search_session_id, query),
-    to: :beam_agent_catalog, as: :search_session_update
+    to: :beam_agent_catalog,
+    as: :search_session_update
 
   @doc """
   Stop and clean up a fuzzy file search session.
@@ -141,5 +147,6 @@ defmodule BeamAgent.Search do
   """
   @spec session_stop(pid(), binary()) :: {:ok, map()} | {:error, term()}
   defdelegate session_stop(session, search_session_id),
-    to: :beam_agent_catalog, as: :search_session_stop
+    to: :beam_agent_catalog,
+    as: :search_session_stop
 end

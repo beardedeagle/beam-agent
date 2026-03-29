@@ -554,7 +554,8 @@ defmodule BeamAgent.Threads do
 
   - `{:ok, result_map}` or `{:error, :not_found}`.
   """
-  @spec thread_metadata_update(pid() | binary(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  @spec thread_metadata_update(pid() | binary(), binary(), map()) ::
+          {:ok, map()} | {:error, term()}
   defdelegate thread_metadata_update(session, thread_id, metadata_patch), to: :beam_agent_threads
 
   @doc """

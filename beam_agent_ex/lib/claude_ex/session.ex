@@ -112,7 +112,8 @@ defmodule ClaudeEx.Session do
   @doc """
   Change the model at runtime during a session.
   """
-  @spec set_model(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
+  @spec set_model(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_model(session, model) do
     :claude_agent_session.set_model(session, model)
   end
@@ -120,7 +121,8 @@ defmodule ClaudeEx.Session do
   @doc """
   Change the permission mode at runtime.
   """
-  @spec set_permission_mode(pid(), binary()) :: {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
+  @spec set_permission_mode(pid(), binary()) ::
+          {:ok, map()} | {:error, :not_supported | :reconnecting | :session_error}
   def set_permission_mode(session, mode) do
     :claude_agent_session.set_permission_mode(session, mode)
   end

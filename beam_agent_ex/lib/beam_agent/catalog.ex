@@ -345,7 +345,8 @@ defmodule BeamAgent.Catalog do
   @doc """
   Search for text matching `pattern` in the session's working directory.
   """
-  @spec find_text(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  @spec find_text(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_text(session, pattern), to: :beam_agent_catalog
 
   @doc """
@@ -357,7 +358,8 @@ defmodule BeamAgent.Catalog do
   @doc """
   Search for code symbols matching `query` in the session's project.
   """
-  @spec find_symbols(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  @spec find_symbols(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_symbols(session, query), to: :beam_agent_catalog
 
   @doc """
@@ -369,7 +371,8 @@ defmodule BeamAgent.Catalog do
   @doc """
   Read the contents of a file at the given path.
   """
-  @spec file_read(pid(), binary()) :: {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
+  @spec file_read(pid(), binary()) ::
+          {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
   defdelegate file_read(session, path), to: :beam_agent_catalog
 
   @doc """
@@ -387,25 +390,29 @@ defmodule BeamAgent.Catalog do
   @doc """
   Fuzzy-search for files by name in the session's project.
   """
-  @spec fuzzy_search(pid(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec fuzzy_search(pid(), binary()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy_search(session, query), to: :beam_agent_catalog
 
   @doc """
   Fuzzy-search for files by name with options.
   """
-  @spec fuzzy_search(pid(), binary(), map()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec fuzzy_search(pid(), binary(), map()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate fuzzy_search(session, query, opts), to: :beam_agent_catalog
 
   @doc """
   Start a stateful fuzzy file search session.
   """
-  @spec search_session_start(pid(), binary(), [binary()]) :: {:ok, :beam_agent_search_core.search_session()} | {:error, term()}
+  @spec search_session_start(pid(), binary(), [binary()]) ::
+          {:ok, :beam_agent_search_core.search_session()} | {:error, term()}
   defdelegate search_session_start(session, search_session_id, roots), to: :beam_agent_catalog
 
   @doc """
   Update a search session with a new query string.
   """
-  @spec search_session_update(pid(), binary(), binary()) :: {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
+  @spec search_session_update(pid(), binary(), binary()) ::
+          {:ok, [:beam_agent_search_core.search_match()]} | {:error, term()}
   defdelegate search_session_update(session, search_session_id, query), to: :beam_agent_catalog
 
   @doc """

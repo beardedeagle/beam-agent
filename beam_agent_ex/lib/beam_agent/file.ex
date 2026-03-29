@@ -69,7 +69,8 @@ defmodule BeamAgent.File do
         IO.puts("\#{m.path}:\#{m.line}: \#{m.content}")
       end
   """
-  @spec find_text(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  @spec find_text(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_text(session, pattern), to: :beam_agent_catalog
 
   @doc """
@@ -111,7 +112,8 @@ defmodule BeamAgent.File do
 
   - `{:ok, symbols}` or `{:error, reason}`.
   """
-  @spec find_symbols(pid(), binary()) :: {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
+  @spec find_symbols(pid(), binary()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]} | {:error, term()}
   defdelegate find_symbols(session, query), to: :beam_agent_catalog
 
   @doc """
@@ -149,7 +151,8 @@ defmodule BeamAgent.File do
 
   - `{:ok, %{path: path, content: content}}` or `{:error, :enoent}` if the file does not exist.
   """
-  @spec read(pid(), binary()) :: {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
+  @spec read(pid(), binary()) ::
+          {:ok, %{path: binary(), content: binary()}} | {:error, :enoent | term()}
   defdelegate read(session, path), to: :beam_agent_catalog, as: :file_read
 
   @doc """
