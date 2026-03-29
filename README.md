@@ -681,6 +681,10 @@ surface, even when the underlying SDK does not implement it directly.
 {ok, Sessions} = beam_agent_session_store:list_sessions(),
 {ok, Messages} = beam_agent_session_store:get_session_messages(<<"sid">>),
 
+%% Restore a previous session (native resume when available)
+{ok, Restored} = beam_agent:restore_session(<<"sid">>, #{}),
+{ok, Msgs} = beam_agent:query(Restored, <<"Pick up where we left off">>),
+
 %% Create and inspect universal threads
 {ok, Thread} = beam_agent_threads:thread_start(Session, #{}),
 {ok, ThreadInfo} = beam_agent_threads:thread_read(
