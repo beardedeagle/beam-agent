@@ -100,12 +100,14 @@ Used by `beam_agent_credential` to match incoming map keys.
 """.
 -spec credential_match_keys() -> [atom() | binary()].
 credential_match_keys() ->
-    lists:flatmap(
-        fun({Name, _Cat, encrypt_and_redact}) -> key_variants(Name);
-           ({_Name, _Cat, _Other}) -> []
-        end,
-        all()
-    ).
+    case persistent_term:get({?MODULE, credential}, undefined) of
+        undefined ->
+            Value = derive_credential_match_keys(),
+            persistent_term:put({?MODULE, credential}, Value),
+            Value;
+        Value ->
+            Value
+    end.
 
 -doc """
 Canonical lowercase binary keys (no separators) for all sensitive keys.
@@ -115,7 +117,14 @@ with its `canonical_key/1` function.
 """.
 -spec redaction_match_keys() -> [binary()].
 redaction_match_keys() ->
-    [canonical_form(Name) || {Name, _Cat, _Handling} <- all()].
+    case persistent_term:get({?MODULE, redaction}, undefined) of
+        undefined ->
+            Value = derive_redaction_match_keys(),
+            persistent_term:put({?MODULE, redaction}, Value),
+            Value;
+        Value ->
+            Value
+    end.
 
 -doc """
 Check whether a key (atom or binary, any format) is sensitive.
@@ -179,3 +188,20 @@ capitalize(<<>>) -> <<>>;
 capitalize(<<C, Rest/binary>>) when C >= $a, C =< $z ->
     <<(C - 32), Rest/binary>>;
 capitalize(Bin) -> Bin.
+
+%%--------------------------------------------------------------------
+%% Internal: derivation (cached by public callers above)
+%%--------------------------------------------------------------------
+
+-spec derive_credential_match_keys() -> [atom() | binary()].
+derive_credential_match_keys() ->
+    lists:flatmap(
+        fun({Name, _Cat, encrypt_and_redact}) -> key_variants(Name);
+           ({_Name, _Cat, _Other}) -> []
+        end,
+        all()
+    ).
+
+-spec derive_redaction_match_keys() -> [binary()].
+derive_redaction_match_keys() ->
+    [canonical_form(Name) || {Name, _Cat, _Handling} <- all()].
