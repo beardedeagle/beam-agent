@@ -35,6 +35,7 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 -export([
     %% Canonical public session API
     start_session/1,
+    restore_session/2,
     child_spec/1,
     stop/1,
     query/2,
@@ -473,6 +474,35 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
 -spec start_session(session_opts()) -> {ok, pid()} | {error, term()}.
 start_session(Opts) when is_map(Opts) ->
     beam_agent_router:start_session(Opts).
+
+-doc """
+Restore a previously tracked session.
+
+Looks up the session metadata from `beam_agent_session_store_core`, maps
+stored fields into session opts (`adapter` → `backend`, `cwd` → `work_dir`,
+`model`), merges with caller-provided overrides, forces `resume => true`,
+and delegates to `start_session/1`.
+
+Backends that support native resume (Claude `--resume`, Copilot
+`session.resume`, Gemini session-ID) use their native mechanism.
+Backends without native resume start a fresh transport but retain the
+same `session_id`, preserving SDK-layer history continuity.
+""".
+-spec restore_session(binary(), session_opts()) -> {ok, pid()} | {error, term()}.
+restore_session(SessionId, Opts)
+  when is_binary(SessionId), byte_size(SessionId) > 0, is_map(Opts) ->
+    case beam_agent_session_store_core:get_session(SessionId) of
+        {ok, Meta} ->
+            SessionOpts = build_restore_opts(SessionId, Meta, Opts),
+            case maps:is_key(backend, SessionOpts) of
+                true ->
+                    start_session(SessionOpts);
+                false ->
+                    {error, {missing_backend, SessionId}}
+            end;
+        {error, not_found} ->
+            {error, {session_not_found, SessionId}}
+    end.
 
 -doc "Build a supervisor child spec for a unified session.".
 -spec child_spec(session_opts()) -> supervisor:child_spec().
@@ -983,6 +1013,34 @@ opt_value([Key | Rest], Opts, Default) ->
         error ->
             opt_value(Rest, Opts, Default)
     end.
+
+%%--------------------------------------------------------------------
+%% Internal: Session Restoration
+%%--------------------------------------------------------------------
+
+%% Build session_opts from stored metadata + caller overrides for
+%% restore_session/2.  Maps adapter→backend, cwd→work_dir.
+%% Merge order: Stored < CallerOpts < {session_id, resume}.
+-spec build_restore_opts(binary(),
+                         beam_agent_session_store_core:session_meta(),
+                         map()) -> session_opts().
+build_restore_opts(SessionId, Meta, CallerOpts) ->
+    Stored0 = case maps:find(adapter, Meta) of
+        {ok, Adapter} when is_atom(Adapter) -> #{backend => Adapter};
+        _ -> #{}
+    end,
+    Stored1 = case maps:find(model, Meta) of
+        {ok, Model} when is_binary(Model), byte_size(Model) > 0 ->
+            Stored0#{model => Model};
+        _ -> Stored0
+    end,
+    Stored = case maps:find(cwd, Meta) of
+        {ok, Cwd} when is_binary(Cwd), byte_size(Cwd) > 0 ->
+            Stored1#{work_dir => Cwd};
+        _ -> Stored1
+    end,
+    Merged = maps:merge(Stored, CallerOpts),
+    Merged#{session_id => SessionId, resume => true}.
 
 %%--------------------------------------------------------------------
 %% Internal: Common field extraction

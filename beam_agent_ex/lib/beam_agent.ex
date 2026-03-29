@@ -67,9 +67,10 @@ defmodule BeamAgent do
   ### Sessions
 
   A session is a supervised `gen_statem` process that owns a single transport
-  connection to a backend CLI. Sessions are started with `start_session/1`
-  and stopped with `stop/1`. Each session has a unique binary `session_id`,
-  tracks message history, and can host multiple conversation threads.
+  connection to a backend CLI. Sessions are started with `start_session/1`,
+  restored from a previous session with `restore_session/2`, and stopped
+  with `stop/1`. Each session has a unique binary `session_id`, tracks
+  message history, and can host multiple conversation threads.
 
   ### Events
 
@@ -410,6 +411,45 @@ defmodule BeamAgent do
       })
   """
   defdelegate start_session(opts), to: :beam_agent
+
+  @doc """
+  Restore a previously tracked session by its session ID.
+
+  Looks up the session in the universal session store, rebuilds session
+  options from the stored metadata (adapter, model, working directory),
+  merges with any caller-provided overrides, and starts a new session
+  with `resume: true`.
+
+  Backends that support native resume (Claude `--resume`, Copilot
+  `session.resume`, Gemini session-ID) use their native mechanism
+  automatically. Backends without native resume start a fresh transport
+  but the SDK-layer session store retains full history under the same
+  session ID.
+
+  ## Parameters
+
+  - `session_id` -- binary session identifier from a previous session.
+  - `opts` -- session option overrides (any key from `:beam_agent.session_opts()`).
+    `session_id` and `resume` are always set internally.
+
+  ## Returns
+
+  - `{:ok, pid}` on success where `pid` is the restored session process.
+  - `{:error, {:session_not_found, session_id}}` if no session exists.
+  - `{:error, {:missing_backend, session_id}}` if no backend is available.
+  - `{:error, reason}` for transport/backend startup failures.
+
+  ## Examples
+
+      {:ok, session} = BeamAgent.restore_session("sess_abc123", %{})
+      {:ok, messages} = BeamAgent.query(session, "Continue where we left off")
+
+      # Restore with a different model:
+      {:ok, session} = BeamAgent.restore_session("sess_abc123", %{
+        model: "claude-sonnet-4-20250514"
+      })
+  """
+  defdelegate restore_session(session_id, opts), to: :beam_agent
 
   @doc """
   Build a supervisor child spec for embedding a session in a supervision tree.

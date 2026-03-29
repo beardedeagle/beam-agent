@@ -175,6 +175,7 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent, :init, 0)
     assert function_exported?(BeamAgent, :init, 1)
     assert function_exported?(BeamAgent, :start_session, 1)
+    assert function_exported?(BeamAgent, :restore_session, 2)
     assert function_exported?(BeamAgent, :child_spec, 1)
     assert function_exported?(BeamAgent, :stop, 1)
     assert function_exported?(BeamAgent, :query, 2)

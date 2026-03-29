@@ -110,6 +110,7 @@ session history at any time.
 ## See Also
 
 - beam_agent_session_store_core: implementation module with full internals
+- beam_agent:restore_session/2: restore a previously tracked session from the store
 - beam_agent_threads: conversation threading within sessions
 - beam_agent_checkpoint: file snapshot and rewind support
 - beam_agent: main SDK entry point (delegates to this module)

@@ -2,8 +2,8 @@
 -moduledoc """
 Lifecycle entry point for the BeamAgent SDK.
 
-This module manages session lifecycle: starting, stopping, querying,
-and event streaming. Domain-specific operations live in dedicated
+This module manages session lifecycle: starting, restoring, stopping,
+querying, and event streaming. Domain-specific operations live in dedicated
 public modules:
 
 - beam_agent_account: login, logout, rate limits
@@ -47,6 +47,7 @@ ok = beam_agent:stop(Session).
     init/0,
     init/1,
     start_session/1,
+    restore_session/2,
     child_spec/1,
     stop/1,
     query/2,
@@ -315,6 +316,54 @@ Returns {ok, Pid} on success where Pid is the session process, or
 """.
 -spec start_session(session_opts()) -> {ok, pid()} | {error, term()}.
 start_session(Opts) -> beam_agent_core:start_session(Opts).
+
+-doc """
+Restore a previously tracked session by its session ID.
+
+Looks up the session in the universal session store, rebuilds session
+options from the stored metadata (adapter, model, working directory),
+merges with any caller-provided overrides, and starts a new session
+with `resume => true`.
+
+Backends that support native resume (Claude `--resume`, Copilot
+`session.resume`, Gemini session-ID) use their native mechanism
+automatically. Backends without native resume start a fresh transport
+but the SDK-layer session store retains full history under the same
+session ID, providing seamless continuity for callers querying
+`beam_agent_session_store:get_session_messages/1`.
+
+Parameters:
+  - SessionId: binary session identifier from a previous session.
+  - Opts: session option overrides. Any key from session_opts/0 is
+    accepted and takes precedence over stored metadata. The keys
+    `session_id` and `resume` are always set internally (overrides
+    for these keys are ignored).
+
+Returns {ok, Pid} on success where Pid is the restored session process,
+{error, {session_not_found, SessionId}} if no session with this ID
+exists in the store, {error, {missing_backend, SessionId}} if neither
+the stored metadata nor the opts contain a backend, or {error, Reason}
+for transport/backend startup failures.
+
+```erlang
+%% Restore a Claude session:
+{ok, Session} = beam_agent:restore_session(<<"sess_abc123">>, #{}),
+{ok, Messages} = beam_agent:query(Session, <<"Continue where we left off">>).
+
+%% Restore with a different model:
+{ok, Session} = beam_agent:restore_session(<<"sess_abc123">>, #{
+    model => <<"claude-sonnet-4-20250514">>
+}).
+
+%% Restore with a different backend (e.g., switch from Claude to Codex):
+{ok, Session} = beam_agent:restore_session(<<"sess_abc123">>, #{
+    backend => codex
+}).
+```
+""".
+-spec restore_session(binary(), session_opts()) -> {ok, pid()} | {error, term()}.
+restore_session(SessionId, Opts) ->
+    beam_agent_core:restore_session(SessionId, Opts).
 
 -doc """
 Build a supervisor child spec for embedding a session in a supervision tree.
