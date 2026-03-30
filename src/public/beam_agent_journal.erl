@@ -12,6 +12,16 @@ orchestration. It is intentionally distinct from `beam_agent_events`:
 The implementation is ETS-backed through `beam_agent_journal_core` and
 `beam_agent_journal_store`, so it stays process-free and works uniformly across
 all BeamAgent backends.
+
+== Architecture
+
+This module is the stable public API facade for the event journal and audit
+subsystem. It delegates journal operations to `beam_agent_journal_core` and
+audit convenience functions to `beam_agent_audit_core`. The two-layer split
+decouples the public API contract from internal implementation, allowing core
+modules to be refactored freely without breaking callers. Type aliases
+re-exported here let callers depend on `beam_agent_journal:entry()` rather
+than the internal module name.
 """.
 
 -export([

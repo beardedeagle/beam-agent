@@ -25,6 +25,15 @@ Typical flow:
 
 This keeps the context layer process-free while still making compaction policy
 first-class and observable.
+
+== Architecture
+
+This module is the stable public API facade for context management. It
+delegates all operations to `beam_agent_context_core`, which owns the
+implementation. The two-layer split decouples the public API contract from
+internal implementation, allowing the core module to be refactored freely
+without breaking callers. Type aliases re-exported here let callers depend on
+`beam_agent_context:scope()` rather than the internal module name.
 """.
 
 -export([

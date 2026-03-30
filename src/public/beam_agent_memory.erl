@@ -24,6 +24,17 @@ true = lists:any(fun(Entry) ->
     maps:get(memory_id, Entry) =:= maps:get(memory_id, Memory)
 end, Matches).
 ```
+
+== Architecture
+
+This module is the stable public API facade for long-term memory. It delegates
+most operations to `beam_agent_memory_core`, which owns the implementation
+and search logic. The one exception is `configure_persistence/1`, which routes
+to `beam_agent_store:configure_domain/2` for adapter configuration. The
+two-layer split decouples the public API contract from internal implementation,
+allowing the core module to be refactored freely without breaking callers.
+Type aliases re-exported here let callers depend on
+`beam_agent_memory:memory_record()` rather than the internal module name.
 """.
 
 -export([
