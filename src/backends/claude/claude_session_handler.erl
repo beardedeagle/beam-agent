@@ -1414,8 +1414,14 @@ decode_settings_json(JsonBin) ->
         false ->
             try json:decode(JsonBin) of
                 Map when is_map(Map) -> Map;
-                _                    -> #{}
-            catch error:_ -> #{}
+                _ ->
+                    logger:warning("claude_session_handler: settings JSON"
+                                   " decoded to non-map, returning #{}"),
+                    #{}
+            catch error:DecodeErr ->
+                    logger:warning("claude_session_handler: settings JSON"
+                                   " parse failed: ~p", [DecodeErr]),
+                    #{}
             end
     end.
 
