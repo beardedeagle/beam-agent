@@ -19,6 +19,7 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_control/4,
+    handle_info/3,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3,
@@ -196,15 +197,32 @@ build_session_info(#hstate{thread_id = ThreadId,
       approval_policy => ApprovalPolicy,
       sandbox_mode => SandboxMode}.
 
--doc "Clean up handler resources on termination.".
+-doc """
+Clean up handler resources on termination.
+
+Fires the session_end hook, then iterates the pending map to cancel any
+outstanding timers and reply `{error, session_terminated}` to callers
+blocked on `send_control`. Non-control pending entries (init, turn_start,
+thread_then_turn) have no blocked caller and are silently discarded.
+""".
 -spec terminate_handler(term(), #hstate{}) -> ok.
-terminate_handler(Reason, #hstate{sdk_hook_registry = HookReg,
+terminate_handler(Reason, #hstate{pending = Pending,
+                                   sdk_hook_registry = HookReg,
                                    session_id = SessionId}) ->
     _ = beam_agent_hooks_core:fire(session_end,
             #{event => session_end,
               session_id => SessionId,
               reason => Reason},
             HookReg),
+    %% Reply to all pending callers and cancel their timers
+    maps:foreach(
+        fun(_Id, {From, TimerRef}) ->
+            _ = erlang:cancel_timer(TimerRef),
+            gen_statem:reply(From, {error, session_terminated});
+           (_Id, _NonControlEntry) ->
+            ok
+        end,
+        Pending),
     ok.
 
 %%====================================================================
@@ -274,6 +292,30 @@ handle_control(Method, Params, From,
     TimerRef = erlang:send_after(35000, self(), {pending_timeout, Id}),
     Pending1 = Pending#{Id => {From, TimerRef}},
     {noreply, [{send, Encoded}], HState#hstate{pending = Pending1}}.
+
+-doc """
+Handle info messages — specifically pending request timeouts.
+
+When `handle_control/4` stores a pending caller, it arms a 35-second
+timer via `erlang:send_after/3`. If the JSON-RPC response never arrives,
+the timeout fires and this callback replies `{error, timeout}` to the
+blocked caller so it doesn't hang indefinitely.
+""".
+-spec handle_info(term(), beam_agent_session_handler:state_name(), #hstate{}) ->
+    beam_agent_session_handler:info_result().
+handle_info({pending_timeout, Id}, _StateName,
+            #hstate{pending = Pending} = HState) ->
+    case maps:find(Id, Pending) of
+        {ok, {From, _TimerRef}} ->
+            Pending1 = maps:remove(Id, Pending),
+            gen_statem:reply(From, {error, timeout}),
+            {messages, [], [], HState#hstate{pending = Pending1}};
+        _ ->
+            %% Already resolved or non-control entry — nothing to do
+            ignore
+    end;
+handle_info(_Msg, _StateName, _HState) ->
+    ignore.
 
 -doc """
 Store model override for the next turn's TurnStartParams.

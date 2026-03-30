@@ -108,8 +108,6 @@ claude_agent_session:start_link(#{sdk_mcp_servers => [Server]})
 %% Registry mapping server names to their definitions.
 -type mcp_registry() :: #{binary() => sdk_mcp_server()}.
 
-%% Default tool handler timeout (30 seconds).
--define(DEFAULT_HANDLER_TIMEOUT, 30000).
 
 %%--------------------------------------------------------------------
 %% Constructors
@@ -178,7 +176,7 @@ servers_for_init(Registry) ->
 %% JSON-RPC Dispatch
 %%--------------------------------------------------------------------
 
--doc "Handle an MCP JSON-RPC message for a named server. Uses default handler timeout of 30 seconds.".
+-doc "Handle an MCP JSON-RPC message for a named server.".
 -spec handle_mcp_message(binary(), map(), mcp_registry()) ->
     {ok, map()} | {error, binary()}.
 handle_mcp_message(ServerName, Message, Registry) ->
@@ -189,9 +187,6 @@ Handle an MCP JSON-RPC message for a named server with options.
 
 Dispatches to the appropriate handler based on the method.
 
-Options:
-  - `handler_timeout` -- timeout in ms for tool handlers (default: 30000)
-
 Supported methods:
   - `"initialize"` -- capabilities + server info
   - `"notifications/initialized"` -- no-op acknowledgment
@@ -201,13 +196,12 @@ Supported methods:
 """.
 -spec handle_mcp_message(binary(), map(), mcp_registry(), map()) ->
     {ok, map()} | {error, binary()}.
-handle_mcp_message(ServerName, Message, Registry, Opts) ->
+handle_mcp_message(ServerName, Message, Registry, _Opts) ->
     case maps:find(ServerName, Registry) of
         {ok, #{enabled := false}} ->
             {error, <<"MCP server disabled: ", ServerName/binary>>};
         {ok, Server} ->
-            Timeout = maps:get(handler_timeout, Opts, ?DEFAULT_HANDLER_TIMEOUT),
-            dispatch_jsonrpc(Message, Server, Timeout);
+            dispatch_jsonrpc(Message, Server);
         error ->
             {error, <<"Unknown MCP server: ", ServerName/binary>>}
     end.
@@ -216,7 +210,7 @@ handle_mcp_message(ServerName, Message, Registry, Opts) ->
 %% Flat Tool Dispatch
 %%--------------------------------------------------------------------
 
--doc "Call a tool by name, searching across all servers in the registry. Uses default handler timeout of 30 seconds.".
+-doc "Call a tool by name, searching across all servers in the registry.".
 -spec call_tool_by_name(binary(), map(), mcp_registry()) ->
     {ok, [content_result()]} | {error, binary()}.
 call_tool_by_name(ToolName, Arguments, Registry) ->
@@ -228,17 +222,13 @@ Call a tool by name with options.
 Searches across all servers in the registry.
 Used by adapters that receive flat tool calls without server context
 (e.g. Copilot `tool.call`, Codex MCP dispatch).
-
-Options:
-  - `handler_timeout` -- timeout in ms for tool handlers (default: 30000)
 """.
 -spec call_tool_by_name(binary(), map(), mcp_registry(), map()) ->
     {ok, [content_result()]} | {error, binary()}.
-call_tool_by_name(ToolName, Arguments, Registry, Opts) ->
-    Timeout = maps:get(handler_timeout, Opts, ?DEFAULT_HANDLER_TIMEOUT),
+call_tool_by_name(ToolName, Arguments, Registry, _Opts) ->
     case find_tool_in_registry(ToolName, Registry) of
         {ok, #{handler := Handler}} ->
-            call_handler(Handler, Arguments, Timeout);
+            call_handler(Handler, Arguments);
         error ->
             {error, <<"Unknown tool: ", ToolName/binary>>}
     end.
@@ -435,8 +425,8 @@ unregister_session_registry(Pid) when is_pid(Pid) ->
 %% Internal: JSON-RPC Method Dispatch
 %%--------------------------------------------------------------------
 
--spec dispatch_jsonrpc(map(), sdk_mcp_server(), pos_integer()) -> {ok, map()}.
-dispatch_jsonrpc(#{<<"method">> := <<"initialize">>} = Msg, Server, _Timeout) ->
+-spec dispatch_jsonrpc(map(), sdk_mcp_server()) -> {ok, map()}.
+dispatch_jsonrpc(#{<<"method">> := <<"initialize">>} = Msg, Server) ->
     Id = maps:get(<<"id">>, Msg, null),
     Version = maps:get(version, Server, <<"1.0.0">>),
     Name = maps:get(name, Server),
@@ -453,11 +443,11 @@ dispatch_jsonrpc(#{<<"method">> := <<"initialize">>} = Msg, Server, _Timeout) ->
         }
     }};
 
-dispatch_jsonrpc(#{<<"method">> := <<"notifications/initialized">>}, _Server, _Timeout) ->
+dispatch_jsonrpc(#{<<"method">> := <<"notifications/initialized">>}, _Server) ->
     %% No response needed for notifications, return empty ack
     {ok, #{}};
 
-dispatch_jsonrpc(#{<<"method">> := <<"tools/list">>} = Msg, Server, _Timeout) ->
+dispatch_jsonrpc(#{<<"method">> := <<"tools/list">>} = Msg, Server) ->
     Id = maps:get(<<"id">>, Msg, null),
     Tools = maps:get(tools, Server, []),
     ToolDefs = [tool_to_mcp_format(T) || T <- Tools],
@@ -467,7 +457,7 @@ dispatch_jsonrpc(#{<<"method">> := <<"tools/list">>} = Msg, Server, _Timeout) ->
         <<"result">> => #{<<"tools">> => ToolDefs}
     }};
 
-dispatch_jsonrpc(#{<<"method">> := <<"tools/call">>} = Msg, Server, Timeout) ->
+dispatch_jsonrpc(#{<<"method">> := <<"tools/call">>} = Msg, Server) ->
     Id = maps:get(<<"id">>, Msg, null),
     Params = maps:get(<<"params">>, Msg, #{}),
     ToolName = maps:get(<<"name">>, Params, <<>>),
@@ -475,7 +465,7 @@ dispatch_jsonrpc(#{<<"method">> := <<"tools/call">>} = Msg, Server, Timeout) ->
     Tools = maps:get(tools, Server, []),
     case find_tool(ToolName, Tools) of
         {ok, #{handler := Handler}} ->
-            case call_handler(Handler, Arguments, Timeout) of
+            case call_handler(Handler, Arguments) of
                 {ok, ContentResults} ->
                     {ok, #{
                         <<"jsonrpc">> => <<"2.0">>,
@@ -510,7 +500,7 @@ dispatch_jsonrpc(#{<<"method">> := <<"tools/call">>} = Msg, Server, Timeout) ->
             }}
     end;
 
-dispatch_jsonrpc(Msg, _Server, _Timeout) ->
+dispatch_jsonrpc(Msg, _Server) ->
     Id = maps:get(<<"id">>, Msg, null),
     Method = maps:get(<<"method">>, Msg, <<"unknown">>),
     MethodBin = if is_binary(Method) -> Method; true -> <<"unknown">> end,
@@ -554,43 +544,26 @@ find_tool_in_registry(ToolName, Registry) ->
             Found
     end, error, Registry).
 
-%% Execute a tool handler with crash protection and configurable timeout.
-%% Spawns a monitored process to isolate handler crashes from
-%% the gen_statem.
--spec call_handler(tool_handler(), map(), pos_integer()) ->
+%% Execute a tool handler with crash protection.
+%%
+%% Calls the handler synchronously in the caller's process. Exceptions
+%% are caught and returned as {error, Msg}. No process is spawned —
+%% the SDK never owns background processes (the caller owns the pid).
+%%
+%% Timeout enforcement, if needed, is the caller's responsibility.
+-spec call_handler(tool_handler(), map()) ->
     {ok, [content_result()]} | {error, binary()}.
-call_handler(Handler, Input, Timeout) ->
-    Self = self(),
-    Ref = make_ref(),
-    {Pid, MRef} = spawn_monitor(fun() ->
-        Result = try Handler(Input) of
-            R -> R
-        catch
-            Class:Reason:Stack ->
-                SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
-                             || {M, F, A, L} <- Stack],
-                ErrMsg = iolist_to_binary(
-                    io_lib:format("Handler ~p:~p~n~p",
-                                  [Class, Reason, SafeStack])),
-                {error, ErrMsg}
-        end,
-        Self ! {Ref, Result}
-    end),
-    receive
-        {Ref, Result} ->
-            demonitor(MRef, [flush]),
-            Result;
-        {'DOWN', MRef, process, Pid, Reason} ->
-            {error, iolist_to_binary(
-                io_lib:format("Handler crashed: ~p", [Reason]))}
-    after Timeout ->
-        demonitor(MRef, [flush]),
-        exit(Pid, kill),
-        %% Flush any result message sent before the kill took effect
-        receive {Ref, _} -> ok after 0 -> ok end,
-        TimeoutSecs = Timeout div 1000,
-        {error, iolist_to_binary(
-            io_lib:format("Tool handler timed out after ~B seconds", [TimeoutSecs]))}
+call_handler(Handler, Input) ->
+    try Handler(Input) of
+        Result -> Result
+    catch
+        Class:Reason:Stack ->
+            SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
+                         || {M, F, A, L} <- Stack],
+            ErrMsg = iolist_to_binary(
+                io_lib:format("Handler ~p:~p~n~p",
+                              [Class, Reason, SafeStack])),
+            {error, ErrMsg}
     end.
 
 %% Format a content_result for the MCP wire protocol.

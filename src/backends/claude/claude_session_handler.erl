@@ -174,14 +174,28 @@ build_session_info(#hstate{system_info = SysInfo,
       system_info => SysInfo,
       init_response => InitResponse}.
 
+-doc """
+Clean up handler resources on termination.
+
+Fires the session_end hook, replies `{error, session_terminated}` to all
+callers blocked on `send_control`, and removes the temporary MCP config
+file if one was written during init.
+""".
 -spec terminate_handler(term(), #hstate{}) -> ok.
-terminate_handler(Reason, #hstate{sdk_hook_registry = HookReg,
+terminate_handler(Reason, #hstate{pending = Pending,
+                                   sdk_hook_registry = HookReg,
                                    session_id = SessionId,
                                    mcp_config_path = McpConfigPath}) ->
     _ = beam_agent_hooks_core:fire(session_end,
             #{session_id => SessionId, reason => Reason,
               event => session_end},
             HookReg),
+    %% Reply to all pending control callers
+    maps:foreach(
+        fun(_ReqId, From) ->
+            gen_statem:reply(From, {error, session_terminated})
+        end,
+        Pending),
     cleanup_mcp_config(McpConfigPath),
     ok.
 

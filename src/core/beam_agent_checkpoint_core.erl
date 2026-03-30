@@ -84,10 +84,20 @@ Reads each file's content and permissions. Files that don't
 exist are recorded as non-existent (rewind will delete them).
 """.
 -spec snapshot(binary(), binary(), [binary() | string()]) ->
-    {ok, checkpoint()}.
+    {ok, checkpoint()} | {error, {path_traversal, binary()}}.
 snapshot(SessionId, UUID, FilePaths)
   when is_binary(SessionId), is_binary(UUID), is_list(FilePaths) ->
     ensure_tables(),
+    case validate_all_paths(FilePaths) of
+        {error, _} = Err ->
+            Err;
+        ok ->
+            snapshot_validated(SessionId, UUID, FilePaths)
+    end.
+
+-spec snapshot_validated(binary(), binary(), [binary() | string()]) ->
+    {ok, checkpoint()}.
+snapshot_validated(SessionId, UUID, FilePaths) ->
     Now = erlang:system_time(millisecond),
     Files = lists:map(fun snapshot_file/1, FilePaths),
     Checkpoint = #{
@@ -107,7 +117,7 @@ Files created after the checkpoint are deleted if they didn't
 exist at checkpoint time.
 """.
 -spec rewind(binary(), binary()) ->
-    ok | {error, not_found | {restore_failed, binary(), file:posix()}}.
+    ok | {error, not_found | {restore_failed, binary(), file:posix() | path_traversal}}.
 rewind(SessionId, UUID)
   when is_binary(SessionId), is_binary(UUID) ->
     ensure_tables(),
@@ -207,17 +217,36 @@ snapshot_file(Path) when is_binary(Path) ->
               existed => false, permissions => undefined}
     end.
 
--spec restore_files([file_snapshot()]) -> ok | {error, {restore_failed, binary(), file:posix()}}.
+-spec restore_files([file_snapshot()]) ->
+    ok | {error, {restore_failed, binary(), file:posix() | path_traversal}}.
 restore_files([]) ->
     ok;
 restore_files([#{path := Path, existed := false} | Rest]) ->
     %% File didn't exist at checkpoint — delete it if it exists now
-    PathStr = unicode:characters_to_list(Path),
-    _ = file:delete(PathStr),
-    restore_files(Rest);
+    case validate_checkpoint_path(Path) of
+        {error, path_traversal} ->
+            {error, {restore_failed, Path, path_traversal}};
+        ok ->
+            PathStr = unicode:characters_to_list(Path),
+            _ = file:delete(PathStr),
+            restore_files(Rest)
+    end;
 restore_files([#{path := Path, content := Content,
                  permissions := Perms} | Rest])
   when Content =/= undefined ->
+    case validate_checkpoint_path(Path) of
+        {error, path_traversal} ->
+            {error, {restore_failed, Path, path_traversal}};
+        ok ->
+            restore_file_content(Path, Content, Perms, Rest)
+    end;
+restore_files([_ | Rest]) ->
+    restore_files(Rest).
+
+-spec restore_file_content(binary(), binary(), non_neg_integer() | undefined,
+                           [file_snapshot()]) ->
+    ok | {error, {restore_failed, binary(), file:posix() | path_traversal}}.
+restore_file_content(Path, Content, Perms, Rest) ->
     PathStr = unicode:characters_to_list(Path),
     TmpPath = PathStr ++ ".beam_agent_tmp",
     case file:write_file(TmpPath, Content) of
@@ -237,9 +266,7 @@ restore_files([#{path := Path, content := Content,
             end;
         {error, Reason} ->
             {error, {restore_failed, Path, Reason}}
-    end;
-restore_files([_ | Rest]) ->
-    restore_files(Rest).
+    end.
 
 -spec extract_path(map()) -> [binary()].
 extract_path(Input) ->
@@ -249,6 +276,52 @@ extract_path(Input) ->
             case maps:find(file_path, Input) of
                 {ok, P} when is_binary(P) -> [P];
                 _ -> []
+            end
+    end.
+
+%%--------------------------------------------------------------------
+%% Path validation
+%%--------------------------------------------------------------------
+
+%% Validate paths for directory traversal.
+%% Absolute paths are allowed; relative paths must not escape the cwd.
+-spec validate_all_paths([binary() | string()]) ->
+    ok | {error, {path_traversal, binary()}}.
+validate_all_paths([]) ->
+    ok;
+validate_all_paths([Path | Rest]) ->
+    BinPath = case is_list(Path) of
+        true  -> unicode:characters_to_binary(Path);
+        false -> Path
+    end,
+    case validate_checkpoint_path(BinPath) of
+        ok -> validate_all_paths(Rest);
+        {error, path_traversal} -> {error, {path_traversal, BinPath}}
+    end.
+
+%% Validate a single checkpoint path for directory traversal.
+%%
+%% Absolute paths are allowed — they are explicit and do not constitute
+%% traversal. Policy enforcement (which absolute paths are permitted)
+%% is the responsibility of the command guard, not checkpoint.
+%%
+%% Relative paths are validated with filelib:safe_relative_path/2 (OTP 25+)
+%% which rejects embedded .. components that would escape the base directory.
+-spec validate_checkpoint_path(binary()) -> ok | {error, path_traversal}.
+validate_checkpoint_path(Path) when is_binary(Path) ->
+    PathStr = unicode:characters_to_list(Path),
+    case filename:pathtype(PathStr) of
+        absolute ->
+            ok;
+        _ ->
+            case file:get_cwd() of
+                {ok, Cwd} ->
+                    case filelib:safe_relative_path(PathStr, Cwd) of
+                        unsafe -> {error, path_traversal};
+                        _Safe  -> ok
+                    end;
+                {error, _Reason} ->
+                    {error, path_traversal}
             end
     end.
 
