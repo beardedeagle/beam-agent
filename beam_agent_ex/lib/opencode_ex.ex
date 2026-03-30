@@ -1001,6 +1001,80 @@ defmodule OpencodeEx do
   @spec todo_summary([todo_item()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
+  # ── Backend-specific ──────────────────────────────────────────────
+
+  @doc "Return the backend name atom (`:opencode`)."
+  @spec backend_name() :: :opencode
+  defdelegate backend_name, to: :opencode_client
+
+  @doc "List available experimental resources."
+  @spec experimental_resources(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_resources(session), to: :opencode_client
+
+  @doc "List available experimental sessions."
+  @spec experimental_sessions(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_sessions(session), to: :opencode_client
+
+  @doc "List experimental tool IDs."
+  @spec experimental_tool_ids(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_tool_ids(session), to: :opencode_client
+
+  @doc "List experimental tools."
+  @spec experimental_tools(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_tools(session), to: :opencode_client
+
+  @doc "Create an experimental workspace."
+  @spec experimental_workspace_create(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_workspace_create(session, body), to: :opencode_client
+
+  @doc "Delete an experimental workspace by ID."
+  @spec experimental_workspace_delete(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_workspace_delete(session, id), to: :opencode_client
+
+  @doc "List experimental workspaces."
+  @spec experimental_workspace_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate experimental_workspace_list(session), to: :opencode_client
+
+  @doc "List session permissions."
+  @spec list_permissions(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate list_permissions(session), to: :opencode_client
+
+  @doc "Authenticate with an MCP server."
+  @spec mcp_auth_authenticate(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_auth_authenticate(session, server_id, body), to: :opencode_client
+
+  @doc "Handle MCP OAuth callback."
+  @spec mcp_auth_callback(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_auth_callback(session, server_id, body), to: :opencode_client
+
+  @doc "Remove MCP authentication for a server."
+  @spec mcp_auth_remove(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_auth_remove(session, server_id), to: :opencode_client
+
+  @doc "Start MCP authentication flow for a server."
+  @spec mcp_auth_start(pid(), binary(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_auth_start(session, server_id, body), to: :opencode_client
+
+  @doc "Connect to a PTY session."
+  @spec pty_connect(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate pty_connect(session, pty_id), to: :opencode_client
+
+  @doc "Abort a session by session ID."
+  @spec session_abort(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_abort(session, session_id), to: :opencode_client
+
+  @doc "List session statuses."
+  @spec session_status_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_status_list(session), to: :opencode_client
+
+  @doc "Advance the TUI control to the next step."
+  @spec tui_control_next(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate tui_control_next(session), to: :opencode_client
+
+  @doc "Send a TUI control response."
+  @spec tui_control_response(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate tui_control_response(session, body), to: :opencode_client
+
   # ── Internal ───────────────────────────────────────────────────────
 
   defp opts_to_map(opts) when is_list(opts), do: Map.new(opts)

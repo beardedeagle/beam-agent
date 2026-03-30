@@ -754,6 +754,20 @@ defmodule GeminiEx do
   @spec todo_summary([todo_item()]) :: %{:total => non_neg_integer(), atom() => non_neg_integer()}
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
+  # ── Backend-specific ──────────────────────────────────────────────
+
+  @doc "Return the backend name atom (`:gemini`)."
+  @spec backend_name() :: :gemini
+  defdelegate backend_name, to: :gemini_cli_client
+
+  @doc "List available configuration providers."
+  @spec config_providers(pid()) :: {:ok, [map()]}
+  defdelegate config_providers(session), to: :gemini_cli_client
+
+  @doc "List available LLM providers."
+  @spec provider_list(pid()) :: {:ok, [map()]}
+  defdelegate provider_list(session), to: :gemini_cli_client
+
   # ── Internal ───────────────────────────────────────────────────────
 
   defp opts_to_map(opts) when is_list(opts), do: Map.new(opts)

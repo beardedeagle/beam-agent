@@ -1172,6 +1172,20 @@ defmodule ClaudeEx do
         }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
+  # ── Backend-specific ──────────────────────────────────────────────
+
+  @doc "Return the backend name atom (`:claude`)."
+  @spec backend_name() :: :claude
+  defdelegate backend_name, to: :claude_agent_sdk
+
+  @doc "Return the raw MCP status map for this session's MCP servers."
+  @spec mcp_status(session()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_status(session), to: :claude_agent_sdk
+
+  @doc "Return the MCP server status as a list for this session."
+  @spec mcp_server_status_list(session()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_server_status_list(session), to: :claude_agent_sdk
+
   # ── Internal ─────────────────────────────────────────────────────
 
   defp opts_to_map(opts) when is_list(opts) do
