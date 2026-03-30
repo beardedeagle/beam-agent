@@ -959,8 +959,15 @@ send_transport(Data, #engine{transport_mod = TMod, transport_ref = TRef}) ->
 execute_send_actions([], Data) ->
     Data;
 execute_send_actions([{send, Payload} | Rest], Data) ->
-    _ = send_transport(Payload, Data),
-    execute_send_actions(Rest, Data).
+    case send_transport(Payload, Data) of
+        ok ->
+            execute_send_actions(Rest, Data);
+        {error, Reason} ->
+            logger:warning("beam_agent_session_engine: transport send failed"
+                           " [session=~s reason=~p remaining=~B]",
+                           [Data#engine.session_id, Reason, length(Rest)]),
+            Data
+    end.
 
 %%====================================================================
 %% Internal: state enter / telemetry
