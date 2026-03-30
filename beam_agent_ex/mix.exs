@@ -85,7 +85,6 @@ defmodule BeamAgentEx.MixProject do
         ],
         "Canonical Domains": [
           BeamAgent.Artifacts,
-          BeamAgent.Audit,
           BeamAgent.Context,
           BeamAgent.Journal,
           BeamAgent.Memory,

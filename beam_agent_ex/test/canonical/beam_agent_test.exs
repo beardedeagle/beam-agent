@@ -9,7 +9,6 @@ defmodule BeamAgentTest do
     BeamAgent.Catalog,
     BeamAgent.Control,
     BeamAgent.Command,
-    BeamAgent.Audit,
     BeamAgent.MCP,
     BeamAgent.Skills,
     BeamAgent.Apps,
@@ -69,10 +68,10 @@ defmodule BeamAgentTest do
     assert function_exported?(BeamAgent.Context, :maybe_compact, 2)
   end
 
-  test "audit wrapper exports canonical journal-backed audit accessors" do
-    assert function_exported?(BeamAgent.Audit, :list_events, 0)
-    assert function_exported?(BeamAgent.Audit, :list_events, 1)
-    assert function_exported?(BeamAgent.Audit, :get_event, 1)
+  test "audit convenience API lives on Journal, not a separate Audit module" do
+    assert function_exported?(BeamAgent.Journal, :list_events, 0)
+    assert function_exported?(BeamAgent.Journal, :list_events, 1)
+    assert function_exported?(BeamAgent.Journal, :get_event, 1)
   end
 
   test "policy wrapper exports canonical profile evaluation" do

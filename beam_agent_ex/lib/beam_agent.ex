@@ -128,7 +128,6 @@ defmodule BeamAgent do
   - `BeamAgent.Agents` -- agent type management and registration
   - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Artifacts` -- typed artifact and context storage
-  - `BeamAgent.Audit` -- durable audit records layered on the journal
   - `BeamAgent.Capabilities` -- backend capability matrix and checks
   - `BeamAgent.Catalog` -- tools, skills, plugins, agents, models, commands
   - `BeamAgent.Checkpoint` -- file checkpoint and rewind operations
