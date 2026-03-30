@@ -1442,8 +1442,8 @@ fallback path:
 | `beam_agent_policy_core` | Deterministic allow/deny policy profiles |
 | `beam_agent_store` | Internal store adapter selection for canonical domains |
 | `beam_agent_store_ets` | Default ETS-backed adapter for canonical domain stores |
-| `beam_agent_file_core` | File search, find text, find symbols |
-| `beam_agent_app_core` | App listing, info, init, log, modes |
+| `beam_agent_catalog` | File search, find text, find symbols (absorbed `beam_agent_file_core`) |
+| `beam_agent_runtime` | App listing, info, init, log, modes (absorbed `beam_agent_app_core`) |
 | `beam_agent_account_core` | Login, logout, auth status, rate limits |
 | `beam_agent_search_core` | Fuzzy file search, search sessions |
 | `beam_agent_skills_core` | Skills listing, remote export, config |
