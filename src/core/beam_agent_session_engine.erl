@@ -1043,13 +1043,13 @@ fire_state_enter(NewState, OldState,
                     send_data(execute_send_actions(Actions,
                                     Data#engine{handler_state = HState1}));
                 Unexpected ->
-                    logger:warning("~s on_state_enter(~p, ~p, _) returned"
+                    logger:warning("~tp on_state_enter(~p, ~p, _) returned"
                                    " unexpected: ~tp; ignoring",
                                    [H, NewState, OldForTelemetry, Unexpected]),
                     Data
             catch
                 Class:Reason:Stack ->
-                    logger:warning("~s on_state_enter(~p, ~p, _) crashed:"
+                    logger:warning("~tp on_state_enter(~p, ~p, _) crashed:"
                                    " ~p:~tp~n~p",
                                    [H, NewState, OldForTelemetry,
                                     Class, Reason, Stack]),
@@ -1135,12 +1135,12 @@ attempt_reconnect(#engine{handler_mod = HandlerMod, opts = Opts} = Data) ->
                     },
                     TimeoutAction = timeout_action(InitState, Opts),
                     {next_state, InitState, Data1, TimeoutAction};
-                {error, _Reason} ->
+                {error, Reason} ->
                     %% Reconnect handler init succeeded but transport
                     %% failed.  Clean up the NEW handler state's
                     %% resources before falling back to retry.
                     catch HandlerMod:terminate_handler(
-                              transport_start_failed, HState),
+                              {transport_start_failed, Reason}, HState),
                     bump_or_exhaust(Data)
             end;
         {stop, _Reason} ->

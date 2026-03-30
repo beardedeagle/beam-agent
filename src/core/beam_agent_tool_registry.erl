@@ -570,7 +570,7 @@ call_handler(Handler, Input) ->
                            []        -> "unknown"
                        end,
             ErrMsg = iolist_to_binary(
-                io_lib:format("Handler crashed (~p) at ~s",
+                io_lib:format("Handler crashed (~p) at ~ts",
                               [Class, TopFrame])),
             {error, ErrMsg}
     end.
