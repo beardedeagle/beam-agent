@@ -647,20 +647,22 @@ Representative events:
 ### ETS Initialization
 
 Call `beam_agent:init/0,1` before starting sessions to initialize the
-SDK's ETS tables. In the default `public` mode all tables use public
-access (zero overhead). Opt into `hardened` mode to protect tables and
-proxy writes through a linked owner process:
+SDK's ETS tables. The default `hardened` mode protects tables and proxies
+writes through a linked owner process, while reads remain zero-cost from
+any process. Opt into `public` mode explicitly if you don't need
+write-path isolation:
 
 ```erlang
-%% Default — public access, zero overhead
+%% Default — hardened access, protected tables, proxied writes, zero-cost reads
 ok = beam_agent:init().
 
-%% Hardened — protected tables, proxied writes, zero-cost reads
-ok = beam_agent:init(#{table_access => hardened}).
+%% Public — all tables use public access, zero overhead (opt-in)
+ok = beam_agent:init(#{table_access => public}).
 ```
 
 If `init/1` is never called, tables are created lazily with public access
-on first use.
+on first use (the pre-init fallback is intentionally permissive since no
+shard owner processes exist yet).
 
 ### Supervisor Integration
 

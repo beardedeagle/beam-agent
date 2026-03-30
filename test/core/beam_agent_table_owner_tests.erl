@@ -2,8 +2,8 @@
 %%% @doc EUnit tests for beam_agent_table_owner.
 %%%
 %%% Tests cover:
-%%%   - Public mode initialization and idempotency
-%%%   - Hardened mode initialization with real owner process
+%%%   - Hardened mode default initialization and idempotency
+%%%   - Explicit public mode initialization
 %%%   - Access mode resolution for always-protected and regular tables
 %%%   - Synchronous write proxy (insert, delete, update_counter)
 %%%   - Owner process lifecycle (linked to consumer, exits on consumer death)
@@ -69,17 +69,17 @@ delete_table(Name) ->
     end.
 
 %%====================================================================
-%% Public mode tests
+%% Initialization and access mode tests
 %%====================================================================
 
-public_mode_defaults_test() ->
+hardened_mode_defaults_test() ->
     cleanup(),
     ok = beam_agent_table_owner:init(),
-    ?assertEqual(public, beam_agent_table_owner:access_mode()),
-    ?assertEqual(undefined, beam_agent_table_owner:owner_pid()),
+    ?assertEqual(hardened, beam_agent_table_owner:access_mode()),
+    ?assertNotEqual(undefined, beam_agent_table_owner:owner_pid()),
     ?assertEqual(true, beam_agent_table_owner:initialized()),
-    ?assertEqual(0, beam_agent_table_owner:shard_count()),
-    ?assertEqual(undefined, beam_agent_table_owner:shard_pids()),
+    ?assertEqual(1, beam_agent_table_owner:shard_count()),
+    ?assertNotEqual(undefined, beam_agent_table_owner:shard_pids()),
     cleanup().
 
 public_mode_explicit_test() ->
