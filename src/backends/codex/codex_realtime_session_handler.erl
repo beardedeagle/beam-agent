@@ -149,7 +149,7 @@ encode_query(Prompt, Params, #hstate{ws_ref = WsRef,
     case fire_hook(user_prompt_submit, HookCtx, HState) of
         {ok, FinalCtx} ->
             FinalPrompt = maps:get(prompt, FinalCtx),
-            _ThreadId = ensure_active_thread(SessionId),
+            _ = ensure_active_thread(SessionId),
             Messages = codex_realtime_protocol:text_messages(FinalPrompt),
             HState1 = HState#hstate{output_buffer = <<>>},
             {ok, {ws_frames, WsRef, Messages}, HState1};
@@ -248,9 +248,13 @@ is_query_complete(_, _HState) -> false.
 -spec handle_custom_call(term(), gen_statem:from(), #hstate{}) ->
     beam_agent_session_handler:control_result().
 handle_custom_call({thread_realtime_start, Params}, _From, HState) ->
-    {ok, ThreadInfo, HState1} = start_realtime_thread(Params, HState),
-    Actions = session_update_actions(Params, HState1),
-    {reply, {ok, ThreadInfo}, Actions, HState1};
+    case start_realtime_thread(Params, HState) of
+        {ok, ThreadInfo, HState1} ->
+            Actions = session_update_actions(Params, HState1),
+            {reply, {ok, ThreadInfo}, Actions, HState1};
+        {error, Reason} ->
+            {error, Reason}
+    end;
 handle_custom_call({thread_realtime_append_audio, ThreadId, Params},
                    _From, HState) ->
     case thread_exists(ThreadId, HState) of
@@ -389,46 +393,65 @@ accumulate_output(Messages, HState) ->
 %% Internal: thread management
 %%====================================================================
 
--spec ensure_active_thread(binary()) -> binary().
+-spec ensure_active_thread(binary()) -> {ok, binary()} | {error, term()}.
 ensure_active_thread(SessionId) ->
     case beam_agent_threads_core:active_thread(SessionId) of
         {ok, ThreadId} ->
-            ThreadId;
+            {ok, ThreadId};
         {error, none} ->
-            {ok, Thread} = beam_agent_threads_core:start_thread(
-                               SessionId,
-                               #{name => <<"codex-realtime">>}),
-            maps:get(thread_id, Thread)
+            case beam_agent_threads_core:start_thread(
+                     SessionId,
+                     #{name => <<"codex-realtime">>}) of
+                {ok, Thread} ->
+                    {ok, maps:get(thread_id, Thread)};
+                {error, _} = Err ->
+                    Err
+            end
     end.
 
--spec start_realtime_thread(map(), #hstate{}) -> {ok, map(), #hstate{}}.
+-spec start_realtime_thread(map(), #hstate{}) ->
+    {ok, map(), #hstate{}} | {error, term()}.
 start_realtime_thread(Params, #hstate{session_id = SessionId} = HState) ->
-    ThreadId = case maps:get(thread_id, Params, undefined) of
-        Id when is_binary(Id), byte_size(Id) > 0 -> Id;
+    case resolve_thread_id(Params, SessionId) of
+        {ok, ThreadId} ->
+            ThreadInfo = #{
+                thread_id  => ThreadId,
+                session_id => SessionId,
+                status     => active,
+                source     => direct_realtime,
+                mode       => maps:get(mode, Params, <<"voice">>)
+            },
+            HState1 = HState#hstate{
+                active_threads = (HState#hstate.active_threads)#{
+                    ThreadId => ThreadInfo
+                }
+            },
+            {ok, ThreadInfo, HState1};
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec resolve_thread_id(map(), binary()) -> {ok, binary()} | {error, term()}.
+resolve_thread_id(Params, SessionId) ->
+    case maps:get(thread_id, Params, undefined) of
+        Id when is_binary(Id), byte_size(Id) > 0 ->
+            {ok, Id};
         _ ->
             case beam_agent_threads_core:active_thread(SessionId) of
-                {ok, Existing} -> Existing;
+                {ok, Existing} ->
+                    {ok, Existing};
                 {error, none} ->
-                    {ok, Thread} = beam_agent_threads_core:start_thread(
-                                       SessionId,
-                                       #{name => maps:get(name, Params,
-                                                          <<"codex-realtime">>)}),
-                    maps:get(thread_id, Thread)
+                    case beam_agent_threads_core:start_thread(
+                             SessionId,
+                             #{name => maps:get(name, Params,
+                                               <<"codex-realtime">>)}) of
+                        {ok, Thread} ->
+                            {ok, maps:get(thread_id, Thread)};
+                        {error, _} = Err ->
+                            Err
+                    end
             end
-    end,
-    ThreadInfo = #{
-        thread_id  => ThreadId,
-        session_id => SessionId,
-        status     => active,
-        source     => direct_realtime,
-        mode       => maps:get(mode, Params, <<"voice">>)
-    },
-    HState1 = HState#hstate{
-        active_threads = (HState#hstate.active_threads)#{
-            ThreadId => ThreadInfo
-        }
-    },
-    {ok, ThreadInfo, HState1}.
+    end.
 
 -spec thread_exists(binary(), #hstate{}) -> boolean().
 thread_exists(ThreadId, #hstate{session_id = SessionId,
