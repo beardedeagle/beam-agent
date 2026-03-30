@@ -422,6 +422,79 @@ defmodule BeamAgent.Catalog do
   defdelegate search_session_stop(session, search_session_id), to: :beam_agent_catalog
 
   # -------------------------------------------------------------------
+  # File impl — lower-level delegates for direct access
+  # -------------------------------------------------------------------
+
+  @doc false
+  @spec file_find_text(binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]}
+          | {:error, {:invalid_pattern, String.t(), non_neg_integer()}}
+  defdelegate file_find_text(pattern, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_find_text(binary(), binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]}
+          | {:error, {:invalid_pattern, term(), non_neg_integer()}}
+  defdelegate file_find_text(pattern, file_glob, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_find_files(:beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_entry()]}
+  defdelegate file_find_files(opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_find_files(binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_entry()]}
+  defdelegate file_find_files(pattern, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_find_symbols(:beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]}
+          | {:error, {:invalid_pattern, String.t(), non_neg_integer()}}
+  defdelegate file_find_symbols(opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_find_symbols(binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_search_result()]}
+          | {:error, {:invalid_pattern, String.t(), non_neg_integer()}}
+  defdelegate file_find_symbols(query, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_list_impl(binary()) :: {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
+  defdelegate file_list_impl(path), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_list_impl(binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, [:beam_agent_catalog.file_entry()]} | {:error, term()}
+  defdelegate file_list_impl(path, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_read_impl(binary()) ::
+          {:ok, %{path: binary(), content: binary()}}
+          | {:error, {:file_too_large, binary()}}
+          | {:error, {:read_failed, binary(), atom()}}
+  defdelegate file_read_impl(path), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_read_impl(binary(), :beam_agent_catalog.file_search_opts()) ::
+          {:ok, %{path: binary(), content: binary()}}
+          | {:error, {:file_too_large, binary()}}
+          | {:error, {:read_failed, binary(), term()}}
+  defdelegate file_read_impl(path, opts), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_status_impl() ::
+          {:ok, %{cwd: binary(), source: :git | :filesystem, files: [map()]}}
+          | {:error, {:list_dir_failed, binary(), atom() | {term(), term()}}}
+  defdelegate file_status_impl(), to: :beam_agent_catalog
+
+  @doc false
+  @spec file_status_impl(:beam_agent_catalog.file_search_opts()) ::
+          {:ok, %{cwd: binary(), source: :git | :filesystem, files: [map()]}}
+          | {:error, {:list_dir_failed, binary(), term()}}
+  defdelegate file_status_impl(opts), to: :beam_agent_catalog
+
+  # -------------------------------------------------------------------
   # Session Catalog — Static Listings
   # -------------------------------------------------------------------
 
