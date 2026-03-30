@@ -319,7 +319,7 @@ beam_agent_policy:evaluate(ProfileId, Action, Context)   -> allow | {deny, Reaso
 %% Canonical routines -- beam_agent_routines
 beam_agent_routines:create(Job)                          -> {ok, JobRecord} | {error, Reason}
 beam_agent_routines:update(JobId, Patch)                -> {ok, JobRecord} | {error, Reason}
-beam_agent_routines:due(Filter)                         -> {ok, [JobRecord]} | {error, Reason}
+beam_agent_routines:list_due(Filter)                     -> {ok, [JobRecord]} | {error, Reason}
 beam_agent_routines:run_due(Opts)                       -> {ok, [map()]} | {error, Reason}
 beam_agent_routines:run_now(JobId)                      -> {ok, Run} | {error, Reason}
 beam_agent_routines:next_due_at()                       -> {ok, DueAt} | {error, none}

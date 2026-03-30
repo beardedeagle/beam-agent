@@ -26,8 +26,6 @@ Target execution itself lives in `beam_agent_routine_runner`.
     get/1,
     list/0,
     list/1,
-    due/0,
-    due/1,
     list_due/0,
     list_due/1,
     next_due_at/0,
@@ -430,16 +428,6 @@ list(Filter) when is_map(Filter) ->
         {error, _} = Error ->
             Error
     end.
-
--doc "Alias for list_due/0.".
--spec due() -> {ok, [job_record()]}.
-due() ->
-    list_due().
-
--doc "Alias for list_due/1.".
--spec due(map()) -> {ok, [job_record()]} | {error, {unsupported_filter, atom()} | {invalid_filter, atom()}}.
-due(Filter) ->
-    list_due(Filter).
 
 -doc "List jobs currently due as of now.".
 -spec list_due() -> {ok, [job_record()]}.
