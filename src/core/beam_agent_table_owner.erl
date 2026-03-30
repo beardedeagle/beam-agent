@@ -397,7 +397,7 @@ do_init(hardened, ShardCount) when is_integer(ShardCount), ShardCount >= 1 ->
 %% Internal: Shard Process Loop
 %%--------------------------------------------------------------------
 
--spec shard_loop(pid(), #{reference() => {module(), atom(), [term()]}},
+-spec shard_loop(pid(), #{pid() => {reference(), [{module(), atom(), [term()]}]}},
                  boolean()) -> no_return().
 shard_loop(Consumer, Monitors, IsPrimary) ->
     receive
