@@ -98,6 +98,7 @@ defmodule BeamAgentEx.MixProject do
         ],
         "Backend Wrappers": [
           ClaudeEx,
+          ClaudeEx.Application,
           ClaudeEx.Session,
           CodexEx,
           CodexEx.Session,
