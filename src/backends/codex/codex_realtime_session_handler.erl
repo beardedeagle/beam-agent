@@ -64,11 +64,10 @@ backend_name() -> codex.
     beam_agent_session_handler:init_result().
 init_handler(Opts) ->
     ClientMod = maps:get(client_module, Opts, beam_agent_ws_client),
-    ApiKey = resolve_api_key(Opts),
-    case ApiKey of
-        <<>> ->
+    case resolve_api_key(Opts) of
+        {error, missing_api_key} ->
             {stop, missing_api_key};
-        _ ->
+        {ok, ApiKey} ->
             Model = maps:get(model, Opts,
                              codex_realtime_protocol:default_model()),
             Voice = maps:get(voice, Opts, undefined),
@@ -482,15 +481,19 @@ maybe_fire_message_hooks(#{type := error} = Msg, HState) ->
 %% Internal: configuration
 %%====================================================================
 
--spec resolve_api_key(map()) -> binary().
+-spec resolve_api_key(map()) -> {ok, binary()} | {error, missing_api_key}.
 resolve_api_key(Opts) ->
     case maps:get(api_key, Opts, undefined) of
         Key when is_binary(Key), byte_size(Key) > 0 ->
-            Key;
+            {ok, Key};
         _ ->
-            EnvKey = os:getenv("CODEX_API_KEY",
-                               os:getenv("OPENAI_API_KEY", "")),
-            unicode:characters_to_binary(EnvKey)
+            case os:getenv("CODEX_API_KEY",
+                           os:getenv("OPENAI_API_KEY", "")) of
+                "" ->
+                    {error, missing_api_key};
+                EnvKey ->
+                    {ok, unicode:characters_to_binary(EnvKey)}
+            end
     end.
 
 -spec resolve_ws_target(map(), binary()) ->
