@@ -125,33 +125,43 @@ defmodule BeamAgent do
   `BeamAgent` retains session lifecycle, streaming, and convenience wrappers.
 
   - `BeamAgent.Account` -- authentication, login/logout, rate limits
+  - `BeamAgent.Agents` -- agent type management and registration
+  - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Artifacts` -- typed artifact and context storage
   - `BeamAgent.Audit` -- durable audit records layered on the journal
-  - `BeamAgent.Apps` -- project/app management and modes
   - `BeamAgent.Capabilities` -- backend capability matrix and checks
   - `BeamAgent.Catalog` -- tools, skills, plugins, agents, models, commands
   - `BeamAgent.Checkpoint` -- file checkpoint and rewind operations
   - `BeamAgent.Command` -- shell commands, session messages, async prompts
+  - `BeamAgent.CommandValidator` -- command execution validation behaviour
   - `BeamAgent.Config` -- session configuration read/write
-  - `BeamAgent.Control` -- turn steering, realtime, reviews, server management
+  - `BeamAgent.Content` -- content block conversion and message normalisation
   - `BeamAgent.Context` -- context pressure, summaries, and policy-driven compaction
+  - `BeamAgent.Control` -- turn steering, realtime, reviews, server management
+  - `BeamAgent.Credential` -- cookie generation and credential encryption
   - `BeamAgent.File` -- file search, read, list, and status
   - `BeamAgent.Hooks` -- SDK lifecycle hook definitions and dispatch
   - `BeamAgent.Journal` -- durable canonical domain-event journal
-  - `BeamAgent.Memory` -- long-term memory and lexical recall
   - `BeamAgent.MCP` -- MCP server/tool registration and management
+  - `BeamAgent.Memory` -- long-term memory and lexical recall
   - `BeamAgent.Orchestrator` -- parent-child orchestration and delegation lineage
+  - `BeamAgent.Plugins` -- plugin management and registration
   - `BeamAgent.Policy` -- reusable allow/deny policy profiles
   - `BeamAgent.Provider` -- LLM provider selection, OAuth flows
   - `BeamAgent.Raw` -- escape-hatch functions for backend-native calls
   - `BeamAgent.Routing` -- backend routing and policy-driven selection
   - `BeamAgent.Routines` -- durable routines and caller-driven scheduled execution
-  - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
   - `BeamAgent.Runs` -- canonical run and step lifecycle
+  - `BeamAgent.Runtime` -- runtime state, model/mode switching, interrupts
   - `BeamAgent.Search` -- fuzzy file search sessions
+  - `BeamAgent.SensitiveKeys` -- sensitive key definitions for encryption and redaction
   - `BeamAgent.SessionStore` -- session history storage and retrieval
   - `BeamAgent.Skills` -- skill listing, remote export, configuration
+  - `BeamAgent.SlashCommands` -- slash command management and registration
+  - `BeamAgent.Store` -- store adapter boundary for domain persistence
+  - `BeamAgent.Telemetry` -- OpenTelemetry-style span and event emission
   - `BeamAgent.Threads` -- thread management within sessions
+  - `BeamAgent.Todo` -- todo tracking helpers for message streams
 
   ## Core concepts
 
