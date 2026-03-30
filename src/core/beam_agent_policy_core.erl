@@ -517,20 +517,12 @@ result_from_default(deny) ->
 
 -spec sort_profiles(profile(), profile()) -> boolean().
 sort_profiles(A, B) ->
-    compare_desc(
+    beam_agent_store_utils:compare_desc(
         maps:get(updated_at, A, 0),
         maps:get(updated_at, B, 0),
         maps:get(profile_id, A),
         maps:get(profile_id, B)
     ).
-
--spec compare_desc(integer(), integer(), binary(), binary()) -> boolean().
-compare_desc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    true;
-compare_desc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    false;
-compare_desc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.
 
 -spec normalize_path(binary()) -> binary().
 normalize_path(Path) ->

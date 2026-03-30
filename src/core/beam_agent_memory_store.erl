@@ -125,7 +125,7 @@ list_memories(Filter) when is_map(Filter) ->
             Acc
     end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_memories/2, Memories),
-    {ok, apply_limit(Sorted, Filter)}.
+    {ok, beam_agent_store_utils:apply_limit(Sorted, maps:get(limit, Filter, infinity))}.
 
 -spec matches_filters(memory_record(), memory_filter()) -> boolean().
 matches_filters(Memory, Filter) ->
@@ -141,9 +141,9 @@ matches_filters(Memory, Filter) ->
         ({run_id, RunId}) ->
             scope_value(run_id, Memory) =:= RunId;
         ({source_ref_type, RefType}) ->
-            has_source_ref_type(RefType, maps:get(source_refs, Memory, []));
+            beam_agent_store_utils:has_source_ref_type(RefType, maps:get(source_refs, Memory, []));
         ({source_ref_id, RefId}) ->
-            has_source_ref_id(RefId, maps:get(source_refs, Memory, []));
+            beam_agent_store_utils:has_source_ref_id(RefId, maps:get(source_refs, Memory, []));
         ({Key, Value}) ->
             maps:get(Key, Memory, undefined) =:= Value
     end, maps:to_list(Filter)).
@@ -152,42 +152,11 @@ matches_filters(Memory, Filter) ->
 scope_value(Key, Memory) ->
     maps:get(Key, maps:get(scope, Memory, #{}), undefined).
 
--spec has_source_ref_type(atom() | binary(), [source_ref()]) -> boolean().
-has_source_ref_type(RefType, SourceRefs) ->
-    lists:any(fun
-        (#{type := Type}) -> Type =:= RefType;
-        (_) -> false
-    end, SourceRefs).
-
--spec has_source_ref_id(binary(), [source_ref()]) -> boolean().
-has_source_ref_id(RefId, SourceRefs) ->
-    lists:any(fun
-        (#{id := Id}) -> Id =:= RefId;
-        (_) -> false
-    end, SourceRefs).
-
--spec apply_limit([memory_record()], memory_filter()) -> [memory_record()].
-apply_limit(Memories, Filter) ->
-    case maps:get(limit, Filter, infinity) of
-        infinity ->
-            Memories;
-        Limit when is_integer(Limit), Limit > 0 ->
-            lists:sublist(Memories, Limit)
-    end.
-
 -spec sort_memories(memory_record(), memory_record()) -> boolean().
 sort_memories(A, B) ->
-    compare_desc(
+    beam_agent_store_utils:compare_desc(
         maps:get(updated_at, A, 0),
         maps:get(updated_at, B, 0),
         maps:get(memory_id, A),
         maps:get(memory_id, B)
     ).
-
--spec compare_desc(integer(), integer(), binary(), binary()) -> boolean().
-compare_desc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    true;
-compare_desc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    false;
-compare_desc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.

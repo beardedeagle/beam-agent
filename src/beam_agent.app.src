@@ -95,6 +95,7 @@
         beam_agent_store,
         beam_agent_store_dets,
         beam_agent_store_ets,
+        beam_agent_store_utils,
         beam_agent_table_owner,
         beam_agent_telemetry_core,
         beam_agent_threads_core,
