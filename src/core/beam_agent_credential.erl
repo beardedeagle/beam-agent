@@ -239,7 +239,6 @@ auto_generate_and_cache() ->
 await_cached_key() ->
     await_cached_key(1000).
 
--spec await_cached_key(pos_integer()) -> binary().
 await_cached_key(0) ->
     error(credential_key_init_timeout);
 await_cached_key(Remaining) ->

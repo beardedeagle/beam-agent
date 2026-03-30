@@ -248,13 +248,9 @@ is_query_complete(_, _HState) -> false.
 -spec handle_custom_call(term(), gen_statem:from(), #hstate{}) ->
     beam_agent_session_handler:control_result().
 handle_custom_call({thread_realtime_start, Params}, _From, HState) ->
-    case start_realtime_thread(Params, HState) of
-        {ok, ThreadInfo, HState1} ->
-            Actions = session_update_actions(Params, HState1),
-            {reply, {ok, ThreadInfo}, Actions, HState1};
-        {error, Reason} ->
-            {error, Reason}
-    end;
+    {ok, ThreadInfo, HState1} = start_realtime_thread(Params, HState),
+    Actions = session_update_actions(Params, HState1),
+    {reply, {ok, ThreadInfo}, Actions, HState1};
 handle_custom_call({thread_realtime_append_audio, ThreadId, Params},
                    _From, HState) ->
     case thread_exists(ThreadId, HState) of
@@ -393,45 +389,37 @@ accumulate_output(Messages, HState) ->
 %% Internal: thread management
 %%====================================================================
 
--spec ensure_active_thread(binary()) -> {ok, binary()} | {error, term()}.
+-spec ensure_active_thread(binary()) -> {ok, binary()}.
 ensure_active_thread(SessionId) ->
     case beam_agent_threads_core:active_thread(SessionId) of
         {ok, ThreadId} ->
             {ok, ThreadId};
         {error, none} ->
-            case beam_agent_threads_core:start_thread(
+            {ok, Thread} = beam_agent_threads_core:start_thread(
                      SessionId,
-                     #{name => <<"codex-realtime">>}) of
-                {ok, Thread} ->
-                    {ok, maps:get(thread_id, Thread)};
-                {error, _} = Err ->
-                    Err
-            end
+                     #{name => <<"codex-realtime">>}),
+            {ok, maps:get(thread_id, Thread)}
     end.
 
 -spec start_realtime_thread(map(), #hstate{}) ->
-    {ok, map(), #hstate{}} | {error, term()}.
+    {ok, map(), #hstate{}}.
 start_realtime_thread(Params, #hstate{session_id = SessionId} = HState) ->
-    case resolve_thread_id(Params, SessionId) of
-        {ok, ThreadId} ->
-            ThreadInfo = #{
-                thread_id  => ThreadId,
-                session_id => SessionId,
-                status     => active,
-                source     => direct_realtime,
-                mode       => maps:get(mode, Params, <<"voice">>)
-            },
-            HState1 = HState#hstate{
-                active_threads = (HState#hstate.active_threads)#{
-                    ThreadId => ThreadInfo
-                }
-            },
-            {ok, ThreadInfo, HState1};
-        {error, _} = Err ->
-            Err
-    end.
+    {ok, ThreadId} = resolve_thread_id(Params, SessionId),
+    ThreadInfo = #{
+        thread_id  => ThreadId,
+        session_id => SessionId,
+        status     => active,
+        source     => direct_realtime,
+        mode       => maps:get(mode, Params, <<"voice">>)
+    },
+    HState1 = HState#hstate{
+        active_threads = (HState#hstate.active_threads)#{
+            ThreadId => ThreadInfo
+        }
+    },
+    {ok, ThreadInfo, HState1}.
 
--spec resolve_thread_id(map(), binary()) -> {ok, binary()} | {error, term()}.
+-spec resolve_thread_id(map(), binary()) -> {ok, binary()}.
 resolve_thread_id(Params, SessionId) ->
     case maps:get(thread_id, Params, undefined) of
         Id when is_binary(Id), byte_size(Id) > 0 ->
@@ -441,15 +429,11 @@ resolve_thread_id(Params, SessionId) ->
                 {ok, Existing} ->
                     {ok, Existing};
                 {error, none} ->
-                    case beam_agent_threads_core:start_thread(
+                    {ok, Thread} = beam_agent_threads_core:start_thread(
                              SessionId,
                              #{name => maps:get(name, Params,
-                                               <<"codex-realtime">>)}) of
-                        {ok, Thread} ->
-                            {ok, maps:get(thread_id, Thread)};
-                        {error, _} = Err ->
-                            Err
-                    end
+                                               <<"codex-realtime">>)}),
+                    {ok, maps:get(thread_id, Thread)}
             end
     end.
 
