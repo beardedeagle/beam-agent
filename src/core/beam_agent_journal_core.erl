@@ -22,7 +22,9 @@ persistence to `beam_agent_journal_store`.
     stream_from/1,
     stream_from/2,
     get/1,
-    ack/2
+    ack/2,
+    get_ack/2,
+    list_acks/1
 ]).
 
 -export_type([
@@ -243,6 +245,21 @@ ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
                 #{consumer_id => ConsumerId, event_id => EventId, found => false}),
             Error
     end.
+
+-doc "Fetch an ack record for a consumer and event.".
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
+get_ack(ConsumerId, EventId)
+  when is_binary(ConsumerId), is_binary(EventId) ->
+    beam_agent_journal_store:get_ack(ConsumerId, EventId).
+
+-doc "List all ack records for a consumer, newest first.".
+-spec list_acks(binary()) -> {ok, [map()]}.
+list_acks(ConsumerId) when is_binary(ConsumerId) ->
+    beam_agent_journal_store:list_acks(ConsumerId).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
 
 -spec normalize_event_type(atom() | binary()) -> ok | {error, {invalid_event_type, binary()}}.
 normalize_event_type(EventType) when is_atom(EventType) ->

@@ -17,7 +17,9 @@ the same code works in both public and hardened table-access modes.
     insert_event/1,
     get_event/1,
     list_events/1,
-    ack_event/3
+    ack_event/3,
+    get_ack/2,
+    list_acks/1
 ]).
 
 -export_type([
@@ -133,6 +135,36 @@ ack_event(ConsumerId, EventId, AcknowledgedAt)
         {error, not_found} ->
             {error, not_found}
     end.
+
+-doc "Fetch a single ack record for a consumer and event.".
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
+get_ack(ConsumerId, EventId)
+  when is_binary(ConsumerId), is_binary(EventId) ->
+    ensure_tables(),
+    case beam_agent_store:lookup(?STORE_DOMAIN, ?ACKS_TABLE,
+        {ConsumerId, EventId}) of
+        [{_, Ack}] -> {ok, Ack};
+        [] -> {error, not_found}
+    end.
+
+-doc "List all ack records for a consumer, newest first.".
+-spec list_acks(binary()) -> {ok, [map()]}.
+list_acks(ConsumerId) when is_binary(ConsumerId) ->
+    ensure_tables(),
+    Acks = beam_agent_store:foldl(?STORE_DOMAIN, fun
+        ({{CId, _EventId}, Ack}, Acc) when CId =:= ConsumerId ->
+            [Ack | Acc];
+        (_, Acc) ->
+            Acc
+    end, [], ?ACKS_TABLE),
+    Sorted = lists:sort(fun(A, B) ->
+        maps:get(acknowledged_at, A, 0) >= maps:get(acknowledged_at, B, 0)
+    end, Acks),
+    {ok, Sorted}.
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
 
 -spec start_key(event_filter()) -> '$end_of_table' | pos_integer().
 start_key(Filter) ->

@@ -34,6 +34,8 @@ than the internal module name.
     stream_from/2,
     get/1,
     ack/2,
+    get_ack/2,
+    list_acks/1,
     %% Audit convenience API
     list_events/0,
     list_events/1,
@@ -149,6 +151,16 @@ get(EventId) ->
 -spec ack(binary(), binary()) -> ok | {error, not_found}.
 ack(ConsumerId, EventId) ->
     beam_agent_journal_core:ack(ConsumerId, EventId).
+
+-doc "Fetch an ack record for a consumer and event.".
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
+get_ack(ConsumerId, EventId) ->
+    beam_agent_journal_core:get_ack(ConsumerId, EventId).
+
+-doc "List all ack records for a consumer, newest first.".
+-spec list_acks(binary()) -> {ok, [map()]}.
+list_acks(ConsumerId) ->
+    beam_agent_journal_core:list_acks(ConsumerId).
 
 %%--------------------------------------------------------------------
 %% Audit Convenience API
