@@ -88,6 +88,15 @@ beam_agent_ets:ensure_table(?TABLE, [set, named_table,
 -doc """
 Ensure a named ETS table exists with the given options. Idempotent.
 
+Domain modules call this at the top of every public function as a
+defensive initialization guard. This is intentional: the SDK is
+process-free, so there is no guaranteed boot-time entry point. The
+guard ensures tables exist regardless of call order.
+
+The overhead is negligible — `ets:whereis/1` is an O(1) hash lookup
+in the ETS registry, so the ~262 calls across the SDK add near-zero
+cost after the tables exist.
+
 The access mode (`public` or `protected`) is resolved automatically
 based on the table name and the global access mode configured via
 `beam_agent_table_owner:init/1`. Do NOT include `public`, `protected`,
