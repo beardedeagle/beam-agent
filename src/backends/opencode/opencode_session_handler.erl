@@ -23,7 +23,8 @@
     on_state_enter/3,
     is_query_complete/2,
     handle_custom_call/3,
-    handle_info/3
+    handle_info/3,
+    is_terminal/1
 ]).
 
 %% Exported for unit testing
@@ -258,6 +259,11 @@ terminate_handler(Reason, #hstate{} = HState) ->
                     session_id => HState#hstate.session_id},
                   HState),
     ok.
+
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result}) -> true;
+is_terminal(#{type := error})  -> true;
+is_terminal(_Message)          -> false.
 
 %%====================================================================
 %% Engine format_status redaction

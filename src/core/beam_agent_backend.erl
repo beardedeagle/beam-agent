@@ -65,22 +65,27 @@ list of recognized aliases (atoms and binaries).
 """.
 registry() ->
     #{claude   => #{module  => claude_agent_sdk,
+                    handler => claude_session_handler,
                     aliases => [claude_agent_sdk,
                                 <<"claude">>, <<"claude_code">>,
                                 <<"claude_agent_sdk">>]},
       codex    => #{module  => codex_app_server,
+                    handler => codex_session_handler,
                     aliases => [codex_app_server,
                                 <<"codex">>, <<"codex_cli">>,
                                 <<"codex_app_server">>]},
       gemini   => #{module  => gemini_cli_client,
+                    handler => gemini_session_handler,
                     aliases => [gemini_cli_client,
                                 <<"gemini">>, <<"gemini_cli">>,
                                 <<"gemini_cli_client">>]},
       opencode => #{module  => opencode_client,
+                    handler => opencode_session_handler,
                     aliases => [opencode_client,
                                 <<"opencode">>,
                                 <<"opencode_client">>]},
       copilot  => #{module  => copilot_client,
+                    handler => copilot_session_handler,
                     aliases => [copilot_client,
                                 <<"copilot">>,
                                 <<"copilot_client">>]}}.
@@ -178,28 +183,29 @@ session_backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 -
 -doc """
 Return whether a message should terminate collection for a backend.
 
-Copilot emits non-terminal `error` messages, so only `error` messages with
-`is_error := true` halt that backend's collection loop. This is behavioral
-semantics specific to each backend's wire protocol, not registry
-configuration, so it is defined here as explicit pattern matches.
+Dispatches to the backend's session handler module via the registry,
+keeping `beam_agent_backend` closed to modification when new backends
+are added (OCP). Each handler implements the required `is_terminal/1`
+callback with its own wire-protocol semantics.
+
+Crashes with `{unknown_backend, Backend}` if the backend atom is not
+in the registry — this is a programmer error, not a runtime condition.
 """.
 -spec is_terminal(backend(), map()) -> boolean().
-is_terminal(copilot, #{type := result}) ->
-    true;
-is_terminal(copilot, #{type := error, is_error := true}) ->
-    true;
-is_terminal(copilot, #{type := error}) ->
-    false;
-is_terminal(_, #{type := result}) ->
-    true;
-is_terminal(_, #{type := error}) ->
-    true;
-is_terminal(_, _) ->
-    false.
+is_terminal(Backend, Message) ->
+    Module = handler_module(Backend),
+    Module:is_terminal(Message).
 
 %%--------------------------------------------------------------------
 %% Internal helpers
 %%--------------------------------------------------------------------
+
+-spec handler_module(backend()) -> module().
+handler_module(Backend) ->
+    case maps:find(Backend, registry()) of
+        {ok, #{handler := Mod}} -> Mod;
+        error -> error({unknown_backend, Backend})
+    end.
 
 -spec lookup_alias(atom() | binary(), #{backend() => map()}) ->
     {ok, backend()} | {error, backend_error()}.

@@ -300,6 +300,20 @@ Default: checks for `type => result` in the message map.
 ) -> boolean().
 
 -doc """
+Return whether a message terminates the collection loop for this backend.
+
+Called by `beam_agent_backend:is_terminal/2` via registry dispatch so
+that the OCP holds: adding a 6th backend requires only a new handler
+module implementing this callback — `beam_agent_backend` is never
+edited again.
+
+This is a stateless variant of `is_query_complete/2` — no handler state
+is available because it is called from the routing layer, outside any
+session process.
+""".
+-callback is_terminal(Message :: beam_agent_core:message()) -> boolean().
+
+-doc """
 Handle backend-specific API calls not covered by `beam_agent_adapter_session`.
 
 Called when the engine receives a `gen_statem:call` it does not recognize.

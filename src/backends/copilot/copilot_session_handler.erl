@@ -10,7 +10,8 @@
     handle_data/2,
     encode_query/3,
     build_session_info/1,
-    terminate_handler/2
+    terminate_handler/2,
+    is_terminal/1
 ]).
 
 %% Optional callbacks
@@ -228,6 +229,12 @@ terminate_handler(Reason, #hstate{pending = Pending} = HState) ->
         end,
         Pending),
     ok.
+
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result})                -> true;
+is_terminal(#{type := error, is_error := true}) -> true;
+is_terminal(#{type := error})                  -> false;
+is_terminal(_Message)                          -> false.
 
 %%====================================================================
 %% Optional callbacks
