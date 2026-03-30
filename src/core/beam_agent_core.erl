@@ -51,20 +51,10 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     abort/1,
     send_control/3,
     %% Shared session and thread capabilities
-    list_sessions/0,
-    list_sessions/1,
     get_session_messages/1,
     get_session_messages/2,
     get_session/1,
     delete_session/1,
-    fork_session/2,
-    revert_session/2,
-    unrevert_session/1,
-    share_session/1,
-    share_session/2,
-    unshare_session/1,
-    summarize_session/1,
-    summarize_session/2,
     thread_start/2,
     thread_resume/2,
     thread_list/1,
@@ -80,24 +70,8 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
     supported_models/1,
     supported_agents/1,
     account_info/1,
-    list_tools/1,
     list_skills/1,
-    list_plugins/1,
-    list_mcp_servers/1,
     list_agents/1,
-    get_tool/2,
-    get_skill/2,
-    get_plugin/2,
-    get_agent/2,
-    current_provider/1,
-    set_provider/2,
-    clear_provider/1,
-    current_agent/1,
-    set_agent/2,
-    clear_agent/1,
-    capabilities/0,
-    capabilities/1,
-    supports/2,
     normalize_message/1,
     make_request_id/0,
     parse_stop_reason/1,
@@ -210,13 +184,6 @@ calling the relevant `ensure_tables/0' functions from that process at boot.
                            | {deny, binary(), boolean()}
                            | {allow, map(), map() | [map()]}
                            | map().
-
--type backend_resolution_error() :: backend_not_present
-                          | {invalid_session_info, term()}
-                          | {session_backend_lookup_failed, term()}
-                          | {unknown_backend, term()}.
-
--type supports_error() :: backend_resolution_error() | {unknown_capability, term()}.
 
 %% Unified message record. Required field: `type`.
 %% All other fields are optional and depend on message_type().
@@ -608,17 +575,6 @@ send_control(Session, Method, Params)
   when is_pid(Session), is_binary(Method), is_map(Params) ->
     beam_agent_routing:send_control(Session, Method, Params).
 
--doc "List tracked sessions from the shared session store.".
--spec list_sessions() -> {ok, [beam_agent_session_store_core:session_meta()]}.
-list_sessions() ->
-    beam_agent_routing:list_sessions().
-
--doc "List tracked sessions with filters.".
--spec list_sessions(beam_agent_session_store_core:list_opts()) ->
-    {ok, [beam_agent_session_store_core:session_meta()]}.
-list_sessions(Opts) when is_map(Opts) ->
-    beam_agent_routing:list_sessions(Opts).
-
 -doc "Get visible messages for a tracked session id.".
 -spec get_session_messages(binary()) ->
     {ok, [message()]} | {error, not_found}.
@@ -641,46 +597,6 @@ get_session(SessionId) ->
 -spec delete_session(binary()) -> ok.
 delete_session(SessionId) ->
     beam_agent_routing:delete_session(SessionId).
-
--doc "Fork a live session.".
--spec fork_session(pid(), map()) -> {ok, map()} | {error, term()}.
-fork_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_routing:fork_session(Session, Opts).
-
--doc "Revert a live session.".
--spec revert_session(pid(), map()) -> {ok, map()} | {error, term()}.
-revert_session(Session, Selector) when is_pid(Session), is_map(Selector) ->
-    beam_agent_routing:revert_session(Session, Selector).
-
--doc "Clear a live session's revert state.".
--spec unrevert_session(pid()) -> {ok, map()} | {error, term()}.
-unrevert_session(Session) when is_pid(Session) ->
-    beam_agent_routing:unrevert_session(Session).
-
--doc "Share a live session using default opts.".
--spec share_session(pid()) -> {ok, map()} | {error, term()}.
-share_session(Session) when is_pid(Session) ->
-    beam_agent_routing:share_session(Session).
-
--doc "Share a live session.".
--spec share_session(pid(), map()) -> {ok, map()} | {error, term()}.
-share_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_routing:share_session(Session, Opts).
-
--doc "Revoke sharing for a live session.".
--spec unshare_session(pid()) -> ok | {error, term()}.
-unshare_session(Session) when is_pid(Session) ->
-    beam_agent_routing:unshare_session(Session).
-
--doc "Summarize a live session using default opts.".
--spec summarize_session(pid()) -> {ok, map()} | {error, term()}.
-summarize_session(Session) when is_pid(Session) ->
-    beam_agent_routing:summarize_session(Session).
-
--doc "Summarize a live session.".
--spec summarize_session(pid(), map()) -> {ok, map()} | {error, term()}.
-summarize_session(Session, Opts) when is_pid(Session), is_map(Opts) ->
-    beam_agent_routing:summarize_session(Session, Opts).
 
 -doc "Start a thread for a live session or persisted session id.".
 -spec thread_start(pid() | binary(), map()) -> {ok, map()} | {error, term()}.
@@ -778,113 +694,15 @@ supported_agents(Session) when is_pid(Session) ->
 account_info(Session) when is_pid(Session) ->
     beam_agent_routing:account_info(Session).
 
--doc "List tools from the shared metadata catalog.".
--spec list_tools(pid() | binary()) -> {ok, [map()]} | {error, term()}.
-list_tools(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_catalog_core:list_tools(Session).
-
 -doc "List skills from the shared metadata catalog.".
 -spec list_skills(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 list_skills(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_skills(Session).
 
--doc "List plugins from the shared metadata catalog.".
--spec list_plugins(pid() | binary()) -> {ok, [map()]} | {error, term()}.
-list_plugins(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_catalog_core:list_plugins(Session).
-
--doc "List MCP servers from the shared metadata catalog.".
--spec list_mcp_servers(pid() | binary()) -> {ok, [map()]} | {error, term()}.
-list_mcp_servers(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_catalog_core:list_mcp_servers(Session).
-
 -doc "List agents from the shared metadata catalog.".
 -spec list_agents(pid() | binary()) -> {ok, [map()]} | {error, term()}.
 list_agents(Session) when is_pid(Session); is_binary(Session) ->
     beam_agent_catalog_core:list_agents(Session).
-
--doc "Look up a tool from the shared metadata catalog.".
--spec get_tool(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_tool(Session, ToolId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(ToolId) ->
-    beam_agent_catalog_core:get_tool(Session, ToolId).
-
--doc "Look up a skill from the shared metadata catalog.".
--spec get_skill(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_skill(Session, SkillId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(SkillId) ->
-    beam_agent_catalog_core:get_skill(Session, SkillId).
-
--doc "Look up a plugin from the shared metadata catalog.".
--spec get_plugin(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_plugin(Session, PluginId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(PluginId) ->
-    beam_agent_catalog_core:get_plugin(Session, PluginId).
-
--doc "Look up an agent from the shared metadata catalog.".
--spec get_agent(pid() | binary(), binary()) -> {ok, map()} | {error, not_found | term()}.
-get_agent(Session, AgentId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(AgentId) ->
-    beam_agent_catalog_core:get_agent(Session, AgentId).
-
--doc "Return the current default provider selection for a session.".
--spec current_provider(pid() | binary()) -> {ok, binary()} | {error, not_set}.
-current_provider(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_runtime_core:current_provider(Session).
-
--doc "Set the default provider for future queries on a session.".
--spec set_provider(pid() | binary(), binary()) -> ok.
-set_provider(Session, ProviderId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(ProviderId) ->
-    beam_agent_runtime_core:set_provider(Session, ProviderId).
-
--doc "Clear any default provider selection for a session.".
--spec clear_provider(pid() | binary()) -> ok.
-clear_provider(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_runtime_core:clear_provider(Session).
-
--doc "Return the current default agent selection for a session.".
--spec current_agent(pid() | binary()) -> {ok, binary()} | {error, not_set}.
-current_agent(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_catalog_core:current_agent(Session).
-
--doc "Set the default agent for future queries on a session.".
--spec set_agent(pid() | binary(), binary()) -> ok.
-set_agent(Session, AgentId)
-  when (is_pid(Session) orelse is_binary(Session)), is_binary(AgentId) ->
-    beam_agent_catalog_core:set_default_agent(Session, AgentId).
-
--doc "Clear any default agent selection for a session.".
--spec clear_agent(pid() | binary()) -> ok.
-clear_agent(Session) when is_pid(Session); is_binary(Session) ->
-    beam_agent_catalog_core:clear_default_agent(Session).
-
--doc "Return the canonical capability registry.".
--spec capabilities() -> [beam_agent_capabilities:capability_info()].
-capabilities() ->
-    beam_agent_capabilities:all().
-
--doc "Return the capability view for a backend or live session.".
--spec capabilities(pid() | backend() | binary() | atom()) ->
-    {ok, [map()]} | {error, backend_resolution_error()}.
-capabilities(Session) when is_pid(Session) ->
-    beam_agent_capabilities:for_session(Session);
-capabilities(BackendLike) ->
-    beam_agent_capabilities:for_backend(BackendLike).
-
--doc "Return whether a capability is available for a backend or live session.".
--spec supports(beam_agent_capabilities:capability(),
-               pid() | backend() | binary() | atom()) ->
-    {ok, true} | {error, supports_error()}.
-supports(Capability, Session) when is_pid(Session) ->
-    case backend(Session) of
-        {ok, Backend} ->
-            beam_agent_capabilities:supports(Capability, Backend);
-        {error, _} = Error ->
-            Error
-    end;
-supports(Capability, BackendLike) ->
-    beam_agent_capabilities:supports(Capability, BackendLike).
 
 -doc """
 Normalize a raw decoded JSON map into an `beam_agent_core:message()`.
