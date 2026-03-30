@@ -13,6 +13,12 @@ format tool results for the next turn.
 All three callbacks are required: if a backend declares tool support, it
 must handle the full round-trip.
 
+> **Status:** No implementations yet. The current five backends handle
+> tool management through their session handlers and the unified
+> `beam_agent_tool_registry`. This behaviour is reserved for backends
+> that need a distinct tool-formatting layer (e.g., stateless API
+> backends that require tool definitions in their wire format).
+
 See also: `beam_agent_adapter`, `beam_agent_adapter_session`,
 `beam_agent_adapter_api`.
 """.

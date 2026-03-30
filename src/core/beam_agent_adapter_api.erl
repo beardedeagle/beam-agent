@@ -13,6 +13,12 @@ The unified `beam_agent_core` dispatcher routes to the stateless path when
 Required callbacks handle synchronous and streaming chat completions.
 Optional callbacks cover embeddings, model listing, and request cancellation.
 
+> **Status:** No implementations yet. All five current backends are
+> session-based agentic coders (`backend_type/0` returns `agentic`) and
+> implement `beam_agent_adapter_session` instead. This behaviour is
+> reserved for future stateless inference API backends (e.g., direct
+> Anthropic Messages API, OpenAI Chat Completions).
+
 See also: `beam_agent_adapter`, `beam_agent_adapter_tools`.
 """.
 
