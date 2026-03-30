@@ -173,8 +173,13 @@ defmodule BeamAgent.Runtime do
   remains redacted.
   """
   @spec provider_status(pid() | binary()) ::
-          {:ok, %{required(:provider_id) => :undefined | binary()}}
-  defdelegate provider_status(session), to: :beam_agent_runtime
+          {:ok, %{required(:provider_id) => nil | binary()}}
+  def provider_status(session) do
+    case :beam_agent_runtime.provider_status(session) do
+      {:ok, %{provider_id: :undefined} = map} -> {:ok, %{map | provider_id: nil}}
+      other -> other
+    end
+  end
 
   @doc """
   Return status for a specific provider by ID.

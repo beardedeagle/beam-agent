@@ -456,8 +456,9 @@ defmodule BeamAgent.MCP do
   describes the server's current state (e.g. enabled/disabled, tool count).
   Pass `nil` to get `{:ok, %{}}`.
   """
-  @spec server_status(mcp_registry() | :undefined) :: {:ok, %{binary() => map()}}
-  defdelegate server_status(registry), to: :beam_agent_mcp
+  @spec server_status(mcp_registry() | nil) :: {:ok, %{binary() => map()}}
+  def server_status(nil), do: :beam_agent_mcp.server_status(:undefined)
+  def server_status(registry), do: :beam_agent_mcp.server_status(registry)
 
   @doc """
   Replace the full set of servers in a registry.
@@ -465,8 +466,9 @@ defmodule BeamAgent.MCP do
   Merges new servers over the old registry, preserving runtime state
   (enabled/disabled flags) for servers that existed before.
   """
-  @spec set_servers([sdk_mcp_server()], mcp_registry() | :undefined) :: mcp_registry()
-  defdelegate set_servers(servers, old_registry), to: :beam_agent_mcp
+  @spec set_servers([sdk_mcp_server()], mcp_registry() | nil) :: mcp_registry()
+  def set_servers(servers, nil), do: :beam_agent_mcp.set_servers(servers, :undefined)
+  def set_servers(servers, old_registry), do: :beam_agent_mcp.set_servers(servers, old_registry)
 
   @doc """
   Enable or disable a named server in the registry at runtime.
@@ -475,9 +477,10 @@ defmodule BeamAgent.MCP do
 
   Returns `{:ok, updated_registry}` or `{:error, :not_found}`.
   """
-  @spec toggle_server(binary(), boolean(), mcp_registry() | :undefined) ::
+  @spec toggle_server(binary(), boolean(), mcp_registry() | nil) ::
           {:ok, mcp_registry()} | {:error, :not_found}
-  defdelegate toggle_server(name, enabled, registry), to: :beam_agent_mcp
+  def toggle_server(name, enabled, nil), do: :beam_agent_mcp.toggle_server(name, enabled, :undefined)
+  def toggle_server(name, enabled, registry), do: :beam_agent_mcp.toggle_server(name, enabled, registry)
 
   @doc """
   Mark a named server as reconnected in the registry.
@@ -486,9 +489,10 @@ defmodule BeamAgent.MCP do
 
   Returns `{:ok, updated_registry}` or `{:error, :not_found}`.
   """
-  @spec reconnect_server(binary(), mcp_registry() | :undefined) ::
+  @spec reconnect_server(binary(), mcp_registry() | nil) ::
           {:ok, mcp_registry()} | {:error, :not_found}
-  defdelegate reconnect_server(name, registry), to: :beam_agent_mcp
+  def reconnect_server(name, nil), do: :beam_agent_mcp.reconnect_server(name, :undefined)
+  def reconnect_server(name, registry), do: :beam_agent_mcp.reconnect_server(name, registry)
 
   @doc """
   Remove a named server from the registry.
@@ -507,8 +511,9 @@ defmodule BeamAgent.MCP do
   can retrieve it via `get_session_registry/1` without holding a reference to the
   session process state. Called by session handlers during initialisation.
   """
-  @spec register_session_registry(pid(), mcp_registry() | :undefined) :: :ok
-  defdelegate register_session_registry(pid, registry), to: :beam_agent_mcp
+  @spec register_session_registry(pid(), mcp_registry() | nil) :: :ok
+  def register_session_registry(pid, nil), do: :beam_agent_mcp.register_session_registry(pid, :undefined)
+  def register_session_registry(pid, registry), do: :beam_agent_mcp.register_session_registry(pid, registry)
 
   @doc """
   Retrieve the MCP registry for a session from the global ETS table.
