@@ -204,14 +204,19 @@ defmodule BeamAgent.Store do
   @doc """
   Resolve the data directory from DETS store options.
 
-  Returns the directory path where `.dets` files are stored.
-  Defaults to `"beam_agent_data"` when no `data_dir` is configured.
+  Returns the directory path where `.dets` files are stored as a binary
+  string. Defaults to `"beam_agent_data"` when no `data_dir` is configured.
+
+  The underlying Erlang function returns a charlist (`file:filename()`);
+  this wrapper converts it to a binary for idiomatic Elixir usage.
 
   ## Examples
 
       "beam_agent_data" = BeamAgent.Store.data_dir(%{})
       "/var/data" = BeamAgent.Store.data_dir(%{data_dir: "/var/data"})
   """
-  @spec data_dir(store_options()) :: charlist()
-  defdelegate data_dir(store_opts), to: :beam_agent_store_dets
+  @spec data_dir(store_options()) :: String.t()
+  def data_dir(store_opts) do
+    :beam_agent_store_dets.data_dir(store_opts) |> List.to_string()
+  end
 end
