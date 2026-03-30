@@ -566,8 +566,8 @@ call_handler(Handler, Input) ->
             %% leaking sensitive data (keys, credentials) that may
             %% be embedded in the raw Reason term.
             TopFrame = case SafeStack of
-                           [Top | _] -> io_lib:format("~p", [Top]);
-                           []        -> "unknown"
+                           [Top | _] -> iolist_to_binary(io_lib:format("~p", [Top]));
+                           []        -> <<"unknown">>
                        end,
             ErrMsg = iolist_to_binary(
                 io_lib:format("Handler crashed (~p) at ~ts",

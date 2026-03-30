@@ -1322,12 +1322,17 @@ normalize(<<"myagent_client">>) -> {ok, myagent};
 adapter_module(myagent) -> myagent_client.
 ```
 
-6. **Add `is_terminal/2` clauses if your backend has non-standard terminal
-   message semantics:**
+6. **Implement `is_terminal/1` in your session handler if your backend has
+   non-standard terminal message semantics.** The session handler behaviour
+   requires this callback, and `beam_agent_backend:is_terminal/2` dispatches
+   to it via the backend registry:
 
 ```erlang
-is_terminal(myagent, #{type := result}) -> true;
-is_terminal(myagent, #{type := error}) -> true;
+%% In myagent_session_handler.erl (exports is_terminal/1)
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result}) -> true;
+is_terminal(#{type := error})  -> true;
+is_terminal(_Message)          -> false.
 ```
 
 #### 5b. Register capabilities in `beam_agent_capabilities`
