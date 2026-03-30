@@ -128,7 +128,8 @@ defmodule BeamAgent.Checkpoint do
   [%{path: "/home/user/project/src/main.ex", existed: true}] = cp.files
   ```
   """
-  @spec snapshot(binary(), binary(), [binary() | String.t()]) :: {:ok, checkpoint()}
+  @spec snapshot(binary(), binary(), [binary() | String.t()]) ::
+          {:ok, checkpoint()} | {:error, {:path_traversal, binary()}}
   defdelegate snapshot(session_id, uuid, file_paths), to: :beam_agent_checkpoint
 
   @doc """
@@ -147,7 +148,7 @@ defmodule BeamAgent.Checkpoint do
   ```
   """
   @spec rewind(binary(), binary()) ::
-          :ok | {:error, :not_found | {:restore_failed, binary(), atom()}}
+          :ok | {:error, :not_found | {:restore_failed, binary(), atom() | :path_traversal}}
   defdelegate rewind(session_id, uuid), to: :beam_agent_checkpoint
 
   @doc """

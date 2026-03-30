@@ -198,7 +198,7 @@ Returns {ok, Checkpoint} with the checkpoint metadata map.
 ```
 """.
 -spec snapshot(binary(), binary(), [binary() | string()]) ->
-    {ok, checkpoint()}.
+    {ok, checkpoint()} | {error, {path_traversal, binary()}}.
 snapshot(SessionId, UUID, Paths) ->
     beam_agent_checkpoint_core:snapshot(SessionId, UUID, Paths).
 
@@ -222,7 +222,7 @@ ok = beam_agent_checkpoint:rewind(<<"sess_001">>, <<"tool_use_xyz">>)
 ```
 """.
 -spec rewind(binary(), binary()) ->
-    ok | {error, not_found | {restore_failed, binary(), file:posix()}}.
+    ok | {error, not_found | {restore_failed, binary(), file:posix() | path_traversal}}.
 rewind(SessionId, UUID) ->
     beam_agent_checkpoint_core:rewind(SessionId, UUID).
 
