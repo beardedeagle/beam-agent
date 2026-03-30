@@ -69,6 +69,7 @@ Returns `ok` when the `kill` command exits with status 0. Returns
 - `{signal_failed, N}` — `kill` exited non-zero (process not found,
   permission denied, etc.)
 - `timeout` — `kill` did not exit within 5 seconds
+- `{port_error, Detail}` — port crashed or threw before completing
 
 Crashes with `function_clause` for unrecognised signal atoms (fail-fast).
 

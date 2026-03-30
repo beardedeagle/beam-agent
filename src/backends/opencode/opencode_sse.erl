@@ -54,7 +54,7 @@ parse_chunk(Chunk, {Buffer, Evt, MaxDataLines, MaxLineSize}) ->
 split_lines(Data, MaxLineSize) ->
     split_lines_impl(Data, [], MaxLineSize).
 
-%% Uses binary:split/3 (BIF-level scanning) instead of byte-by-byte
+%% Uses binary:split/2 (BIF-level scanning) instead of byte-by-byte
 %% matching for O(1) newline detection per line segment.
 -spec split_lines_impl(binary(), [binary()], pos_integer()) ->
                           {[binary()], binary()}.
