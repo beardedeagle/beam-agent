@@ -42,7 +42,7 @@ defmodule BeamAgentTest do
   # ---------------------------------------------------------------------------
 
   test "delegates backend registry to canonical erlang module" do
-    assert BeamAgent.list_backends() == [:claude, :codex, :gemini, :opencode, :copilot]
+    assert BeamAgent.list_backends() == [:claude, :codex, :copilot, :gemini, :opencode]
   end
 
   test "command wrapper executes a minimal shell command" do

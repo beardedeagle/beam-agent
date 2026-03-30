@@ -317,6 +317,19 @@ defmodule BeamAgent.Runtime do
   @spec app_modes_impl(pid() | binary()) :: {:ok, [binary()]}
   defdelegate app_modes_impl(session), to: :beam_agent_runtime
 
+  @doc false
+  @spec apps_list_impl(pid() | binary()) :: {:ok, [:beam_agent_runtime.app_entry()]}
+  defdelegate apps_list_impl(session), to: :beam_agent_runtime
+
+  @doc false
+  @spec apps_list_impl(pid() | binary(), %{optional(:status) => :active | :inactive}) ::
+          {:ok, [:beam_agent_runtime.app_entry()]}
+  defdelegate apps_list_impl(session, opts), to: :beam_agent_runtime
+
+  @doc false
+  @spec app_log_impl(pid() | binary(), term()) :: :ok | {:error, :no_app}
+  defdelegate app_log_impl(session, body), to: :beam_agent_runtime
+
   # ---------------------------------------------------------------------------
   # Session-scoped runtime operations
   # ---------------------------------------------------------------------------

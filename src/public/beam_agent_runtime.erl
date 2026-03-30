@@ -158,6 +158,9 @@ level deep. The built-in provider catalog is compiled-in static data.
     app_info_impl/1,
     app_init_impl/1,
     app_modes_impl/1,
+    %% App list / log — implementation delegates
+    apps_list_impl/1, apps_list_impl/2,
+    app_log_impl/2,
     %% Todo Tracking — pure functions
     extract_todos/1,
     filter_by_status/2,
@@ -165,13 +168,6 @@ level deep. The built-in provider catalog is compiled-in static data.
 ]).
 
 -export_type([todo_item/0, todo_status/0, app_entry/0, apps_list_opts/0]).
-
--ifdef(TEST).
--export([
-    apps_list_impl/1, apps_list_impl/2,
-    app_log_impl/2
-]).
--endif.
 
 %%--------------------------------------------------------------------
 %% Todo Types
