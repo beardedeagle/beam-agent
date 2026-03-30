@@ -469,6 +469,18 @@ defmodule CopilotEx do
     :copilot_client.resume_session(session_id, opts_to_map(opts))
   end
 
+  @doc "Subscribe to the native Copilot event stream."
+  @spec event_subscribe(pid()) :: {:ok, reference()}
+  def event_subscribe(session) do
+    :copilot_client.event_subscribe(session)
+  end
+
+  @doc "Unsubscribe from the native Copilot event stream."
+  @spec event_unsubscribe(pid(), reference()) :: :ok | {:error, :bad_ref}
+  def event_unsubscribe(session, ref) do
+    :copilot_client.event_unsubscribe(session, ref)
+  end
+
   @doc """
   Interrupt/abort the current active query.
 

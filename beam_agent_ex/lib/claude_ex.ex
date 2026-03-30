@@ -419,6 +419,18 @@ defmodule ClaudeEx do
     BeamAgent.stream(session, prompt, opts_to_map(opts))
   end
 
+  @doc "Subscribe to the native Claude event stream."
+  @spec event_subscribe(session()) :: {:ok, reference()}
+  def event_subscribe(session) do
+    :claude_agent_sdk.event_subscribe(session)
+  end
+
+  @doc "Unsubscribe from the native Claude event stream."
+  @spec event_unsubscribe(session(), reference()) :: :ok | {:error, :bad_ref}
+  def event_unsubscribe(session, ref) do
+    :claude_agent_sdk.event_unsubscribe(session, ref)
+  end
+
   @doc """
   Get the current health/state of a session.
 
