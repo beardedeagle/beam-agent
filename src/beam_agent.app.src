@@ -49,7 +49,6 @@
         beam_agent_catalog_core,
         beam_agent_checkpoint_core,
         beam_agent_command_core,
-        beam_agent_command_audit,
         beam_agent_command_guard,
         beam_agent_command_parser,
         beam_agent_command_policy,
