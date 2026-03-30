@@ -57,7 +57,7 @@ level features should reuse these stores instead of inventing parallel tables.
 | `beam_agent_runs` | Run and step lifecycle | runs + steps | process-free |
 | `beam_agent_artifacts` | Typed artifacts and references | artifacts + links | process-free |
 | `beam_agent_journal` | Append-only domain event journal | journal entries + acknowledgements | process-free |
-| `beam_agent_audit` | Filtered audit view over journal-backed events | audit-tagged journal entries | process-free |
+| `beam_agent_journal` (audit) | Filtered audit view over journal-backed events | audit-tagged journal entries | process-free |
 | `beam_agent_memory` | Cross-session memory and recall | memories + expiry/pin state | process-free |
 | `beam_agent_routing` | Backend-selection policy and sticky state | routing cursors + affinity | process-free |
 | `beam_agent_context` | Pressure estimation and compaction entrypoints | no new store; composes summaries, threads, memory | process-free |
@@ -72,7 +72,7 @@ level features should reuse these stores instead of inventing parallel tables.
 1. `beam_agent_runs` creates the canonical run.
 2. Session execution emits normalized messages.
 3. Domain mutations append to `beam_agent_journal`.
-4. `beam_agent_audit` reads the subset of journal entries tagged as audit.
+4. `beam_agent_journal` provides filtered access to audit-tagged entries.
 5. `beam_agent_orchestrator` links child runs when work fans out.
 
 ### Scheduled work without hidden schedulers
