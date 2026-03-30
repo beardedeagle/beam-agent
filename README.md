@@ -342,7 +342,7 @@ beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {erro
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
-`BeamAgent.Artifacts`, `BeamAgent.Audit`, `BeamAgent.Context`,
+`BeamAgent.Artifacts`, `BeamAgent.Context`,
 `BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`,
 `BeamAgent.Routing`, `BeamAgent.Routines`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,

@@ -311,7 +311,7 @@ backends() ->
     registered_backends().
 
 -doc """
-Return the flat list of all 23 capability atom identifiers.
+Return the flat list of all 24 capability atom identifiers.
 """.
 -spec capability_ids() -> [capability()].
 capability_ids() ->
