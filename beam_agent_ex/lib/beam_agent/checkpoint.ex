@@ -83,9 +83,9 @@ defmodule BeamAgent.Checkpoint do
   """
   @type file_snapshot() :: %{
           required(:path) => binary(),
-          required(:content) => binary() | :undefined,
+          required(:content) => binary() | nil,
           required(:existed) => boolean(),
-          required(:permissions) => non_neg_integer() | :undefined
+          required(:permissions) => non_neg_integer() | nil
         }
 
   @doc """
@@ -130,7 +130,12 @@ defmodule BeamAgent.Checkpoint do
   """
   @spec snapshot(binary(), binary(), [binary() | String.t()]) ::
           {:ok, checkpoint()} | {:error, {:path_traversal, binary()}}
-  defdelegate snapshot(session_id, uuid, file_paths), to: :beam_agent_checkpoint
+  def snapshot(session_id, uuid, file_paths) do
+    case :beam_agent_checkpoint.snapshot(session_id, uuid, file_paths) do
+      {:ok, cp} -> {:ok, normalize_checkpoint(cp)}
+      {:error, _} = err -> err
+    end
+  end
 
   @doc """
   Rewind files to a checkpoint state.
@@ -164,7 +169,10 @@ defmodule BeamAgent.Checkpoint do
   ```
   """
   @spec list_checkpoints(binary()) :: {:ok, [checkpoint()]}
-  defdelegate list_checkpoints(session_id), to: :beam_agent_checkpoint
+  def list_checkpoints(session_id) do
+    {:ok, cps} = :beam_agent_checkpoint.list_checkpoints(session_id)
+    {:ok, Enum.map(cps, &normalize_checkpoint/1)}
+  end
 
   @doc """
   Get a specific checkpoint by session ID and UUID.
@@ -172,7 +180,12 @@ defmodule BeamAgent.Checkpoint do
   Returns `{:ok, checkpoint}` or `{:error, :not_found}`.
   """
   @spec get_checkpoint(binary(), binary()) :: {:ok, checkpoint()} | {:error, :not_found}
-  defdelegate get_checkpoint(session_id, uuid), to: :beam_agent_checkpoint
+  def get_checkpoint(session_id, uuid) do
+    case :beam_agent_checkpoint.get_checkpoint(session_id, uuid) do
+      {:ok, cp} -> {:ok, normalize_checkpoint(cp)}
+      {:error, _} = err -> err
+    end
+  end
 
   @doc """
   Delete a checkpoint.
@@ -223,4 +236,25 @@ defmodule BeamAgent.Checkpoint do
           {:ok, :ok}
           | {:error, :not_found | {:restore_failed, binary(), atom()} | term()}
   defdelegate rewind_files(session, checkpoint_uuid), to: :beam_agent_checkpoint
+
+  # -------------------------------------------------------------------
+  # Normalization: Erlang :undefined → Elixir nil
+  # -------------------------------------------------------------------
+
+  defp normalize_checkpoint(%{files: files} = cp) do
+    %{cp | files: Enum.map(files, &normalize_file_snapshot/1)}
+  end
+
+  defp normalize_file_snapshot(snapshot) do
+    snapshot
+    |> normalize_field(:content)
+    |> normalize_field(:permissions)
+  end
+
+  defp normalize_field(map, key) do
+    case Map.get(map, key) do
+      :undefined -> Map.put(map, key, nil)
+      _ -> map
+    end
+  end
 end
