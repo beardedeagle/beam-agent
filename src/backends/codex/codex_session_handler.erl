@@ -19,6 +19,7 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_control/4,
+    handle_info/3,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3,
@@ -274,6 +275,30 @@ handle_control(Method, Params, From,
     TimerRef = erlang:send_after(35000, self(), {pending_timeout, Id}),
     Pending1 = Pending#{Id => {From, TimerRef}},
     {noreply, [{send, Encoded}], HState#hstate{pending = Pending1}}.
+
+-doc """
+Handle info messages — specifically pending request timeouts.
+
+When `handle_control/4` stores a pending caller, it arms a 35-second
+timer via `erlang:send_after/3`. If the JSON-RPC response never arrives,
+the timeout fires and this callback replies `{error, timeout}` to the
+blocked caller so it doesn't hang indefinitely.
+""".
+-spec handle_info(term(), beam_agent_session_handler:state_name(), #hstate{}) ->
+    beam_agent_session_handler:info_result().
+handle_info({pending_timeout, Id}, _StateName,
+            #hstate{pending = Pending} = HState) ->
+    case maps:find(Id, Pending) of
+        {ok, {From, _TimerRef}} ->
+            Pending1 = maps:remove(Id, Pending),
+            gen_statem:reply(From, {error, timeout}),
+            {messages, [], [], HState#hstate{pending = Pending1}};
+        _ ->
+            %% Already resolved or non-control entry — nothing to do
+            ignore
+    end;
+handle_info(_Msg, _StateName, _HState) ->
+    ignore.
 
 -doc """
 Store model override for the next turn's TurnStartParams.
