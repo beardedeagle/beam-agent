@@ -54,7 +54,6 @@
     test_get_queue_max/1,
     test_get_reconnect_config/1,
     test_get_reconnect_attempts/1,
-    test_get_sdk_hook_registry/1,
     ensure_session_id/1,
     base_reconnect_delay/2,
     validate_reconnect_config/1
@@ -1461,10 +1460,5 @@ test_get_reconnect_config(#engine{reconnect_config = V}) -> V.
 -doc false.
 -spec test_get_reconnect_attempts(#engine{}) -> non_neg_integer().
 test_get_reconnect_attempts(#engine{reconnect_attempts = V}) -> V.
-
--doc false.
--spec test_get_sdk_hook_registry(#engine{}) ->
-    beam_agent_hooks_core:hook_registry() | undefined.
-test_get_sdk_hook_registry(#engine{sdk_hook_registry = V}) -> V.
 
 -endif.

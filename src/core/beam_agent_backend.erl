@@ -25,7 +25,6 @@ small, contention is low, and lookups are on the hot path for query routing.
     available_backends/0,
     normalize/1,
     adapter_module/1,
-    backend_type/1,
     session_backend/1,
     register_session/2,
     unregister_session/1,
@@ -134,17 +133,6 @@ adapter_module(Backend) ->
         {ok, #{module := Mod}} -> Mod;
         error -> error({unknown_backend, Backend})
     end.
-
--doc """
-Return the backend category for a canonical backend atom.
-
-Delegates to the facade module's `backend_type/0` callback. Used by
-`beam_agent_core` dispatch to choose session-based or stateless routing.
-""".
--spec backend_type(backend()) -> beam_agent_adapter:backend_type().
-backend_type(Backend) ->
-    Mod = adapter_module(Backend),
-    Mod:backend_type().
 
 -doc "Cache a live session pid with its backend.".
 -spec register_session(pid(), backend() | binary() | atom()) ->
