@@ -282,7 +282,7 @@ do_exec_query(From, Prompt, Params, Data) ->
         Data1 =
             Data#data{port = Port,
                       buffer = <<>>,
-                      consumer = From,
+                      consumer = undefined,
                       query_ref = Ref,
                       msg_queue = queue:new(),
                       query_start_time = StartTime},
