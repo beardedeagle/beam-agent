@@ -176,7 +176,7 @@ servers_for_init(Registry) ->
 %% JSON-RPC Dispatch
 %%--------------------------------------------------------------------
 
--doc "Handle an MCP JSON-RPC message for a named server. Uses default handler timeout of 30 seconds.".
+-doc "Handle an MCP JSON-RPC message for a named server.".
 -spec handle_mcp_message(binary(), map(), mcp_registry()) ->
     {ok, map()} | {error, binary()}.
 handle_mcp_message(ServerName, Message, Registry) ->
@@ -210,7 +210,7 @@ handle_mcp_message(ServerName, Message, Registry, _Opts) ->
 %% Flat Tool Dispatch
 %%--------------------------------------------------------------------
 
--doc "Call a tool by name, searching across all servers in the registry. Uses default handler timeout of 30 seconds.".
+-doc "Call a tool by name, searching across all servers in the registry.".
 -spec call_tool_by_name(binary(), map(), mcp_registry()) ->
     {ok, [content_result()]} | {error, binary()}.
 call_tool_by_name(ToolName, Arguments, Registry) ->

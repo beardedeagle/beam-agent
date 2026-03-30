@@ -283,8 +283,8 @@ extract_path(Input) ->
 %% Path validation
 %%--------------------------------------------------------------------
 
-%% Validate that all paths are within the current working directory.
-%% Rejects path traversal attempts (../) and absolute paths outside cwd.
+%% Validate paths for directory traversal.
+%% Absolute paths are allowed; relative paths must not escape the cwd.
 -spec validate_all_paths([binary() | string()]) ->
     ok | {error, {path_traversal, binary()}}.
 validate_all_paths([]) ->
@@ -314,10 +314,14 @@ validate_checkpoint_path(Path) when is_binary(Path) ->
         absolute ->
             ok;
         _ ->
-            {ok, Cwd} = file:get_cwd(),
-            case filelib:safe_relative_path(PathStr, Cwd) of
-                unsafe -> {error, path_traversal};
-                _Safe  -> ok
+            case file:get_cwd() of
+                {ok, Cwd} ->
+                    case filelib:safe_relative_path(PathStr, Cwd) of
+                        unsafe -> {error, path_traversal};
+                        _Safe  -> ok
+                    end;
+                {error, _Reason} ->
+                    {error, path_traversal}
             end
     end.
 

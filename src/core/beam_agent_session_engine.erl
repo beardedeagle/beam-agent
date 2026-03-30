@@ -526,14 +526,19 @@ handle_common_call(From, {send_control, Method, Params}, _StateName,
         true ->
             case H:handle_control(Method, Params, From, HState) of
                 {reply, Result, Actions, HState1} ->
-                    Data1 = execute_send_actions(
-                                Actions,
-                                Data#engine{handler_state = HState1}),
-                    {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                    case execute_send_actions(
+                             Actions,
+                             Data#engine{handler_state = HState1}) of
+                        {Data1, ok} ->
+                            {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                        {Data1, {send_failed, R}} ->
+                            {keep_state, Data1,
+                             [{reply, From, {error, {transport_failed, R}}}]}
+                    end;
                 {noreply, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
-                                Data#engine{handler_state = HState1}),
+                                Data#engine{handler_state = HState1})),
                     {keep_state, Data1};
                 {error, Reason} ->
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
@@ -549,11 +554,16 @@ handle_common_call(From, {set_model, Model},
         true ->
             case H:handle_set_model(Model, HState) of
                 {ok, Result, Actions, HState1} ->
-                    Data1 = execute_send_actions(
-                                Actions,
-                                Data#engine{handler_state = HState1,
-                                            model = Model}),
-                    {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                    case execute_send_actions(
+                             Actions,
+                             Data#engine{handler_state = HState1,
+                                         model = Model}) of
+                        {Data1, ok} ->
+                            {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                        {Data1, {send_failed, R}} ->
+                            {keep_state, Data1,
+                             [{reply, From, {error, {transport_failed, R}}}]}
+                    end;
                 {error, Reason} ->
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
             end;
@@ -568,11 +578,16 @@ handle_common_call(From, {set_permission_mode, Mode},
         true ->
             case H:handle_set_permission_mode(Mode, HState) of
                 {ok, Result, Actions, HState1} ->
-                    Data1 = execute_send_actions(
-                                Actions,
-                                Data#engine{handler_state = HState1,
-                                            permission_mode = Mode}),
-                    {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                    case execute_send_actions(
+                             Actions,
+                             Data#engine{handler_state = HState1,
+                                         permission_mode = Mode}) of
+                        {Data1, ok} ->
+                            {keep_state, Data1, [{reply, From, {ok, Result}}]};
+                        {Data1, {send_failed, R}} ->
+                            {keep_state, Data1,
+                             [{reply, From, {error, {transport_failed, R}}}]}
+                    end;
                 {error, Reason} ->
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
             end;
@@ -587,14 +602,19 @@ handle_common_call(From, Request, _StateName,
         true ->
             case H:handle_custom_call(Request, From, HState) of
                 {reply, Reply, Actions, HState1} ->
-                    Data1 = execute_send_actions(
-                                Actions,
-                                Data#engine{handler_state = HState1}),
-                    {keep_state, Data1, [{reply, From, Reply}]};
+                    case execute_send_actions(
+                             Actions,
+                             Data#engine{handler_state = HState1}) of
+                        {Data1, ok} ->
+                            {keep_state, Data1, [{reply, From, Reply}]};
+                        {Data1, {send_failed, R}} ->
+                            {keep_state, Data1,
+                             [{reply, From, {error, {transport_failed, R}}}]}
+                    end;
                 {noreply, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
-                                Data#engine{handler_state = HState1}),
+                                Data#engine{handler_state = HState1})),
                     {keep_state, Data1};
                 {error, Reason} ->
                     {keep_state_and_data, [{reply, From, {error, Reason}}]}
@@ -615,22 +635,22 @@ dispatch_connecting(Event,
                     #engine{handler_mod = H, handler_state = HState} = Data) ->
     case H:handle_connecting(Event, HState) of
         {next_state, NextState, Actions, HState1} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
-                        Data#engine{handler_state = HState1}),
+                        Data#engine{handler_state = HState1})),
             TimeoutAction = timeout_action(NextState, Data1#engine.opts),
             {next_state, NextState, Data1, TimeoutAction};
         {next_state, NextState, Actions, HState1, Buffer} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
                         Data#engine{handler_state = HState1,
-                                    buffer = Buffer}),
+                                    buffer = Buffer})),
             TimeoutAction = timeout_action(NextState, Data1#engine.opts),
             {next_state, NextState, Data1, TimeoutAction};
         {keep_state, Actions, HState1} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
-                        Data#engine{handler_state = HState1}),
+                        Data#engine{handler_state = HState1})),
             {keep_state, Data1};
         {error_state, Reason, HState1} ->
             enter_error(Reason,
@@ -645,20 +665,20 @@ dispatch_initializing(Event,
                               handler_state = HState} = Data) ->
     case H:handle_initializing(Event, HState) of
         {next_state, NextState, Actions, HState1} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
-                        Data#engine{handler_state = HState1}),
+                        Data#engine{handler_state = HState1})),
             {next_state, NextState, Data1};
         {next_state, NextState, Actions, HState1, Buffer} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
                         Data#engine{handler_state = HState1,
-                                    buffer = Buffer}),
+                                    buffer = Buffer})),
             {next_state, NextState, Data1};
         {keep_state, Actions, HState1} ->
-            Data1 = execute_send_actions(
+            Data1 = send_data(execute_send_actions(
                         Actions,
-                        Data#engine{handler_state = HState1}),
+                        Data#engine{handler_state = HState1})),
             {keep_state, Data1};
         {error_state, Reason, HState1} ->
             enter_error(Reason,
@@ -682,9 +702,9 @@ dispatch_handler_info(Msg, StateName,
                 ignore ->
                     keep_state_and_data;
                 {messages, Messages, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
-                                Data#engine{handler_state = HState1}),
+                                Data#engine{handler_state = HState1})),
                     case StateName of
                         active_query ->
                             deliver_messages(Messages, Data1);
@@ -693,24 +713,24 @@ dispatch_handler_info(Msg, StateName,
                             {keep_state, Data2}
                     end;
                 {next_state, NextState, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
-                                Data#engine{handler_state = HState1}),
+                                Data#engine{handler_state = HState1})),
                     TimeoutAction = timeout_action(NextState,
                                                    Data1#engine.opts),
                     {next_state, NextState, Data1, TimeoutAction};
                 {next_state, NextState, Actions, HState1, Buffer} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
                                 Data#engine{handler_state = HState1,
-                                            buffer = Buffer}),
+                                            buffer = Buffer})),
                     TimeoutAction = timeout_action(NextState,
                                                    Data1#engine.opts),
                     {next_state, NextState, Data1, TimeoutAction};
                 {keep_state, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
-                                Data#engine{handler_state = HState1}),
+                                Data#engine{handler_state = HState1})),
                     {keep_state, Data1};
                 {error_state, Reason, HState1} ->
                     enter_error(Reason,
@@ -810,19 +830,32 @@ handle_interrupt(From, #engine{handler_mod = H,
         true ->
             case H:encode_interrupt(HState) of
                 {ok, Actions, HState1} ->
-                    Data1 = execute_send_actions(
-                                Actions,
-                                Data#engine{handler_state = HState1}),
-                    ReplyActions = [{reply, From, ok}
-                                   | consumer_error_actions(interrupted,
-                                                            Data1)],
-                    maybe_span_stop(Data1),
-                    {next_state, ready,
-                     Data1#engine{consumer         = undefined,
-                                  query_start_time = undefined,
-                                  msg_queue        = queue:new(),
-                                  query_status     = interrupted},
-                     ReplyActions};
+                    case execute_send_actions(
+                             Actions,
+                             Data#engine{handler_state = HState1}) of
+                        {Data1, ok} ->
+                            ReplyActions =
+                                [{reply, From, ok}
+                                 | consumer_error_actions(interrupted, Data1)],
+                            maybe_span_stop(Data1),
+                            {next_state, ready,
+                             Data1#engine{consumer         = undefined,
+                                          query_start_time = undefined,
+                                          msg_queue        = queue:new(),
+                                          query_status     = interrupted},
+                             ReplyActions};
+                        {Data1, {send_failed, R}} ->
+                            ReplyActions =
+                                [{reply, From, {error, {transport_failed, R}}}
+                                 | consumer_error_actions(interrupted, Data1)],
+                            maybe_span_stop(Data1),
+                            {next_state, ready,
+                             Data1#engine{consumer         = undefined,
+                                          query_start_time = undefined,
+                                          msg_queue        = queue:new(),
+                                          query_status     = interrupted},
+                             ReplyActions}
+                    end;
                 not_supported ->
                     soft_interrupt(From, Data)
             end;
@@ -865,10 +898,10 @@ handle_incoming_data(RawData, StateName,
         false ->
             try H:handle_data(Combined, HState) of
                 {ok, Messages, NewBuf, Actions, HState1} ->
-                    Data1 = execute_send_actions(
+                    Data1 = send_data(execute_send_actions(
                                 Actions,
                                 Data#engine{buffer        = NewBuf,
-                                            handler_state = HState1}),
+                                            handler_state = HState1})),
                     case StateName of
                         active_query ->
                             deliver_messages(Messages, Data1);
@@ -955,9 +988,10 @@ send_transport(Data, #engine{transport_mod = TMod, transport_ref = TRef}) ->
     TMod:send(TRef, Data).
 
 -spec execute_send_actions([beam_agent_session_handler:handler_action()],
-                           #engine{}) -> #engine{}.
+                           #engine{}) ->
+    {#engine{}, ok | {send_failed, term()}}.
 execute_send_actions([], Data) ->
-    Data;
+    {Data, ok};
 execute_send_actions([{send, Payload} | Rest], Data) ->
     case send_transport(Payload, Data) of
         ok ->
@@ -966,8 +1000,13 @@ execute_send_actions([{send, Payload} | Rest], Data) ->
             logger:warning("beam_agent_session_engine: transport send failed"
                            " [session=~s reason=~p remaining=~B]",
                            [Data#engine.session_id, Reason, length(Rest)]),
-            Data
+            {Data, {send_failed, Reason}}
     end.
+
+%% Extract engine data from a send result, discarding any error signal.
+%% Used by callers that have no From to propagate the error to.
+-spec send_data({#engine{}, ok | {send_failed, term()}}) -> #engine{}.
+send_data({Data, _}) -> Data.
 
 %%====================================================================
 %% Internal: state enter / telemetry
@@ -994,8 +1033,8 @@ fire_state_enter(NewState, OldState,
         true ->
             {ok, Actions, HState1} =
                 H:on_state_enter(NewState, OldForTelemetry, HState),
-            execute_send_actions(Actions,
-                                Data#engine{handler_state = HState1});
+            send_data(execute_send_actions(Actions,
+                                Data#engine{handler_state = HState1}));
         false ->
             Data
     end,
