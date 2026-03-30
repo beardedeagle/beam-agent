@@ -237,6 +237,14 @@ init({HandlerMod, Opts}) ->
                             TimeoutAction = timeout_action(InitState, Opts1),
                             {ok, InitState, Data, TimeoutAction};
                         {error, Reason} ->
+                            %% Handler init succeeded but transport
+                            %% failed to start.  Give the handler a
+                            %% chance to clean up resources it
+                            %% allocated during init (temp files, ETS
+                            %% entries, etc.).
+                            catch HandlerMod:terminate_handler(
+                                      {transport_start_failed, Reason},
+                                      HState),
                             {stop, {transport_start_failed, Reason}}
                     end;
                 {stop, Reason} ->
@@ -1115,6 +1123,11 @@ attempt_reconnect(#engine{handler_mod = HandlerMod, opts = Opts} = Data) ->
                     TimeoutAction = timeout_action(InitState, Opts),
                     {next_state, InitState, Data1, TimeoutAction};
                 {error, _Reason} ->
+                    %% Reconnect handler init succeeded but transport
+                    %% failed.  Clean up the NEW handler state's
+                    %% resources before falling back to retry.
+                    catch HandlerMod:terminate_handler(
+                              transport_start_failed, HState),
                     bump_or_exhaust(Data)
             end;
         {stop, _Reason} ->
