@@ -69,7 +69,7 @@ delete_table(Name) ->
     end.
 
 %%====================================================================
-%% Public mode tests
+%% Initialization and access mode tests
 %%====================================================================
 
 hardened_mode_defaults_test() ->
