@@ -141,17 +141,9 @@ maybe_delete_parent_index(#{parent_run_id := ParentRunId, child_run_id := ChildR
 
 -spec sort_links(link_record(), link_record()) -> boolean().
 sort_links(A, B) ->
-    compare_asc(
+    beam_agent_store_utils:compare_asc(
         maps:get(sequence, A, maps:get(created_at, A, 0)),
         maps:get(sequence, B, maps:get(created_at, B, 0)),
         maps:get(child_run_id, A),
         maps:get(child_run_id, B)
     ).
-
--spec compare_asc(integer(), integer(), binary(), binary()) -> boolean().
-compare_asc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    true;
-compare_asc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    false;
-compare_asc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.

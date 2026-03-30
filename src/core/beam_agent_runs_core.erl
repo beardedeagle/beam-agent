@@ -1042,22 +1042,22 @@ step_transition_operation(cancelled) -> cancel_step.
     run_telemetry_request_meta() | step_telemetry_request_meta() | telemetry_metadata()) ->
     integer().
 telemetry_start(Domain, Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(Domain, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(Domain, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_finish(telemetry_domain(), telemetry_operation(), integer(),
     telemetry_result(),
     run_telemetry_request_meta() | step_telemetry_request_meta() | telemetry_metadata()) -> ok.
 telemetry_finish(Domain, Operation, StartTime, {ok, Value}, Metadata) when is_map(Value) ->
-    beam_agent_telemetry_core:span_stop(Domain, Operation, StartTime,
+    beam_agent_telemetry:span_stop(Domain, Operation, StartTime,
         compact_telemetry(maps:merge(Metadata, success_telemetry(Value))));
 telemetry_finish(Domain, Operation, _StartTime, {error, Reason}, Metadata) ->
-    beam_agent_telemetry_core:span_exception(Domain, Operation, Reason,
+    beam_agent_telemetry:span_exception(Domain, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec emit_state_change(telemetry_domain(), created | running | terminal_current_status(),
     running | terminal_status(), run_telemetry_meta() | step_telemetry_meta()) -> ok.
 emit_state_change(Domain, FromState, ToState, Metadata) ->
-    beam_agent_telemetry_core:state_change(Domain, FromState, ToState,
+    beam_agent_telemetry:state_change(Domain, FromState, ToState,
         compact_telemetry(Metadata)).
 
 -spec compact_telemetry(map()) -> map().

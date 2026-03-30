@@ -329,9 +329,10 @@ defmodule BeamAgent.Hooks do
   end
   ```
   """
-  @spec fire(hook_event(), hook_context(), hook_registry() | :undefined) ::
+  @spec fire(hook_event(), hook_context(), hook_registry() | nil) ::
           {:ok, hook_context()} | {:deny, binary()} | {:ask, binary()}
-  defdelegate fire(event, context, registry), to: :beam_agent_hooks
+  def fire(event, context, nil), do: :beam_agent_hooks.fire(event, context, :undefined)
+  def fire(event, context, registry), do: :beam_agent_hooks.fire(event, context, registry)
 
   @doc """
   Build a hook registry from a list of hook definitions.
@@ -353,8 +354,15 @@ defmodule BeamAgent.Hooks do
   registry = BeamAgent.Hooks.build_registry(hooks)
   ```
   """
-  @spec build_registry([hook_def()] | :undefined) :: hook_registry() | :undefined
-  defdelegate build_registry(opts), to: :beam_agent_hooks
+  @spec build_registry([hook_def()] | nil) :: hook_registry() | nil
+  def build_registry(nil), do: nil
+
+  def build_registry(opts) do
+    case :beam_agent_hooks.build_registry(opts) do
+      :undefined -> nil
+      registry -> registry
+    end
+  end
 
   # -------------------------------------------------------------------
   # Global Hooks

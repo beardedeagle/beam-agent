@@ -11,6 +11,36 @@ The default adapter is `beam_agent_store_ets`, which preserves the existing
 process-free ETS plus `beam_agent_table_owner` hardened-mode behavior. Future
 durable adapters can be introduced behind the same boundary without forcing a
 big-bang rewrite of every canonical domain.
+
+== Shared `beam_agent_domains` Table — Composite-Key Contract
+
+Several domain modules share the single `beam_agent_domains` ETS table to avoid
+proliferating named tables. Each domain namespaces its entries using a unique
+composite-key prefix tuple as the first element of the key:
+
+| Domain Module                    | Key Prefix(es)                              |
+|----------------------------------|----------------------------------------------|
+| `beam_agent_runs_store`          | `{run, RunId}`, `{run_step, {RunId, StepId}}`|
+| `beam_agent_artifacts_store`     | `{artifact, ArtifactId}`                     |
+| `beam_agent_memory_store`        | `{memory, MemoryId}`                         |
+| `beam_agent_threads_core`        | `{thread, ThreadKey}`, `{active_thread, Sid}` |
+| `beam_agent_orchestrator_store`  | `{orch_link, ChildRunId}`                    |
+| `beam_agent_policy_core`         | `{policy, PolicyId}`                         |
+| `beam_agent_routing_core`        | `{routing_affinity, Key}`, `{routing_rr, Key}`|
+
+**Rules for shared-table domains:**
+
+1. **Key prefixes must be unique atoms** — no two domains may use the same
+   prefix atom. New domains must choose a prefix that does not collide.
+
+2. **Clear operations must use `match_delete/2`** — never call
+   `delete_all_objects/2` on the shared table. Each domain's `clear/0`
+   must only delete its own prefix:
+   `beam_agent_ets:match_delete(?DOMAINS_TABLE, {{my_prefix, '_'}, '_'})`.
+
+3. **Each domain calls `ensure_table/3` independently** — the call is
+   idempotent and the table options must be `[set, named_table,
+   {read_concurrency, true}]` for all domains sharing this table.
 """.
 
 -export([

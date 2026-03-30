@@ -22,7 +22,9 @@ persistence to `beam_agent_journal_store`.
     stream_from/1,
     stream_from/2,
     get/1,
-    ack/2
+    ack/2,
+    get_ack/2,
+    list_acks/1
 ]).
 
 -export_type([
@@ -244,6 +246,21 @@ ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
             Error
     end.
 
+-doc "Fetch an ack record for a consumer and event.".
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
+get_ack(ConsumerId, EventId)
+  when is_binary(ConsumerId), is_binary(EventId) ->
+    beam_agent_journal_store:get_ack(ConsumerId, EventId).
+
+-doc "List all ack records for a consumer, newest first.".
+-spec list_acks(binary()) -> {ok, [map()]}.
+list_acks(ConsumerId) when is_binary(ConsumerId) ->
+    beam_agent_journal_store:list_acks(ConsumerId).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
+
 -spec normalize_event_type(atom() | binary()) -> ok | {error, {invalid_event_type, binary()}}.
 normalize_event_type(EventType) when is_atom(EventType) ->
     ok;
@@ -260,71 +277,28 @@ normalize_event(Event) when is_map(Event) ->
     Allowed = [event_id, session_id, thread_id, run_id, timestamp, tags, payload],
     case validate_allowed_keys(Event, Allowed) of
         ok ->
-            case normalize_optional_binary(event_id, Event) of
-                {ok, EventId} ->
-                    case normalize_optional_binary(session_id, Event) of
-                        {ok, SessionId} ->
-                            case normalize_optional_binary(thread_id, Event) of
-                                {ok, ThreadId} ->
-                                    case normalize_optional_binary(run_id, Event) of
-                                        {ok, RunId} ->
-                                            case normalize_timestamp(Event) of
-                                                {ok, Timestamp} ->
-                                                    case normalize_tags(Event) of
-                                                        {ok, Tags} ->
-                                                            case normalize_payload(Event) of
-                                                                {ok, Payload} ->
-                                                                    case require_session_for_thread(
-                                                                        SessionId, ThreadId) of
-                                                                        ok ->
-                                                                            Normalized0 = #{
-                                                                                payload => Payload,
-                                                                                tags => Tags
-                                                                            },
-                                                                            Normalized1 = maybe_put(
-                                                                                event_id,
-                                                                                EventId,
-                                                                                Normalized0),
-                                                                            Normalized2 = maybe_put(
-                                                                                session_id,
-                                                                                SessionId,
-                                                                                Normalized1),
-                                                                            Normalized3 = maybe_put(
-                                                                                thread_id,
-                                                                                ThreadId,
-                                                                                Normalized2),
-                                                                            Normalized4 = maybe_put(
-                                                                                run_id,
-                                                                                RunId,
-                                                                                Normalized3),
-                                                                            {ok, maybe_put(
-                                                                                timestamp,
-                                                                                Timestamp,
-                                                                                Normalized4)};
-                                                                        Error ->
-                                                                            Error
-                                                                    end;
-                                                                Error ->
-                                                                    Error
-                                                            end;
-                                                        Error ->
-                                                            Error
-                                                    end;
-                                                Error ->
-                                                    Error
-                                            end;
-                                        Error ->
-                                            Error
-                                    end;
-                                Error ->
-                                    Error
-                            end;
-                        Error ->
-                            Error
+            Fields = [
+                {event_id,  fun() -> normalize_optional_binary(event_id, Event) end},
+                {session_id, fun() -> normalize_optional_binary(session_id, Event) end},
+                {thread_id, fun() -> normalize_optional_binary(thread_id, Event) end},
+                {run_id,    fun() -> normalize_optional_binary(run_id, Event) end},
+                {timestamp, fun() -> normalize_timestamp(Event) end},
+                {tags,      fun() -> normalize_tags(Event) end},
+                {payload,   fun() -> normalize_payload(Event) end}
+            ],
+            case normalize_fields(Fields, #{}) of
+                {ok, Normalized} ->
+                    SessionId = maps:get(session_id, Normalized, undefined),
+                    ThreadId = maps:get(thread_id, Normalized, undefined),
+                    case require_session_for_thread(SessionId, ThreadId) of
+                        ok -> {ok, Normalized};
+                        Error -> Error
                     end;
                 Error ->
                     Error
-            end
+            end;
+        Error ->
+            Error
     end.
 
 -spec normalize_filter(map()) ->
@@ -334,92 +308,43 @@ normalize_filter(Filter) when is_map(Filter) ->
     Allowed = [event_id, event_type, session_id, thread_id, run_id, tag, since, limit],
     case validate_allowed_filter_keys(Filter, Allowed) of
         ok ->
-            case normalize_optional_filter_binary(event_id, Filter) of
-                {ok, EventId} ->
-                    case normalize_optional_filter_event_type(Filter) of
-                        {ok, EventType} ->
-                            case normalize_optional_filter_binary(session_id, Filter) of
-                                {ok, SessionId} ->
-                                    case normalize_optional_filter_binary(thread_id, Filter) of
-                                        {ok, ThreadId} ->
-                                            case normalize_optional_filter_binary(run_id, Filter) of
-                                                {ok, RunId} ->
-                                                    case normalize_optional_filter_tag(Filter) of
-                                                        {ok, Tag} ->
-                                                            case normalize_limit(Filter) of
-                                                                {ok, Limit} ->
-                                                                    case normalize_since(Filter) of
-                                                                        {ok, Since} ->
-                                                                            case require_session_for_thread(
-                                                                                SessionId, ThreadId) of
-                                                                                ok ->
-                                                                                    Normalized0 = #{},
-                                                                                    Normalized1 =
-                                                                                        maybe_put(
-                                                                                            event_id,
-                                                                                            EventId,
-                                                                                            Normalized0),
-                                                                                    Normalized2 =
-                                                                                        maybe_put(
-                                                                                            event_type,
-                                                                                            EventType,
-                                                                                            Normalized1),
-                                                                                    Normalized3 =
-                                                                                        maybe_put(
-                                                                                            session_id,
-                                                                                            SessionId,
-                                                                                            Normalized2),
-                                                                                    Normalized4 =
-                                                                                        maybe_put(
-                                                                                            thread_id,
-                                                                                            ThreadId,
-                                                                                            Normalized3),
-                                                                                    Normalized5 =
-                                                                                        maybe_put(
-                                                                                            run_id,
-                                                                                            RunId,
-                                                                                            Normalized4),
-                                                                                    Normalized6 =
-                                                                                        maybe_put(
-                                                                                            tag,
-                                                                                            Tag,
-                                                                                            Normalized5),
-                                                                                    Normalized7 =
-                                                                                        maybe_put(
-                                                                                            since,
-                                                                                            Since,
-                                                                                            Normalized6),
-                                                                                    {ok, maybe_put(
-                                                                                        limit,
-                                                                                        Limit,
-                                                                                        Normalized7)};
-                                                                                Error ->
-                                                                                    Error
-                                                                            end;
-                                                                        Error ->
-                                                                            Error
-                                                                    end;
-                                                                Error ->
-                                                                    Error
-                                                            end;
-                                                        Error ->
-                                                            Error
-                                                    end;
-                                                Error ->
-                                                    Error
-                                            end;
-                                        Error ->
-                                            Error
-                                    end;
-                                Error ->
-                                    Error
-                            end;
-                        Error ->
-                            Error
+            Fields = [
+                {event_id,   fun() -> normalize_optional_filter_binary(event_id, Filter) end},
+                {event_type, fun() -> normalize_optional_filter_event_type(Filter) end},
+                {session_id, fun() -> normalize_optional_filter_binary(session_id, Filter) end},
+                {thread_id,  fun() -> normalize_optional_filter_binary(thread_id, Filter) end},
+                {run_id,     fun() -> normalize_optional_filter_binary(run_id, Filter) end},
+                {tag,        fun() -> normalize_optional_filter_tag(Filter) end},
+                {limit,      fun() -> normalize_limit(Filter) end},
+                {since,      fun() -> normalize_since(Filter) end}
+            ],
+            case normalize_fields(Fields, #{}) of
+                {ok, Normalized} ->
+                    SessionId = maps:get(session_id, Normalized, undefined),
+                    ThreadId = maps:get(thread_id, Normalized, undefined),
+                    case require_session_for_thread(SessionId, ThreadId) of
+                        ok -> {ok, Normalized};
+                        Error -> Error
                     end;
                 Error ->
                     Error
-            end
+            end;
+        Error ->
+            Error
+    end.
+
+%% Monadic chain: run each normalizer step in sequence, short-circuiting
+%% on the first error. Replaces deeply nested case staircases.
+-spec normalize_fields([{atom(), fun(() -> {ok, term()} | {error, term()})}], map()) ->
+    {ok, map()} | {error, term()}.
+normalize_fields([], Acc) ->
+    {ok, Acc};
+normalize_fields([{Key, Normalizer} | Rest], Acc) ->
+    case Normalizer() of
+        {ok, Value} ->
+            normalize_fields(Rest, maybe_put(Key, Value, Acc));
+        {error, _} = Error ->
+            Error
     end.
 
 -spec normalize_optional_binary(event_id | run_id | session_id | thread_id, map()) ->
@@ -572,11 +497,11 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(ack | append | get | list | stream_from, map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(journal, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(journal, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(ack | append | get | list | stream_from, integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(journal, Operation, StartTime,
+    beam_agent_telemetry:span_stop(journal, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(append | list | stream_from,
@@ -588,7 +513,7 @@ telemetry_stop(Operation, StartTime, Metadata) ->
       | {invalid_filter, event_id | event_type | limit | run_id | session_id | since |
             tag | thread_id}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(journal, Operation, Reason,
+    beam_agent_telemetry:span_exception(journal, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_event_meta(event_type(), map()) -> map().

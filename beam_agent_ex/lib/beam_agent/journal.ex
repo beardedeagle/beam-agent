@@ -127,6 +127,18 @@ defmodule BeamAgent.Journal do
   @spec ack(binary(), binary()) :: :ok | {:error, :not_found}
   defdelegate ack(consumer_id, event_id), to: :beam_agent_journal
 
+  @doc """
+  Fetch an ack record for a consumer and event.
+  """
+  @spec get_ack(binary(), binary()) :: {:ok, map()} | {:error, :not_found}
+  defdelegate get_ack(consumer_id, event_id), to: :beam_agent_journal
+
+  @doc """
+  List all ack records for a consumer, newest first.
+  """
+  @spec list_acks(binary()) :: {:ok, [map()]}
+  defdelegate list_acks(consumer_id), to: :beam_agent_journal
+
   # --- Audit convenience API ---
 
   @doc """

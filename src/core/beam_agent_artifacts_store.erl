@@ -121,7 +121,7 @@ list_artifacts(Filter) when is_map(Filter) ->
             Acc
     end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_artifacts/2, Artifacts),
-    {ok, apply_limit(Sorted, Filter)}.
+    {ok, beam_agent_store_utils:apply_limit(Sorted, maps:get(limit, Filter, infinity))}.
 
 -spec matches_filters(artifact_record(), artifact_filter()) -> boolean().
 matches_filters(Artifact, Filter) ->
@@ -131,49 +131,18 @@ matches_filters(Artifact, Filter) ->
         ({since, Since}) ->
             maps:get(updated_at, Artifact, 0) >= Since;
         ({source_ref_type, RefType}) ->
-            has_source_ref_type(RefType, maps:get(source_refs, Artifact, []));
+            beam_agent_store_utils:has_source_ref_type(RefType, maps:get(source_refs, Artifact, []));
         ({source_ref_id, RefId}) ->
-            has_source_ref_id(RefId, maps:get(source_refs, Artifact, []));
+            beam_agent_store_utils:has_source_ref_id(RefId, maps:get(source_refs, Artifact, []));
         ({Key, Value}) ->
             maps:get(Key, Artifact, undefined) =:= Value
     end, maps:to_list(Filter)).
 
--spec has_source_ref_type(atom() | binary(), [source_ref()]) -> boolean().
-has_source_ref_type(RefType, SourceRefs) ->
-    lists:any(fun
-        (#{type := Type}) -> Type =:= RefType;
-        (_) -> false
-    end, SourceRefs).
-
--spec has_source_ref_id(binary(), [source_ref()]) -> boolean().
-has_source_ref_id(RefId, SourceRefs) ->
-    lists:any(fun
-        (#{id := Id}) -> Id =:= RefId;
-        (_) -> false
-    end, SourceRefs).
-
--spec apply_limit([artifact_record()], artifact_filter()) -> [artifact_record()].
-apply_limit(Artifacts, Filter) ->
-    case maps:get(limit, Filter, infinity) of
-        infinity ->
-            Artifacts;
-        Limit when is_integer(Limit), Limit > 0 ->
-            lists:sublist(Artifacts, Limit)
-    end.
-
 -spec sort_artifacts(artifact_record(), artifact_record()) -> boolean().
 sort_artifacts(A, B) ->
-    compare_desc(
+    beam_agent_store_utils:compare_desc(
         maps:get(updated_at, A, 0),
         maps:get(updated_at, B, 0),
         maps:get(artifact_id, A),
         maps:get(artifact_id, B)
     ).
-
--spec compare_desc(integer(), integer(), binary(), binary()) -> boolean().
-compare_desc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    true;
-compare_desc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    false;
-compare_desc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.

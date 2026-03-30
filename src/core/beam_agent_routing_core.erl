@@ -927,16 +927,16 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(routing_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(routing, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(routing, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(routing_operation(), integer(), routing_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(routing, Operation, StartTime,
+    beam_agent_telemetry:span_stop(routing, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(routing_operation(), {error, {_, _}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(routing, Operation, Reason,
+    beam_agent_telemetry:span_exception(routing, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_request_meta(map()) -> map().

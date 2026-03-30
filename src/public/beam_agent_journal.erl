@@ -12,6 +12,16 @@ orchestration. It is intentionally distinct from `beam_agent_events`:
 The implementation is ETS-backed through `beam_agent_journal_core` and
 `beam_agent_journal_store`, so it stays process-free and works uniformly across
 all BeamAgent backends.
+
+== Architecture
+
+This module is the stable public API facade for the event journal and audit
+subsystem. It delegates journal operations to `beam_agent_journal_core` and
+audit convenience functions to `beam_agent_audit_core`. The two-layer split
+decouples the public API contract from internal implementation, allowing core
+modules to be refactored freely without breaking callers. Type aliases
+re-exported here let callers depend on `beam_agent_journal:entry()` rather
+than the internal module name.
 """.
 
 -export([
@@ -24,6 +34,8 @@ all BeamAgent backends.
     stream_from/2,
     get/1,
     ack/2,
+    get_ack/2,
+    list_acks/1,
     %% Audit convenience API
     list_events/0,
     list_events/1,
@@ -139,6 +151,16 @@ get(EventId) ->
 -spec ack(binary(), binary()) -> ok | {error, not_found}.
 ack(ConsumerId, EventId) ->
     beam_agent_journal_core:ack(ConsumerId, EventId).
+
+-doc "Fetch an ack record for a consumer and event.".
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
+get_ack(ConsumerId, EventId) ->
+    beam_agent_journal_core:get_ack(ConsumerId, EventId).
+
+-doc "List all ack records for a consumer, newest first.".
+-spec list_acks(binary()) -> {ok, [map()]}.
+list_acks(ConsumerId) ->
+    beam_agent_journal_core:list_acks(ConsumerId).
 
 %%--------------------------------------------------------------------
 %% Audit Convenience API

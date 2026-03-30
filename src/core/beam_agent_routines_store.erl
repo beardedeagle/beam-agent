@@ -137,7 +137,7 @@ list_jobs(Filter) when is_map(Filter) ->
             end
     end, [], ?JOBS_TABLE),
     Sorted = lists:sort(fun sort_jobs/2, Jobs),
-    {ok, apply_limit(Sorted, maps:get(limit, Filter, infinity))}.
+    {ok, beam_agent_store_utils:apply_limit(Sorted, maps:get(limit, Filter, infinity))}.
 
 -doc "List currently due jobs in ascending due-time order.".
 -spec list_due_jobs(integer(), due_filter()) -> {ok, [job_record()]}.
@@ -275,26 +275,12 @@ matches_job_filters(Job, Filter) ->
 
 -spec sort_jobs(job_record(), job_record()) -> boolean().
 sort_jobs(A, B) ->
-    compare_desc(
+    beam_agent_store_utils:compare_desc(
         maps:get(updated_at, A, 0),
         maps:get(updated_at, B, 0),
         maps:get(job_id, A),
         maps:get(job_id, B)
     ).
-
--spec compare_desc(integer(), integer(), binary(), binary()) -> boolean().
-compare_desc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    true;
-compare_desc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    false;
-compare_desc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.
-
--spec apply_limit([job_record()], infinity | pos_integer()) -> [job_record()].
-apply_limit(Jobs, infinity) ->
-    Jobs;
-apply_limit(Jobs, Limit) when is_integer(Limit), Limit > 0 ->
-    lists:sublist(Jobs, Limit).
 
 -spec decrement_limit(infinity | pos_integer(), 1) -> infinity | non_neg_integer().
 decrement_limit(infinity, _Matched) ->

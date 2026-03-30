@@ -587,16 +587,16 @@ is_ok(_) -> false.
 
 -spec telemetry_start(context_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(context, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(context, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_finish(context_operation(), integer(),
     {ok, context_result()} | {error, context_error()}, map()) -> ok.
 telemetry_finish(Operation, StartTime, {ok, Result}, Metadata) ->
     TeleMeta = compact_telemetry(maps:merge(Metadata, telemetry_result_meta(Result))),
-    beam_agent_telemetry_core:span_stop(context, Operation, StartTime, TeleMeta),
+    beam_agent_telemetry:span_stop(context, Operation, StartTime, TeleMeta),
     maybe_emit_compaction_transition(Result, TeleMeta);
 telemetry_finish(Operation, _StartTime, {error, Reason}, Metadata) ->
-    beam_agent_telemetry_core:span_exception(context, Operation, Reason,
+    beam_agent_telemetry:span_exception(context, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_scope_meta(scope(), map()) -> map().
@@ -621,7 +621,7 @@ telemetry_result_meta(Result) ->
 
 -spec maybe_emit_compaction_transition(context_result(), map()) -> ok.
 maybe_emit_compaction_transition(#{compacted := true}, Metadata) ->
-    beam_agent_telemetry_core:state_change(context, stable, compacted, Metadata);
+    beam_agent_telemetry:state_change(context, stable, compacted, Metadata);
 maybe_emit_compaction_transition(_Result, _Metadata) ->
     ok.
 

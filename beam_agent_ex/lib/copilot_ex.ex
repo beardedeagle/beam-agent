@@ -469,6 +469,18 @@ defmodule CopilotEx do
     :copilot_client.resume_session(session_id, opts_to_map(opts))
   end
 
+  @doc "Subscribe to the native Copilot event stream."
+  @spec event_subscribe(pid()) :: {:ok, reference()}
+  def event_subscribe(session) do
+    :copilot_client.event_subscribe(session)
+  end
+
+  @doc "Unsubscribe from the native Copilot event stream."
+  @spec event_unsubscribe(pid(), reference()) :: :ok | {:error, :bad_ref}
+  def event_unsubscribe(session, ref) do
+    :copilot_client.event_unsubscribe(session, ref)
+  end
+
   @doc """
   Interrupt/abort the current active query.
 
@@ -993,6 +1005,148 @@ defmodule CopilotEx do
           atom() => non_neg_integer()
         }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
+
+  # ── Backend-specific ──────────────────────────────────────────────
+
+  @doc "Return the backend name atom (`:copilot`)."
+  @spec backend_name() :: :copilot
+  defdelegate backend_name, to: :copilot_client
+
+  @doc "Return the current account quota."
+  @spec account_quota(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate account_quota(session), to: :copilot_client
+
+  @doc "Return the currently selected agent."
+  @spec agent_current(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate agent_current(session), to: :copilot_client
+
+  @doc "Deselect the current agent."
+  @spec agent_deselect(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate agent_deselect(session), to: :copilot_client
+
+  @doc "List available agents."
+  @spec agent_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate agent_list(session), to: :copilot_client
+
+  @doc "Reload the agent registry."
+  @spec agent_reload(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate agent_reload(session), to: :copilot_client
+
+  @doc "Select an agent by ID."
+  @spec agent_select(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate agent_select(session, agent_id), to: :copilot_client
+
+  @doc "Trigger context compaction."
+  @spec compaction_compact(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate compaction_compact(session), to: :copilot_client
+
+  @doc "Start a fleet of parallel sessions."
+  @spec fleet_start(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate fleet_start(session, params), to: :copilot_client
+
+  @doc "Disable an MCP server by ID."
+  @spec mcp_disable(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_disable(session, server_id), to: :copilot_client
+
+  @doc "Enable an MCP server by ID."
+  @spec mcp_enable(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_enable(session, server_id), to: :copilot_client
+
+  @doc "List registered MCP servers."
+  @spec mcp_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_list(session), to: :copilot_client
+
+  @doc "Reload all MCP servers."
+  @spec mcp_reload(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate mcp_reload(session), to: :copilot_client
+
+  @doc "Return the raw MCP status map for this session's MCP servers."
+  @spec mcp_status(pid()) :: {:ok, %{binary() => map()}}
+  defdelegate mcp_status(session), to: :copilot_client
+
+  @doc "Return the MCP server status as a list for this session."
+  @spec mcp_server_status_list(pid()) :: {:ok, %{binary() => map()}}
+  defdelegate mcp_server_status_list(session), to: :copilot_client
+
+  @doc "List registered plugins."
+  @spec plugins_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate plugins_list(session), to: :copilot_client
+
+  @doc "Get the session foreground state."
+  @spec session_foreground_get(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_foreground_get(session), to: :copilot_client
+
+  @doc "Set the session foreground state."
+  @spec session_foreground_set(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_foreground_set(session, params), to: :copilot_client
+
+  @doc "Write to the session log."
+  @spec session_log(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_log(session, params), to: :copilot_client
+
+  @doc "Get the current session mode."
+  @spec session_mode_get(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_mode_get(session), to: :copilot_client
+
+  @doc "Set the session mode."
+  @spec session_mode_set(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_mode_set(session, mode), to: :copilot_client
+
+  @doc "Get the current session model."
+  @spec session_model_current(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_model_current(session), to: :copilot_client
+
+  @doc "Delete the session plan."
+  @spec session_plan_delete(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_plan_delete(session), to: :copilot_client
+
+  @doc "Read the session plan."
+  @spec session_plan_read(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_plan_read(session), to: :copilot_client
+
+  @doc "Update the session plan."
+  @spec session_plan_update(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate session_plan_update(session, params), to: :copilot_client
+
+  @doc "Execute a shell command."
+  @spec shell_exec(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate shell_exec(session, command), to: :copilot_client
+
+  @doc "Kill a shell process by ID."
+  @spec shell_kill(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate shell_kill(session, process_id), to: :copilot_client
+
+  @doc "Disable a skill by ID."
+  @spec skills_disable(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate skills_disable(session, skill_id), to: :copilot_client
+
+  @doc "Enable a skill by ID."
+  @spec skills_enable(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate skills_enable(session, skill_id), to: :copilot_client
+
+  @doc "Reload the skill registry."
+  @spec skills_reload(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate skills_reload(session), to: :copilot_client
+
+  @doc "List available tools."
+  @spec tools_list(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate tools_list(session), to: :copilot_client
+
+  @doc "Present a UI elicitation prompt."
+  @spec ui_elicitation(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate ui_elicitation(session, params), to: :copilot_client
+
+  @doc "Create a file in the workspace."
+  @spec workspace_create_file(pid(), map()) :: {:ok, map()} | {:error, term()}
+  defdelegate workspace_create_file(session, params), to: :copilot_client
+
+  @doc "List files in the workspace."
+  @spec workspace_list_files(pid()) :: {:ok, map()} | {:error, term()}
+  defdelegate workspace_list_files(session), to: :copilot_client
+
+  @doc "Read a file from the workspace by path."
+  @spec workspace_read_file(pid(), binary()) :: {:ok, map()} | {:error, term()}
+  defdelegate workspace_read_file(session, path), to: :copilot_client
 
   # ── Internal ─────────────────────────────────────────────────────
 

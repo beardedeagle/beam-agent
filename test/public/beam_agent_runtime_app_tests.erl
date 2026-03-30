@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @doc EUnit tests for beam_agent_app_core (app registry over ETS).
+%%% @doc EUnit tests for beam_agent_runtime app_* functions.
 %%%
 %%% Tests cover:
 %%%   - Table lifecycle (ensure_tables idempotent, clear removes data)
@@ -12,7 +12,7 @@
 %%%   - unregister_app: removes app, idempotent on missing
 %%% @end
 %%%-------------------------------------------------------------------
--module(beam_agent_app_core_tests).
+-module(beam_agent_runtime_app_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 

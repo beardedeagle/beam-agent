@@ -9,7 +9,7 @@ ensure_credential_key_test() ->
     _ = beam_agent_test_setup:ensure_test_key().
 
 list_backends_test() ->
-    ?assertEqual([claude, codex, gemini, opencode, copilot],
+    ?assertEqual([claude, codex, copilot, gemini, opencode],
         beam_agent:list_backends()).
 
 command_run_smoke_test() ->

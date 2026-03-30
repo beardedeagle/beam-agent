@@ -43,7 +43,7 @@ sighup_terminates_sleep_process_test() ->
 
 nonexistent_pid_returns_error_test() ->
     %% PID 99999999 almost certainly does not exist on any system.
-    {error, {exit_status, _}} =
+    {error, {signal_failed, _}} =
         beam_agent_os_signal:send_signal(sigint, 99999999).
 
 %%====================================================================

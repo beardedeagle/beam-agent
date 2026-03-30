@@ -79,7 +79,9 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.SlashCommands,
           BeamAgent.Telemetry,
           BeamAgent.Threads,
-          BeamAgent.Todo
+          BeamAgent.Todo,
+          BeamAgent.Credential,
+          BeamAgent.SensitiveKeys
         ],
         "Canonical Domains": [
           BeamAgent.Artifacts,
@@ -91,7 +93,8 @@ defmodule BeamAgentEx.MixProject do
           BeamAgent.Policy,
           BeamAgent.Routing,
           BeamAgent.Routines,
-          BeamAgent.Runs
+          BeamAgent.Runs,
+          BeamAgent.Store
         ],
         "Backend Wrappers": [
           ClaudeEx,

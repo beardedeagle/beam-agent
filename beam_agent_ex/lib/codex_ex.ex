@@ -1075,6 +1075,20 @@ defmodule CodexEx do
         }
   defdelegate todo_summary(todos), to: BeamAgent.Todo
 
+  # ── Backend-specific ──────────────────────────────────────────────
+
+  @doc "Return the backend name atom (`:codex`)."
+  @spec backend_name() :: :codex
+  defdelegate backend_name, to: :codex_app_server
+
+  @doc "List available configuration providers."
+  @spec config_providers(pid()) :: {:ok, [map()]}
+  defdelegate config_providers(session), to: :codex_app_server
+
+  @doc "List available LLM providers."
+  @spec provider_list(pid()) :: {:ok, [map()]}
+  defdelegate provider_list(session), to: :codex_app_server
+
   # ── Internal ───────────────────────────────────────────────────────
 
   defp opts_to_map(opts) when is_list(opts), do: Map.new(opts)

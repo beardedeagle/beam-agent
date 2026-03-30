@@ -18,6 +18,16 @@ Use this module when you need to:
   - collect a durable execution picture that includes descendants and journal
     records
   - cancel a run tree without creating a resident orchestration service
+
+== Architecture
+
+This module is the stable public API facade for orchestration. It delegates
+all operations to `beam_agent_orchestrator_core`, which owns the
+implementation and lineage tracking logic. The two-layer split decouples the
+public API contract from internal implementation, allowing the core module to
+be refactored freely without breaking callers. Type aliases re-exported here
+let callers depend on `beam_agent_orchestrator:child()` rather than the
+internal module name.
 """.
 
 -export([

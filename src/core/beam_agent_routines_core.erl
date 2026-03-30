@@ -1343,18 +1343,18 @@ any_runner() ->
 
 -spec telemetry_start(routine_operation(), routine_telemetry_meta()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(routine, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(routine_operation(), integer(), routine_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
+    beam_agent_telemetry:span_stop(routine, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(create | list_due | update,
     already_exists | job_busy | job_terminal | not_found | {error, routine_error()},
     routine_telemetry_meta()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(routine, Operation, Reason,
+    beam_agent_telemetry:span_exception(routine, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_finish(create | update, integer(),

@@ -10,6 +10,11 @@ This module keeps the backend-selection logic centralized:
   - cache pid-to-backend lookups in ETS
   - provide backend-specific terminal-message semantics
 
+All backend metadata is defined in the single `registry/0` function.
+To add a new backend, add one entry there — `available_backends/0`,
+`normalize/1`, and `adapter_module/1` all derive from the registry
+automatically.
+
 It intentionally uses ETS, not a dedicated process, because the state is
 small, contention is low, and lookups are on the hot path for query routing.
 """.
@@ -46,6 +51,45 @@ small, contention is low, and lookups are on the hot path for query routing.
 
 -define(SESSIONS_TABLE, beam_agent_backend_sessions).
 
+%%====================================================================
+%% Registry — single source of truth
+%%====================================================================
+
+-doc """
+The canonical backend registry.
+
+To register a new backend, add one entry here. `available_backends/0`,
+`normalize/1`, and `adapter_module/1` all derive from this map.
+
+Each entry maps a canonical backend atom to its adapter module and a
+list of recognized aliases (atoms and binaries).
+""".
+registry() ->
+    #{claude   => #{module  => claude_agent_sdk,
+                    aliases => [claude_agent_sdk,
+                                <<"claude">>, <<"claude_code">>,
+                                <<"claude_agent_sdk">>]},
+      codex    => #{module  => codex_app_server,
+                    aliases => [codex_app_server,
+                                <<"codex">>, <<"codex_cli">>,
+                                <<"codex_app_server">>]},
+      gemini   => #{module  => gemini_cli_client,
+                    aliases => [gemini_cli_client,
+                                <<"gemini">>, <<"gemini_cli">>,
+                                <<"gemini_cli_client">>]},
+      opencode => #{module  => opencode_client,
+                    aliases => [opencode_client,
+                                <<"opencode">>,
+                                <<"opencode_client">>]},
+      copilot  => #{module  => copilot_client,
+                    aliases => [copilot_client,
+                                <<"copilot">>,
+                                <<"copilot_client">>]}}.
+
+%%====================================================================
+%% Public API
+%%====================================================================
+
 -doc "Ensure the pid-to-backend ETS table exists.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
@@ -62,50 +106,34 @@ clear() ->
 -doc "Return the canonical backend atoms supported by the unified SDK.".
 -spec available_backends() -> [backend(), ...].
 available_backends() ->
-    [claude, codex, gemini, opencode, copilot].
+    lists:sort(maps:keys(registry())).
 
 -doc """
 Normalize a backend identifier into a canonical backend atom.
 
 Accepted forms include atoms, binaries, and strings such as:
 `claude`, `<<"claude_agent_sdk">>`, `"codex_app_server"`, etc.
+The recognized aliases are defined in `registry/0`.
 """.
 -spec normalize(term()) -> {ok, backend()} | {error, backend_error()}.
-normalize(claude) -> {ok, claude};
-normalize(codex) -> {ok, codex};
-normalize(gemini) -> {ok, gemini};
-normalize(opencode) -> {ok, opencode};
-normalize(copilot) -> {ok, copilot};
-normalize(claude_agent_sdk) -> {ok, claude};
-normalize(codex_app_server) -> {ok, codex};
-normalize(gemini_cli_client) -> {ok, gemini};
-normalize(opencode_client) -> {ok, opencode};
-normalize(copilot_client) -> {ok, copilot};
 normalize(Value) when is_list(Value) ->
     normalize(unicode:characters_to_binary(Value));
-normalize(<<"claude">>) -> {ok, claude};
-normalize(<<"claude_code">>) -> {ok, claude};
-normalize(<<"claude_agent_sdk">>) -> {ok, claude};
-normalize(<<"codex">>) -> {ok, codex};
-normalize(<<"codex_cli">>) -> {ok, codex};
-normalize(<<"codex_app_server">>) -> {ok, codex};
-normalize(<<"gemini">>) -> {ok, gemini};
-normalize(<<"gemini_cli">>) -> {ok, gemini};
-normalize(<<"gemini_cli_client">>) -> {ok, gemini};
-normalize(<<"opencode">>) -> {ok, opencode};
-normalize(<<"opencode_client">>) -> {ok, opencode};
-normalize(<<"copilot">>) -> {ok, copilot};
-normalize(<<"copilot_client">>) -> {ok, copilot};
+normalize(Value) when is_atom(Value); is_binary(Value) ->
+    Reg = registry(),
+    case maps:is_key(Value, Reg) of
+        true  -> {ok, Value};
+        false -> lookup_alias(Value, Reg)
+    end;
 normalize(Value) ->
     {error, {unknown_backend, Value}}.
 
 -doc "Map a canonical backend to its adapter facade module.".
 -spec adapter_module(backend()) -> adapter_module().
-adapter_module(claude) -> claude_agent_sdk;
-adapter_module(codex) -> codex_app_server;
-adapter_module(gemini) -> gemini_cli_client;
-adapter_module(opencode) -> opencode_client;
-adapter_module(copilot) -> copilot_client.
+adapter_module(Backend) ->
+    case maps:find(Backend, registry()) of
+        {ok, #{module := Mod}} -> Mod;
+        error -> error({unknown_backend, Backend})
+    end.
 
 -doc """
 Return the backend category for a canonical backend atom.
@@ -163,7 +191,9 @@ session_backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 -
 Return whether a message should terminate collection for a backend.
 
 Copilot emits non-terminal `error` messages, so only `error` messages with
-`is_error := true` halt that backend's collection loop.
+`is_error := true` halt that backend's collection loop. This is behavioral
+semantics specific to each backend's wire protocol, not registry
+configuration, so it is defined here as explicit pattern matches.
 """.
 -spec is_terminal(backend(), map()) -> boolean().
 is_terminal(copilot, #{type := result}) ->
@@ -182,6 +212,23 @@ is_terminal(_, _) ->
 %%--------------------------------------------------------------------
 %% Internal helpers
 %%--------------------------------------------------------------------
+
+-spec lookup_alias(atom() | binary(), #{backend() => map()}) ->
+    {ok, backend()} | {error, backend_error()}.
+lookup_alias(Alias, Registry) ->
+    Result = maps:fold(fun
+        (Backend, #{aliases := Aliases}, error) ->
+            case lists:member(Alias, Aliases) of
+                true  -> {ok, Backend};
+                false -> error
+            end;
+        (_Backend, _Entry, Found) ->
+            Found
+    end, error, Registry),
+    case Result of
+        {ok, _} = Ok -> Ok;
+        error -> {error, {unknown_backend, Alias}}
+    end.
 
 -spec infer_session_backend(pid()) -> {ok, backend()} | {error, backend_lookup_error()}.
 infer_session_backend(Session) ->

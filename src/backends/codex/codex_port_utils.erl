@@ -14,7 +14,7 @@ append_buffer(Partial, Buffer, BufferMax) ->
 check_buffer_overflow(Buffer, BufferMax) ->
     case byte_size(Buffer) > BufferMax of
         true ->
-            beam_agent_telemetry_core:buffer_overflow(byte_size(Buffer),
+            beam_agent_telemetry:buffer_overflow(byte_size(Buffer),
                                                  BufferMax),
             logger:warning("Codex buffer overflow (~p bytes), truncatin"
                            "g",

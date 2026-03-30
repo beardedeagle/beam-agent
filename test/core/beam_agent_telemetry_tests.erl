@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @doc EUnit tests for beam_agent_telemetry_core (telemetry event helpers).
+%%% @doc EUnit tests for beam_agent_telemetry (telemetry event helpers).
 %%%
 %%% Tests cover:
 %%%   - span_start/3: emits [beam_agent, Agent, EventSuffix, start] event,
@@ -14,7 +14,7 @@
 %%%     buffer_size measurement and max metadata
 %%% @end
 %%%-------------------------------------------------------------------
--module(beam_agent_telemetry_core_tests).
+-module(beam_agent_telemetry_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 
@@ -29,7 +29,7 @@ span_start_returns_integer_test() ->
         [beam_agent, claude, query, start],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(claude, query,
+    StartTime = beam_agent_telemetry:span_start(claude, query,
         #{session => <<"s1">>}),
     ?assert(is_integer(StartTime)),
     telemetry:detach(HandlerId).
@@ -44,7 +44,7 @@ span_start_emits_start_event_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    _StartTime = beam_agent_telemetry_core:span_start(claude, query,
+    _StartTime = beam_agent_telemetry:span_start(claude, query,
         #{session => <<"s2">>}),
     receive
         {telemetry_event, Measurements, Metadata} ->
@@ -66,7 +66,7 @@ span_start_includes_caller_metadata_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    _StartTime = beam_agent_telemetry_core:span_start(gemini, query,
+    _StartTime = beam_agent_telemetry:span_start(gemini, query,
         #{custom_key => <<"custom_val">>}),
     receive
         {telemetry_event, Metadata} ->
@@ -86,7 +86,7 @@ span_start_agent_injected_into_metadata_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    _StartTime = beam_agent_telemetry_core:span_start(codex, exec, #{}),
+    _StartTime = beam_agent_telemetry:span_start(codex, exec, #{}),
     receive
         {telemetry_event, Metadata} ->
             ?assertEqual(codex, maps:get(agent, Metadata))
@@ -109,8 +109,8 @@ span_stop_emits_stop_event_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(claude, query, #{}),
-    ok = beam_agent_telemetry_core:span_stop(claude, query, StartTime),
+    StartTime = beam_agent_telemetry:span_start(claude, query, #{}),
+    ok = beam_agent_telemetry:span_stop(claude, query, StartTime),
     receive
         {telemetry_event, Measurements, Metadata} ->
             ?assert(is_map(Measurements)),
@@ -133,9 +133,9 @@ span_stop_duration_is_non_negative_test() ->
             Self ! {telemetry_event, Measurements}
         end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(gemini, stream, #{}),
+    StartTime = beam_agent_telemetry:span_start(gemini, stream, #{}),
     timer:sleep(5),
-    ok = beam_agent_telemetry_core:span_stop(gemini, stream, StartTime),
+    ok = beam_agent_telemetry:span_stop(gemini, stream, StartTime),
     receive
         {telemetry_event, Measurements} ->
             Duration = maps:get(duration, Measurements),
@@ -152,8 +152,8 @@ span_stop_returns_ok_test() ->
         [beam_agent, codex, exec, stop],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(codex, exec, #{}),
-    Result = beam_agent_telemetry_core:span_stop(codex, exec, StartTime),
+    StartTime = beam_agent_telemetry:span_start(codex, exec, #{}),
+    Result = beam_agent_telemetry:span_stop(codex, exec, StartTime),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -171,7 +171,7 @@ span_exception_emits_exception_event_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:span_exception(claude, query, timeout),
+    ok = beam_agent_telemetry:span_exception(claude, query, timeout),
     receive
         {telemetry_event, Measurements, Metadata} ->
             ?assert(is_map(Measurements)),
@@ -193,7 +193,7 @@ span_exception_reason_in_metadata_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:span_exception(gemini, stream,
+    ok = beam_agent_telemetry:span_exception(gemini, stream,
         {error, connection_refused}),
     receive
         {telemetry_event, Metadata} ->
@@ -211,7 +211,7 @@ span_exception_returns_ok_test() ->
         [beam_agent, codex, exec, exception],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    Result = beam_agent_telemetry_core:span_exception(codex, exec, some_reason),
+    Result = beam_agent_telemetry:span_exception(codex, exec, some_reason),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -225,7 +225,7 @@ span_exception_agent_in_metadata_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:span_exception(opencode, query, crash),
+    ok = beam_agent_telemetry:span_exception(opencode, query, crash),
     receive
         {telemetry_event, Metadata} ->
             ?assertEqual(opencode, maps:get(agent, Metadata))
@@ -248,7 +248,7 @@ state_change_emits_event_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:state_change(claude, idle, running),
+    ok = beam_agent_telemetry:state_change(claude, idle, running),
     receive
         {telemetry_event, Measurements, Metadata} ->
             ?assert(is_map(Measurements)),
@@ -268,7 +268,7 @@ state_change_returns_ok_test() ->
         [beam_agent, session, state_change],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    Result = beam_agent_telemetry_core:state_change(gemini, connecting, connected),
+    Result = beam_agent_telemetry:state_change(gemini, connecting, connected),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -282,7 +282,7 @@ state_change_different_agents_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:state_change(copilot, starting, ready),
+    ok = beam_agent_telemetry:state_change(copilot, starting, ready),
     receive
         {telemetry_event, Metadata} ->
             ?assertEqual(copilot, maps:get(agent, Metadata)),
@@ -305,7 +305,7 @@ state_change_event_name_is_fixed_test() ->
             Self ! {telemetry_event, EventName}
         end,
         []),
-    ok = beam_agent_telemetry_core:state_change(codex, idle, running),
+    ok = beam_agent_telemetry:state_change(codex, idle, running),
     receive
         {telemetry_event, EventName} ->
             ?assertEqual([beam_agent, session, state_change], EventName)
@@ -324,7 +324,7 @@ domain_state_change_emits_domain_scoped_event_test() ->
             Self ! {telemetry_event, EventName, Measurements, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:state_change(run, created, running, #{run_id => <<"r1">>}),
+    ok = beam_agent_telemetry:state_change(run, created, running, #{run_id => <<"r1">>}),
     receive
         {telemetry_event, EventName, Measurements, Metadata} ->
             ?assertEqual([beam_agent, run, state_change], EventName),
@@ -345,7 +345,7 @@ domain_state_change_returns_ok_test() ->
         [beam_agent, routine, state_change],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    Result = beam_agent_telemetry_core:state_change(routine, active, running, #{}),
+    Result = beam_agent_telemetry:state_change(routine, active, running, #{}),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -363,7 +363,7 @@ buffer_overflow_emits_event_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:buffer_overflow(1024, 512),
+    ok = beam_agent_telemetry:buffer_overflow(1024, 512),
     receive
         {telemetry_event, Measurements, Metadata} ->
             ?assert(is_map(Measurements)),
@@ -381,7 +381,7 @@ buffer_overflow_returns_ok_test() ->
         [beam_agent, buffer, overflow],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    Result = beam_agent_telemetry_core:buffer_overflow(200, 100),
+    Result = beam_agent_telemetry:buffer_overflow(200, 100),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -395,7 +395,7 @@ buffer_overflow_measurements_contain_size_test() ->
             Self ! {telemetry_event, Measurements}
         end,
         []),
-    ok = beam_agent_telemetry_core:buffer_overflow(9999, 100),
+    ok = beam_agent_telemetry:buffer_overflow(9999, 100),
     receive
         {telemetry_event, Measurements} ->
             ?assertEqual(9999, maps:get(buffer_size, Measurements))
@@ -414,7 +414,7 @@ buffer_overflow_metadata_contains_max_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:buffer_overflow(500, 250),
+    ok = beam_agent_telemetry:buffer_overflow(500, 250),
     receive
         {telemetry_event, Metadata} ->
             ?assertEqual(250, maps:get(max, Metadata))
@@ -437,8 +437,8 @@ span_stop_4_emits_stop_with_metadata_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
-    ok = beam_agent_telemetry_core:span_stop(command, run, StartTime,
+    StartTime = beam_agent_telemetry:span_start(command, run, #{}),
+    ok = beam_agent_telemetry:span_stop(command, run, StartTime,
         #{exit_code => 0, cwd => <<"/tmp">>}),
     receive
         {telemetry_event, Measurements, Metadata} ->
@@ -461,9 +461,9 @@ span_stop_4_duration_non_negative_test() ->
             Self ! {telemetry_event, Measurements}
         end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
+    StartTime = beam_agent_telemetry:span_start(command, run, #{}),
     timer:sleep(5),
-    ok = beam_agent_telemetry_core:span_stop(command, run, StartTime,
+    ok = beam_agent_telemetry:span_stop(command, run, StartTime,
         #{exit_code => 0}),
     receive
         {telemetry_event, Measurements} ->
@@ -480,8 +480,8 @@ span_stop_4_returns_ok_test() ->
         [beam_agent, command, run, stop],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    StartTime = beam_agent_telemetry_core:span_start(command, run, #{}),
-    Result = beam_agent_telemetry_core:span_stop(command, run, StartTime, #{}),
+    StartTime = beam_agent_telemetry:span_start(command, run, #{}),
+    Result = beam_agent_telemetry:span_stop(command, run, StartTime, #{}),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
 
@@ -499,7 +499,7 @@ span_exception_4_emits_with_metadata_test() ->
             Self ! {telemetry_event, Measurements, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:span_exception(command, run,
+    ok = beam_agent_telemetry:span_exception(command, run,
         {timeout, 5000}, #{command => <<"sleep 10">>, cwd => undefined}),
     receive
         {telemetry_event, Measurements, Metadata} ->
@@ -520,7 +520,7 @@ span_exception_4_returns_ok_test() ->
         [beam_agent, command, run, exception],
         fun(_EventName, _Measurements, _Metadata, _Config) -> ok end,
         []),
-    Result = beam_agent_telemetry_core:span_exception(command, run,
+    Result = beam_agent_telemetry:span_exception(command, run,
         some_error, #{key => val}),
     ?assertEqual(ok, Result),
     telemetry:detach(HandlerId).
@@ -535,7 +535,7 @@ span_exception_4_merges_agent_and_reason_test() ->
             Self ! {telemetry_event, Metadata}
         end,
         []),
-    ok = beam_agent_telemetry_core:span_exception(command, run,
+    ok = beam_agent_telemetry:span_exception(command, run,
         badarg, #{custom => data}),
     receive
         {telemetry_event, Metadata} ->

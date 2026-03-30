@@ -20,6 +20,7 @@
     encode_interrupt/1,
     handle_control/4,
     handle_info/3,
+    redact_handler_state/1,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3,
@@ -390,6 +391,21 @@ handle_custom_call({respond_request, RequestId, Params}, _From, HState) ->
     do_respond_request(RequestId, Params, HState);
 handle_custom_call(_Request, _From, _HState) ->
     {error, unsupported}.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        opts               = beam_agent_redaction:map(HState#hstate.opts),
+        approval_handler   = undefined,
+        user_input_handler = undefined
+    };
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: initializing handshake

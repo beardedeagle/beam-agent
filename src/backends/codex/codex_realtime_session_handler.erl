@@ -20,6 +20,7 @@
     encode_interrupt/1,
     is_query_complete/2,
     handle_custom_call/3,
+    redact_handler_state/1,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3
@@ -64,11 +65,10 @@ backend_name() -> codex.
     beam_agent_session_handler:init_result().
 init_handler(Opts) ->
     ClientMod = maps:get(client_module, Opts, beam_agent_ws_client),
-    ApiKey = resolve_api_key(Opts),
-    case ApiKey of
-        <<>> ->
+    case resolve_api_key(Opts) of
+        {error, missing_api_key} ->
             {stop, missing_api_key};
-        _ ->
+        {ok, ApiKey} ->
             Model = maps:get(model, Opts,
                              codex_realtime_protocol:default_model()),
             Voice = maps:get(voice, Opts, undefined),
@@ -327,6 +327,20 @@ on_state_enter(_State, _OldState, HState) ->
     {ok, [], HState}.
 
 %%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        headers = [{K, <<"redacted">>} || {K, _V} <- HState#hstate.headers],
+        opts = beam_agent_redaction:map(HState#hstate.opts)
+    };
+redact_handler_state(Other) ->
+    Other.
+
+%%====================================================================
 %% Internal: response.done handling
 %%====================================================================
 
@@ -482,15 +496,19 @@ maybe_fire_message_hooks(#{type := error} = Msg, HState) ->
 %% Internal: configuration
 %%====================================================================
 
--spec resolve_api_key(map()) -> binary().
+-spec resolve_api_key(map()) -> {ok, binary()} | {error, missing_api_key}.
 resolve_api_key(Opts) ->
     case maps:get(api_key, Opts, undefined) of
         Key when is_binary(Key), byte_size(Key) > 0 ->
-            Key;
+            {ok, Key};
         _ ->
-            EnvKey = os:getenv("CODEX_API_KEY",
-                               os:getenv("OPENAI_API_KEY", "")),
-            unicode:characters_to_binary(EnvKey)
+            case os:getenv("CODEX_API_KEY",
+                           os:getenv("OPENAI_API_KEY", "")) of
+                "" ->
+                    {error, missing_api_key};
+                EnvKey ->
+                    {ok, unicode:characters_to_binary(EnvKey)}
+            end
     end.
 
 -spec resolve_ws_target(map(), binary()) ->

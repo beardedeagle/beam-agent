@@ -147,13 +147,8 @@ beam_agent_catalog_core     beam_agent_registry
     fuzzy_search/3,
     search_session_start/3,
     search_session_update/3,
-    search_session_stop/2
-]).
-
--export_type([file_search_result/0, file_entry/0, file_search_opts/0]).
-
--ifdef(TEST).
--export([
+    search_session_stop/2,
+    %% File impl — lower-level delegates for direct access
     file_find_text/2, file_find_text/3,
     file_find_files/1, file_find_files/2,
     file_find_symbols/1, file_find_symbols/2,
@@ -161,7 +156,8 @@ beam_agent_catalog_core     beam_agent_registry
     file_read_impl/1, file_read_impl/2,
     file_status_impl/0, file_status_impl/1
 ]).
--endif.
+
+-export_type([file_search_result/0, file_entry/0, file_search_opts/0]).
 
 %% Internal helpers: specs are deliberately broader than current call sites.
 -dialyzer({nowarn_function, [
@@ -759,12 +755,10 @@ file_find_files(Pattern, Opts) when is_binary(Pattern), is_map(Opts) ->
 
 %% find_symbols
 
--ifdef(TEST).
 -spec file_find_symbols(file_search_opts()) ->
     {ok, [file_search_result()]} | {error, {invalid_pattern, string(), non_neg_integer()}}.
 file_find_symbols(Opts) when is_map(Opts) ->
     file_find_symbols(<<>>, Opts).
--endif.
 
 -spec file_find_symbols(binary(), file_search_opts()) ->
     {ok, [file_search_result()]} | {error, term()}.
@@ -846,13 +840,11 @@ file_read_impl(Path, Opts) when is_binary(Path), is_map(Opts) ->
 
 %% file_status
 
--ifdef(TEST).
 -spec file_status_impl() ->
     {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}}
     | {error, {list_dir_failed, binary(), atom() | {_, _}}}.
 file_status_impl() ->
     file_status_impl(#{}).
--endif.
 
 -spec file_status_impl(file_search_opts()) ->
     {ok, #{cwd := binary(), source := git | filesystem, files := [map()]}}

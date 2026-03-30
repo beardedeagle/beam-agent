@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @doc EUnit tests for beam_agent_file_core (file search and read).
+%%% @doc EUnit tests for beam_agent_catalog file_* functions.
 %%%
 %%% Tests cover:
 %%%   - find_text/2,3: regex search, invalid pattern, case insensitive
@@ -10,7 +10,7 @@
 %%%   - file_status/0,1: cwd and source fields
 %%% @end
 %%%-------------------------------------------------------------------
--module(beam_agent_file_core_tests).
+-module(beam_agent_catalog_file_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 

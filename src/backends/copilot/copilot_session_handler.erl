@@ -20,6 +20,7 @@
     handle_initializing/2,
     encode_interrupt/1,
     handle_control/4,
+    redact_handler_state/1,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3,
@@ -434,6 +435,21 @@ on_state_enter(_State, _OldState, HState) ->
 is_query_complete(#{type := result}, _HState) -> true;
 is_query_complete(#{type := error, is_error := true}, _HState) -> true;
 is_query_complete(_Msg, _HState) -> false.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        opts               = beam_agent_redaction:map(HState#hstate.opts),
+        permission_handler = undefined,
+        user_input_handler = undefined
+    };
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: JSON-RPC dispatch

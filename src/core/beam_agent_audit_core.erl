@@ -260,16 +260,16 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(audit_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(audit, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(audit, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(audit_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(audit, Operation, StartTime,
+    beam_agent_telemetry:span_stop(audit, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(record | list_events, audit_record_error(), map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(audit, Operation, Reason,
+    beam_agent_telemetry:span_exception(audit, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec compact_telemetry(map()) -> map().

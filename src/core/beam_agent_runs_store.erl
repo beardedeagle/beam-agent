@@ -143,7 +143,7 @@ list_runs(Filter) when is_map(Filter) ->
             Acc
     end, [], ?DOMAINS_TABLE),
     Sorted = lists:sort(fun sort_runs/2, Runs),
-    {ok, apply_limit(Sorted, Filter)}.
+    {ok, beam_agent_store_utils:apply_limit(Sorted, maps:get(limit, Filter, infinity))}.
 
 %%--------------------------------------------------------------------
 %% Step Storage
@@ -204,18 +204,9 @@ matches_filters(Run, Filter) ->
             maps:get(Key, Run, undefined) =:= Value
     end, maps:to_list(Filter)).
 
--spec apply_limit([run_record()], run_filter()) -> [run_record()].
-apply_limit(Runs, Filter) ->
-    case maps:get(limit, Filter, infinity) of
-        infinity ->
-            Runs;
-        Limit when is_integer(Limit), Limit > 0 ->
-            lists:sublist(Runs, Limit)
-    end.
-
 -spec sort_runs(run_record(), run_record()) -> boolean().
 sort_runs(A, B) ->
-    compare_desc(
+    beam_agent_store_utils:compare_desc(
         maps:get(updated_at, A, 0),
         maps:get(updated_at, B, 0),
         maps:get(run_id, A),
@@ -224,25 +215,9 @@ sort_runs(A, B) ->
 
 -spec sort_steps(step_record(), step_record()) -> boolean().
 sort_steps(A, B) ->
-    compare_asc(
+    beam_agent_store_utils:compare_asc(
         maps:get(created_at, A, 0),
         maps:get(created_at, B, 0),
         maps:get(step_id, A),
         maps:get(step_id, B)
     ).
-
--spec compare_desc(integer(), integer(), binary(), binary()) -> boolean().
-compare_desc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    true;
-compare_desc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    false;
-compare_desc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.
-
--spec compare_asc(integer(), integer(), binary(), binary()) -> boolean().
-compare_asc(Left, Right, _LeftId, _RightId) when Left < Right ->
-    true;
-compare_asc(Left, Right, _LeftId, _RightId) when Left > Right ->
-    false;
-compare_asc(_Left, _Right, LeftId, RightId) ->
-    LeftId =< RightId.

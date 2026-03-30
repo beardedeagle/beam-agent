@@ -1,50 +1,89 @@
 -module(opencode_sse).
 -moduledoc false.
--export([new_state/0,new_state/1,parse_chunk/2,buffer_size/1]).
--export_type([sse_event/0,parse_state/0]).
+-export([new_state/0, new_state/1, parse_chunk/2, buffer_size/1]).
+-export_type([sse_event/0, parse_state/0]).
+
 -type sse_event() ::
           #{data := binary(), event => binary(), id => binary()}.
--record(evt,{event_type = undefined :: binary() | undefined,
-             event_id = undefined :: binary() | undefined,
-             data_lines = [] :: [binary()]}).
--opaque parse_state() :: {binary(), #evt{}, pos_integer()}.
+
+-record(evt, {event_type = undefined :: binary() | undefined,
+              event_id   = undefined :: binary() | undefined,
+              data_lines = []        :: [binary()]}).
 
 %% Default maximum number of data: lines per SSE event.
 %% Assuming ~1 KB per line, 10 000 lines ≈ 10 MB — prevents unbounded
 %% per-event accumulation when the outer buffer_max guard does not apply.
 -define(DEFAULT_MAX_DATA_LINES, 10000).
 
+%% Default maximum size (bytes) of a single SSE line.
+%% 1 MB is generous for any legitimate SSE field; lines exceeding this
+%% are discarded to prevent OOM from a malicious or buggy server sending
+%% data with no newlines.
+-define(DEFAULT_MAX_LINE_SIZE, 1048576).
+
+-opaque parse_state() ::
+    {binary(), #evt{}, pos_integer(), pos_integer()}.
+
 -spec new_state() -> parse_state().
 new_state() ->
-    {<<>>, #evt{}, ?DEFAULT_MAX_DATA_LINES}.
+    {<<>>, #evt{}, ?DEFAULT_MAX_DATA_LINES, ?DEFAULT_MAX_LINE_SIZE}.
 
 -spec new_state(map()) -> parse_state().
 new_state(Opts) ->
     MaxDataLines = maps:get(max_data_lines, Opts, ?DEFAULT_MAX_DATA_LINES),
-    {<<>>, #evt{}, MaxDataLines}.
+    MaxLineSize  = maps:get(max_line_size, Opts, ?DEFAULT_MAX_LINE_SIZE),
+    {<<>>, #evt{}, MaxDataLines, MaxLineSize}.
+
 -spec buffer_size(parse_state()) -> non_neg_integer().
-buffer_size({Buffer, _Evt, _MaxDataLines}) ->
+buffer_size({Buffer, _Evt, _MaxDataLines, _MaxLineSize}) ->
     byte_size(Buffer).
+
 -spec parse_chunk(binary(), parse_state()) ->
                      {[sse_event()], parse_state()}.
-parse_chunk(Chunk, {Buffer, Evt, MaxDataLines}) ->
-    Full = <<Buffer/binary,Chunk/binary>>,
-    {Lines, Remaining} = split_lines(Full),
+parse_chunk(Chunk, {Buffer, Evt, MaxDataLines, MaxLineSize}) ->
+    Full = <<Buffer/binary, Chunk/binary>>,
+    {Lines, Remaining} = split_lines(Full, MaxLineSize),
     {Events, FinalEvt} = process_lines(Lines, Evt, [], MaxDataLines),
-    {Events, {Remaining, FinalEvt, MaxDataLines}}.
--spec split_lines(binary()) -> {[binary()], binary()}.
-split_lines(Data) ->
-    split_lines(Data, [], <<>>).
--spec split_lines(binary(), [binary()], binary()) ->
-                     {[binary()], binary()}.
-split_lines(<<>>, Lines, Current) ->
-    {lists:reverse(Lines), Current};
-split_lines(<<$\r,$\n,Rest/binary>>, Lines, Current) ->
-    split_lines(Rest, [Current | Lines], <<>>);
-split_lines(<<$\n,Rest/binary>>, Lines, Current) ->
-    split_lines(Rest, [Current | Lines], <<>>);
-split_lines(<<Byte,Rest/binary>>, Lines, Current) ->
-    split_lines(Rest, Lines, <<Current/binary,Byte>>).
+    {Events, {Remaining, FinalEvt, MaxDataLines, MaxLineSize}}.
+
+%%--------------------------------------------------------------------
+%% Line splitting with per-line size guard
+%%--------------------------------------------------------------------
+
+-spec split_lines(binary(), pos_integer()) -> {[binary()], binary()}.
+split_lines(Data, MaxLineSize) ->
+    split_lines_impl(Data, [], MaxLineSize).
+
+%% Uses binary:split/2 (BIF-level scanning) instead of byte-by-byte
+%% matching for O(1) newline detection per line segment.
+-spec split_lines_impl(binary(), [binary()], pos_integer()) ->
+                          {[binary()], binary()}.
+split_lines_impl(<<>>, Lines, _MaxLineSize) ->
+    {lists:reverse(Lines), <<>>};
+split_lines_impl(Data, Lines, MaxLineSize) ->
+    case binary:split(Data, [<<"\r\n">>, <<"\n">>]) of
+        [Line, Rest] when byte_size(Line) =< MaxLineSize ->
+            split_lines_impl(Rest, [Line | Lines], MaxLineSize);
+        [_OversizedLine, Rest] ->
+            logger:warning(
+                "opencode_sse: discarding oversized line "
+                "(exceeded max_line_size ~p bytes)",
+                [MaxLineSize]),
+            split_lines_impl(Rest, Lines, MaxLineSize);
+        [Incomplete] when byte_size(Incomplete) > MaxLineSize ->
+            logger:warning(
+                "opencode_sse: discarding oversized incomplete buffer "
+                "(exceeded max_line_size ~p bytes)",
+                [MaxLineSize]),
+            {lists:reverse(Lines), <<>>};
+        [Incomplete] ->
+            {lists:reverse(Lines), Incomplete}
+    end.
+
+%%--------------------------------------------------------------------
+%% Event construction
+%%--------------------------------------------------------------------
+
 -spec process_lines([binary()], #evt{}, [sse_event()], pos_integer()) ->
                        {[sse_event()], #evt{}}.
 process_lines([], Evt, Events, _MaxDataLines) ->
@@ -58,12 +97,13 @@ process_lines([Line | Rest], Evt, Events, MaxDataLines) ->
                 Event ->
                     process_lines(Rest, #evt{}, [Event | Events], MaxDataLines)
             end;
-        <<$:,_/binary>> ->
+        <<$:, _/binary>> ->
             process_lines(Rest, Evt, Events, MaxDataLines);
         _ ->
             Evt1 = apply_field(Line, Evt, MaxDataLines),
             process_lines(Rest, Evt1, Events, MaxDataLines)
     end.
+
 -spec apply_field(binary(), #evt{}, pos_integer()) -> #evt{}.
 apply_field(Line, Evt, MaxDataLines) ->
     case binary:split(Line, <<": ">>) of
@@ -74,6 +114,7 @@ apply_field(Line, Evt, MaxDataLines) ->
         [Field | _Rest] ->
             apply_named_field(Field, <<>>, Evt, MaxDataLines)
     end.
+
 -spec apply_named_field(binary(), binary(), #evt{}, pos_integer()) -> #evt{}.
 apply_named_field(<<"data">>, Value, Evt, MaxDataLines) ->
     CurrentCount = length(Evt#evt.data_lines),
@@ -106,27 +147,25 @@ apply_named_field(<<"retry">>, _Value, Evt, _MaxDataLines) ->
     Evt;
 apply_named_field(_Other, _Value, Evt, _MaxDataLines) ->
     Evt.
+
 -spec flush_event(#evt{}) -> sse_event() | skip.
 flush_event(#evt{data_lines = []}) ->
     skip;
 flush_event(#evt{data_lines = DataLines,
                  event_type = EventType,
-                 event_id = EventId}) ->
+                 event_id   = EventId}) ->
     Data = join_data_lines(lists:reverse(DataLines)),
     Base = #{data => Data},
     M0 =
         case EventType of
-            undefined ->
-                Base;
-            ET ->
-                Base#{event => ET}
+            undefined -> Base;
+            ET        -> Base#{event => ET}
         end,
     case EventId of
-        undefined ->
-            M0;
-        EId ->
-            M0#{id => EId}
+        undefined -> M0;
+        EId       -> M0#{id => EId}
     end.
+
 -spec join_data_lines([binary()]) -> binary().
 join_data_lines([]) ->
     <<>>;
@@ -136,7 +175,6 @@ join_data_lines(Lines) ->
     lists:foldl(fun(Line, <<>>) ->
                        Line;
                    (Line, Acc) ->
-                       <<Acc/binary,$\n,Line/binary>>
+                       <<Acc/binary, $\n, Line/binary>>
                 end,
                 <<>>, Lines).
-

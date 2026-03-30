@@ -326,7 +326,7 @@ do_run(Command, Opts) ->
     CmdStr = display_command(Command),
     Cwd = maps:get(cwd, Opts, undefined),
     TeleMeta = #{command => telemetry_command(CmdStr), cwd => Cwd},
-    StartTime = beam_agent_telemetry_core:span_start(command, run, TeleMeta),
+    StartTime = beam_agent_telemetry:span_start(command, run, TeleMeta),
     {PortName, PortOpts} = build_port_spec(Command, Opts),
     Prev = apply_restrictions(Opts),
     try
@@ -624,10 +624,10 @@ cmd_escape_char(Char) ->
     #{'command' := binary(), 'cwd' := term()},
     {ok, command_result()} | {error, command_error()}) -> ok.
 emit_command_telemetry(StartTime, TeleMeta, {ok, #{exit_code := ExitCode}}) ->
-    beam_agent_telemetry_core:span_stop(command, run, StartTime,
+    beam_agent_telemetry:span_stop(command, run, StartTime,
         TeleMeta#{exit_code => ExitCode});
 emit_command_telemetry(_StartTime, TeleMeta, {error, Reason}) ->
-    beam_agent_telemetry_core:span_exception(command, run, Reason, TeleMeta).
+    beam_agent_telemetry:span_exception(command, run, Reason, TeleMeta).
 
 %% Convert a command string to a binary for telemetry metadata.
 %% Truncated to ?TELEMETRY_CMD_MAX_BYTES to prevent telemetry bloat.
