@@ -30,6 +30,9 @@
 %% filelib:is_regular/1 on the validated path).
 -export([validate_settings_path/1]).
 
+%% Engine format_status callback — redact credentials from crash dumps
+-export([redact_handler_state/1]).
+
 %% Dialyzer: resume_args/1 and fork_session_args/1 return string literals
 %% whose character codes are more specific than [[byte()]]; suppressing
 %% since encoding the exact codepoints in a spec is impractical.
@@ -312,6 +315,17 @@ handle_set_permission_mode(Mode, #hstate{} = HState) ->
                    <<"request">> => Request},
     Encoded = beam_agent_jsonl:encode_line(ControlMsg),
     {ok, Mode, [{send, Encoded}], HState}.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{opts = beam_agent_redaction:map(HState#hstate.opts)};
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: initializing handshake

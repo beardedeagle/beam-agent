@@ -20,6 +20,7 @@
     encode_interrupt/1,
     handle_set_model/2,
     handle_set_permission_mode/2,
+    redact_handler_state/1,
     on_state_enter/3,
     is_query_complete/2
 ]).
@@ -361,6 +362,17 @@ on_state_enter(_State, _OldState, HState) ->
 is_query_complete(#{type := result}, _HState) -> true;
 is_query_complete(#{type := error}, _HState) -> true;
 is_query_complete(_Msg, _HState) -> false.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{opts = beam_agent_redaction:map(HState#hstate.opts)};
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: initializing handshake

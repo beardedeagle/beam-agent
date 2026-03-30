@@ -20,6 +20,7 @@
     encode_interrupt/1,
     is_query_complete/2,
     handle_custom_call/3,
+    redact_handler_state/1,
     handle_set_model/2,
     handle_set_permission_mode/2,
     on_state_enter/3
@@ -324,6 +325,20 @@ on_state_enter(ready, connecting, #hstate{session_id = SessionId} = HState) ->
     {ok, [], HState};
 on_state_enter(_State, _OldState, HState) ->
     {ok, [], HState}.
+
+%%====================================================================
+%% Engine format_status redaction
+%%====================================================================
+
+-doc false.
+-spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
+redact_handler_state(#hstate{} = HState) ->
+    HState#hstate{
+        headers = [{K, <<"redacted">>} || {K, _V} <- HState#hstate.headers],
+        opts = beam_agent_redaction:map(HState#hstate.opts)
+    };
+redact_handler_state(Other) ->
+    Other.
 
 %%====================================================================
 %% Internal: response.done handling
