@@ -326,6 +326,8 @@ handle_connecting({exit, _}, HState) ->
 -spec handle_initializing(beam_agent_session_handler:transport_event(),
                           term()) ->
     beam_agent_session_handler:phase_result().
+handle_initializing({data, RawData}, HState) ->
+    handle_sse_data(RawData, initializing, HState);
 handle_initializing(init_timeout, HState) ->
     logger:error("OpenCode initialization timed out"),
     {error_state, init_timeout, HState};
