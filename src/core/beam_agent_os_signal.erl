@@ -122,7 +122,7 @@ send_via_port(KillPath, SigFlag, PidStr) ->
         Class:Reason:Stack ->
             logger:warning("Signal delivery port error: ~p:~tp~n~p",
                            [Class, Reason, Stack]),
-            {error, {Class, Reason}}
+            {error, {port_error, {Class, Reason}}}
     end.
 
 %% Drain any pending messages from a closed port to prevent mailbox leaks.

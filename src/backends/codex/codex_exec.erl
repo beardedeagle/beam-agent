@@ -108,7 +108,10 @@ format_status(Status) ->
     Status#{data => redact_data(Data)}.
 -spec redact_data(#data{} | term()) -> #data{} | term().
 redact_data(#data{} = Data) ->
-    Data#data{opts = beam_agent_redaction:map(Data#data.opts)};
+    Data#data{
+        opts      = beam_agent_redaction:map(Data#data.opts),
+        msg_queue = undefined
+    };
 redact_data(Other) ->
     Other.
 -spec idle(gen_statem:event_type(), term(), #data{}) ->

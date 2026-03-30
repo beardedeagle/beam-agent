@@ -399,7 +399,11 @@ handle_custom_call(_Request, _From, _HState) ->
 -doc false.
 -spec redact_handler_state(#hstate{} | term()) -> #hstate{} | term().
 redact_handler_state(#hstate{} = HState) ->
-    HState#hstate{opts = beam_agent_redaction:map(HState#hstate.opts)};
+    HState#hstate{
+        opts               = beam_agent_redaction:map(HState#hstate.opts),
+        approval_handler   = undefined,
+        user_input_handler = undefined
+    };
 redact_handler_state(Other) ->
     Other.
 

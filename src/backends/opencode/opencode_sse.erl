@@ -52,39 +52,33 @@ parse_chunk(Chunk, {Buffer, Evt, MaxDataLines, MaxLineSize}) ->
 
 -spec split_lines(binary(), pos_integer()) -> {[binary()], binary()}.
 split_lines(Data, MaxLineSize) ->
-    split_lines(Data, [], <<>>, MaxLineSize).
+    split_lines_impl(Data, [], MaxLineSize).
 
--spec split_lines(binary(), [binary()], binary(), pos_integer()) ->
-                     {[binary()], binary()}.
-split_lines(<<>>, Lines, Current, _MaxLineSize) ->
-    {lists:reverse(Lines), Current};
-split_lines(<<$\r, $\n, Rest/binary>>, Lines, Current, MaxLineSize) ->
-    split_lines(Rest, [Current | Lines], <<>>, MaxLineSize);
-split_lines(<<$\n, Rest/binary>>, Lines, Current, MaxLineSize) ->
-    split_lines(Rest, [Current | Lines], <<>>, MaxLineSize);
-split_lines(<<Byte, Rest/binary>>, Lines, Current, MaxLineSize) ->
-    case byte_size(Current) >= MaxLineSize of
-        true ->
+%% Uses binary:split/3 (BIF-level scanning) instead of byte-by-byte
+%% matching for O(1) newline detection per line segment.
+-spec split_lines_impl(binary(), [binary()], pos_integer()) ->
+                          {[binary()], binary()}.
+split_lines_impl(<<>>, Lines, _MaxLineSize) ->
+    {lists:reverse(Lines), <<>>};
+split_lines_impl(Data, Lines, MaxLineSize) ->
+    case binary:split(Data, [<<"\r\n">>, <<"\n">>]) of
+        [Line, Rest] when byte_size(Line) =< MaxLineSize ->
+            split_lines_impl(Rest, [Line | Lines], MaxLineSize);
+        [_OversizedLine, Rest] ->
             logger:warning(
                 "opencode_sse: discarding oversized line "
                 "(exceeded max_line_size ~p bytes)",
                 [MaxLineSize]),
-            skip_to_newline(Rest, Lines, MaxLineSize);
-        false ->
-            split_lines(Rest, Lines, <<Current/binary, Byte>>, MaxLineSize)
+            split_lines_impl(Rest, Lines, MaxLineSize);
+        [Incomplete] when byte_size(Incomplete) > MaxLineSize ->
+            logger:warning(
+                "opencode_sse: discarding oversized incomplete buffer "
+                "(exceeded max_line_size ~p bytes)",
+                [MaxLineSize]),
+            {lists:reverse(Lines), <<>>};
+        [Incomplete] ->
+            {lists:reverse(Lines), Incomplete}
     end.
-
-%% Skip bytes until the next newline after discarding an oversized line.
--spec skip_to_newline(binary(), [binary()], pos_integer()) ->
-                         {[binary()], binary()}.
-skip_to_newline(<<>>, Lines, _MaxLineSize) ->
-    {lists:reverse(Lines), <<>>};
-skip_to_newline(<<$\r, $\n, Rest/binary>>, Lines, MaxLineSize) ->
-    split_lines(Rest, Lines, <<>>, MaxLineSize);
-skip_to_newline(<<$\n, Rest/binary>>, Lines, MaxLineSize) ->
-    split_lines(Rest, Lines, <<>>, MaxLineSize);
-skip_to_newline(<<_Byte, Rest/binary>>, Lines, MaxLineSize) ->
-    skip_to_newline(Rest, Lines, MaxLineSize).
 
 %%--------------------------------------------------------------------
 %% Event construction

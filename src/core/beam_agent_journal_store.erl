@@ -151,12 +151,11 @@ get_ack(ConsumerId, EventId)
 -spec list_acks(binary()) -> {ok, [map()]}.
 list_acks(ConsumerId) when is_binary(ConsumerId) ->
     ensure_tables(),
-    Acks = beam_agent_store:foldl(?STORE_DOMAIN, fun
-        ({{CId, _EventId}, Ack}, Acc) when CId =:= ConsumerId ->
-            [Ack | Acc];
-        (_, Acc) ->
-            Acc
-    end, [], ?ACKS_TABLE),
+    %% Use match_object for ETS-side prefix filtering instead of a full
+    %% Erlang-side foldl scan over the entire acks table.
+    Matches = beam_agent_ets:match_object(?ACKS_TABLE,
+                                          {{ConsumerId, '_'}, '_'}),
+    Acks = [Ack || {_Key, Ack} <- Matches],
     Sorted = lists:sort(fun(A, B) ->
         maps:get(acknowledged_at, A, 0) >= maps:get(acknowledged_at, B, 0)
     end, Acks),

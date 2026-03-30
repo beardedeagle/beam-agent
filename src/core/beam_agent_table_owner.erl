@@ -315,9 +315,26 @@ monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
         undefined ->
             ignored;
         PrimaryPid ->
-            PrimaryPid ! {monitor_for_cleanup, Pid, MFA},
-            ok
+            case lists:member(Mod, allowed_cleanup_modules()) of
+                false ->
+                    logger:warning(
+                        "beam_agent_table_owner: rejected cleanup callback "
+                        "from disallowed module ~p:~p/~p",
+                        [Mod, Fun, length(Args)]),
+                    ignored;
+                true ->
+                    PrimaryPid ! {monitor_for_cleanup, Pid, MFA},
+                    ok
+            end
     end.
+
+%% Modules allowed to register cleanup callbacks. This allowlist prevents
+%% arbitrary code execution inside the privileged shard owner process.
+%% `ets` is included because ETS table operations are a valid cleanup
+%% mechanism (e.g. deleting rows keyed by the dead process).
+-spec allowed_cleanup_modules() -> [beam_agent_events | ets].
+allowed_cleanup_modules() ->
+    [beam_agent_events, ets].
 
 %%--------------------------------------------------------------------
 %% Internal: Initialization
