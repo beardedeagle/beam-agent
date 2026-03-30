@@ -121,6 +121,11 @@ and writes are proxied through the shard owner processes.
 %% Init ready timeout per shard.
 -define(INIT_TIMEOUT, 5000).
 
+%% Maximum number of active monitors per primary shard. Prevents
+%% unbounded map growth when many pids are monitored but few die.
+%% 10 000 is generous for any realistic SDK workload.
+-define(MAX_MONITORS, 10000).
+
 %%--------------------------------------------------------------------
 %% Public API
 %%--------------------------------------------------------------------
@@ -384,8 +389,17 @@ shard_loop(Consumer, Monitors, IsPrimary) ->
         %% defensively to prevent duplicate monitors if a non-primary
         %% shard ever receives this message due to a bug.
         {monitor_for_cleanup, Pid, MFA} when IsPrimary ->
-            MonRef = erlang:monitor(process, Pid),
-            shard_loop(Consumer, Monitors#{MonRef => MFA}, IsPrimary);
+            case map_size(Monitors) >= ?MAX_MONITORS of
+                true ->
+                    logger:warning(
+                        "beam_agent_table_owner: monitor limit reached "
+                        "(~p active), rejecting monitor for ~p",
+                        [map_size(Monitors), Pid]),
+                    shard_loop(Consumer, Monitors, IsPrimary);
+                false ->
+                    MonRef = erlang:monitor(process, Pid),
+                    shard_loop(Consumer, Monitors#{MonRef => MFA}, IsPrimary)
+            end;
         {monitor_for_cleanup, _Pid, _MFA} ->
             %% Non-primary shard — drop silently.
             shard_loop(Consumer, Monitors, IsPrimary);
