@@ -1210,7 +1210,8 @@ predicate: `result` and `error` messages halt the loop.
 message (e.g. `gen_statem:call(Session, {receive_message, Ref}, T)`).
 
 Returns `{ok, Messages}` in order, or `{error, Reason}` on
-timeout or transport failure.
+transport failure. On timeout returns `{error, {timeout, PartialMessages}}`
+preserving any messages accumulated before the deadline expired.
 
 See also `collect_messages/5`.
 """.
@@ -1240,7 +1241,7 @@ collect_loop(Session, Ref, Deadline, ReceiveFun, IsTerminal, Acc) ->
     Remaining = Deadline - erlang:monotonic_time(millisecond),
     case Remaining =< 0 of
         true ->
-            {error, timeout};
+            {error, {timeout, lists:reverse(Acc)}};
         false ->
             case ReceiveFun(Session, Ref, Remaining) of
                 {ok, Msg} ->
