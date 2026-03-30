@@ -1415,7 +1415,7 @@ decode_settings_json(JsonBin) ->
             try json:decode(JsonBin) of
                 Map when is_map(Map) -> Map;
                 _                    -> #{}
-            catch _:_ -> #{}
+            catch error:_ -> #{}
             end
     end.
 

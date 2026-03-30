@@ -316,7 +316,7 @@ register_command(Port, Command) ->
 -spec unregister_command(port()) -> ok.
 unregister_command(Port) ->
     try beam_agent_ets:delete(?COMMAND_TABLE, Port)
-    catch _:_ -> ok
+    catch error:badarg -> ok
     end,
     ok.
 
@@ -717,7 +717,7 @@ enter_throttle(RC) ->
 -spec signal_active_commands(binary()) -> ok.
 signal_active_commands(Reason) ->
     Commands = try beam_agent_ets:tab2list(?COMMAND_TABLE)
-               catch _:_ -> []
+               catch error:badarg -> []
                end,
     lists:foreach(fun({Port, OwnerPid, _Cmd, _Time}) ->
         OwnerPid ! {beam_agent_lockdown, Port, Reason}
@@ -764,7 +764,7 @@ build_status() ->
 -spec safe_delete_all(table_name()) -> ok.
 safe_delete_all(Table) ->
     try beam_agent_ets:delete_all_objects(Table)
-    catch _:_ -> ok
+    catch error:badarg -> ok
     end,
     ok.
 
@@ -809,7 +809,7 @@ maybe_recent_history(N) ->
     case running() of
         true ->
             try get_recent_history(N)
-            catch _:_ -> []
+            catch error:badarg -> []
             end;
         false ->
             []
