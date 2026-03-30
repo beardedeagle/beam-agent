@@ -81,6 +81,76 @@ ack_is_idempotent_and_requires_existing_event_test() ->
         beam_agent_journal_core:ack(<<"consumer-1">>, <<"missing-event">>)),
     reset().
 
+get_ack_returns_not_found_for_missing_test() ->
+    reset(),
+    ?assertEqual({error, not_found},
+        beam_agent_journal_core:get_ack(<<"no-consumer">>, <<"no-event">>)),
+    reset().
+
+get_ack_returns_ok_after_ack_test() ->
+    reset(),
+    {ok, Entry} = beam_agent_journal_core:append(<<"get_ack_test">>, #{
+        tags => [ack_read],
+        payload => #{done => true}
+    }),
+    EventId = maps:get(event_id, Entry),
+    ConsumerId = <<"consumer-get-ack">>,
+    ok = beam_agent_journal_core:ack(ConsumerId, EventId),
+    {ok, Ack} = beam_agent_journal_core:get_ack(ConsumerId, EventId),
+    ?assertEqual(ConsumerId, maps:get(consumer_id, Ack)),
+    ?assertEqual(EventId, maps:get(event_id, Ack)),
+    ?assert(is_integer(maps:get(acknowledged_at, Ack))),
+    reset().
+
+get_ack_is_idempotent_test() ->
+    reset(),
+    {ok, Entry} = beam_agent_journal_core:append(<<"idem_ack_test">>, #{
+        tags => [ack_read],
+        payload => #{ok => true}
+    }),
+    EventId = maps:get(event_id, Entry),
+    ConsumerId = <<"consumer-idem">>,
+    ok = beam_agent_journal_core:ack(ConsumerId, EventId),
+    {ok, Ack1} = beam_agent_journal_core:get_ack(ConsumerId, EventId),
+    ok = beam_agent_journal_core:ack(ConsumerId, EventId),
+    {ok, Ack2} = beam_agent_journal_core:get_ack(ConsumerId, EventId),
+    ?assertEqual(maps:get(event_id, Ack1), maps:get(event_id, Ack2)),
+    reset().
+
+list_acks_empty_for_unknown_consumer_test() ->
+    reset(),
+    ?assertEqual({ok, []},
+        beam_agent_journal_core:list_acks(<<"unknown-consumer">>)),
+    reset().
+
+list_acks_returns_newest_first_test() ->
+    reset(),
+    {ok, E1} = beam_agent_journal_core:append(<<"list_ack_1">>, #{
+        tags => [ack_order], payload => #{i => 1}
+    }),
+    {ok, E2} = beam_agent_journal_core:append(<<"list_ack_2">>, #{
+        tags => [ack_order], payload => #{i => 2}
+    }),
+    {ok, E3} = beam_agent_journal_core:append(<<"list_ack_3">>, #{
+        tags => [ack_order], payload => #{i => 3}
+    }),
+    ConsumerId = <<"consumer-order">>,
+    ok = beam_agent_journal_core:ack(ConsumerId, maps:get(event_id, E1)),
+    ok = beam_agent_journal_core:ack(ConsumerId, maps:get(event_id, E2)),
+    ok = beam_agent_journal_core:ack(ConsumerId, maps:get(event_id, E3)),
+    {ok, Acks} = beam_agent_journal_core:list_acks(ConsumerId),
+    ?assertEqual(3, length(Acks)),
+    %% Verify newest-first ordering: each acknowledged_at >= the next.
+    AckTimes = [maps:get(acknowledged_at, A) || A <- Acks],
+    ?assertEqual(AckTimes, lists:reverse(lists:sort(AckTimes))),
+    %% All three event ids present.
+    AckIds = [maps:get(event_id, A) || A <- Acks],
+    ?assertEqual(lists:sort([maps:get(event_id, E1),
+                             maps:get(event_id, E2),
+                             maps:get(event_id, E3)]),
+                 lists:sort(AckIds)),
+    reset().
+
 append_rejects_thread_without_session_test() ->
     reset(),
     ?assertEqual({error, session_id_required_for_thread},

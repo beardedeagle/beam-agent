@@ -332,9 +332,30 @@ monitor_for_cleanup(Pid, {Mod, Fun, Args} = MFA)
 %% arbitrary code execution inside the privileged shard owner process.
 %% `ets` is included because ETS table operations are a valid cleanup
 %% mechanism (e.g. deleting rows keyed by the dead process).
--spec allowed_cleanup_modules() -> [beam_agent_events | ets].
+-spec allowed_cleanup_modules() -> [beam_agent_events | ets, ...].
 allowed_cleanup_modules() ->
     [beam_agent_events, ets].
+
+%% Throttled warning for monitor cap — logs the first rejection and
+%% every 100th thereafter to avoid log spam under sustained churn.
+-spec throttle_monitor_cap_warning(non_neg_integer(), pid()) -> ok.
+throttle_monitor_cap_warning(ActiveCount, Pid) ->
+    Count = case get(monitor_cap_warnings) of
+                undefined -> 0;
+                N         -> N
+            end,
+    case Count rem 100 of
+        0 ->
+            logger:warning(
+                "beam_agent_table_owner: monitor limit reached "
+                "(~p active), rejecting monitor for ~p "
+                "(~p rejections total)",
+                [ActiveCount, Pid, Count + 1]);
+        _ ->
+            ok
+    end,
+    put(monitor_cap_warnings, Count + 1),
+    ok.
 
 %%--------------------------------------------------------------------
 %% Internal: Initialization
@@ -406,16 +427,24 @@ shard_loop(Consumer, Monitors, IsPrimary) ->
         %% defensively to prevent duplicate monitors if a non-primary
         %% shard ever receives this message due to a bug.
         {monitor_for_cleanup, Pid, MFA} when IsPrimary ->
-            case map_size(Monitors) >= ?MAX_MONITORS of
-                true ->
-                    logger:warning(
-                        "beam_agent_table_owner: monitor limit reached "
-                        "(~p active), rejecting monitor for ~p",
-                        [map_size(Monitors), Pid]),
-                    shard_loop(Consumer, Monitors, IsPrimary);
-                false ->
-                    MonRef = erlang:monitor(process, Pid),
-                    shard_loop(Consumer, Monitors#{MonRef => MFA}, IsPrimary)
+            case maps:find(Pid, Monitors) of
+                {ok, {ExistingRef, MFAs}} ->
+                    %% Already monitoring this Pid — append callback.
+                    shard_loop(Consumer,
+                               Monitors#{Pid := {ExistingRef, [MFA | MFAs]}},
+                               IsPrimary);
+                error ->
+                    case map_size(Monitors) >= ?MAX_MONITORS of
+                        true ->
+                            throttle_monitor_cap_warning(
+                                map_size(Monitors), Pid),
+                            shard_loop(Consumer, Monitors, IsPrimary);
+                        false ->
+                            MonRef = erlang:monitor(process, Pid),
+                            shard_loop(Consumer,
+                                       Monitors#{Pid => {MonRef, [MFA]}},
+                                       IsPrimary)
+                    end
             end;
         {monitor_for_cleanup, _Pid, _MFA} ->
             %% Non-primary shard — drop silently.
@@ -425,18 +454,20 @@ shard_loop(Consumer, Monitors, IsPrimary) ->
         %% The callback runs inside the shard, so ETS writes for tables
         %% owned by this shard are direct. Writes to other shards' tables
         %% route through beam_agent_ets wrappers automatically.
-        {'DOWN', MonRef, process, _Pid, _Reason} ->
-            case maps:take(MonRef, Monitors) of
-                {{Mod, Fun, Args}, Monitors1} ->
-                    try apply(Mod, Fun, Args)
-                    catch Class:Err:Stack ->
-                        logger:warning(
-                            "beam_agent_table_owner: monitor cleanup "
-                            "callback ~p:~p/~p failed: ~p:~p~n~p",
-                            [Mod, Fun, length(Args), Class,
-                             beam_agent_redaction:reason(Err),
-                             beam_agent_redaction:stacktrace(Stack)])
-                    end,
+        {'DOWN', _MonRef, process, Pid, _Reason} ->
+            case maps:take(Pid, Monitors) of
+                {{_Ref, MFAs}, Monitors1} ->
+                    lists:foreach(fun({Mod, Fun, Args}) ->
+                        try apply(Mod, Fun, Args)
+                        catch Class:Err:Stack ->
+                            logger:warning(
+                                "beam_agent_table_owner: monitor cleanup "
+                                "callback ~p:~p/~p failed: ~p:~p~n~p",
+                                [Mod, Fun, length(Args), Class,
+                                 beam_agent_redaction:reason(Err),
+                                 beam_agent_redaction:stacktrace(Stack)])
+                        end
+                    end, lists:reverse(MFAs)),
                     shard_loop(Consumer, Monitors1, IsPrimary);
                 error ->
                     shard_loop(Consumer, Monitors, IsPrimary)

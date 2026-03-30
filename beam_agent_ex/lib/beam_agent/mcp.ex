@@ -479,8 +479,11 @@ defmodule BeamAgent.MCP do
   """
   @spec toggle_server(binary(), boolean(), mcp_registry() | nil) ::
           {:ok, mcp_registry()} | {:error, :not_found}
-  def toggle_server(name, enabled, nil), do: :beam_agent_mcp.toggle_server(name, enabled, :undefined)
-  def toggle_server(name, enabled, registry), do: :beam_agent_mcp.toggle_server(name, enabled, registry)
+  def toggle_server(name, enabled, nil),
+    do: :beam_agent_mcp.toggle_server(name, enabled, :undefined)
+
+  def toggle_server(name, enabled, registry),
+    do: :beam_agent_mcp.toggle_server(name, enabled, registry)
 
   @doc """
   Mark a named server as reconnected in the registry.
@@ -512,8 +515,11 @@ defmodule BeamAgent.MCP do
   session process state. Called by session handlers during initialisation.
   """
   @spec register_session_registry(pid(), mcp_registry() | nil) :: :ok
-  def register_session_registry(pid, nil), do: :beam_agent_mcp.register_session_registry(pid, :undefined)
-  def register_session_registry(pid, registry), do: :beam_agent_mcp.register_session_registry(pid, registry)
+  def register_session_registry(pid, nil),
+    do: :beam_agent_mcp.register_session_registry(pid, :undefined)
+
+  def register_session_registry(pid, registry),
+    do: :beam_agent_mcp.register_session_registry(pid, registry)
 
   @doc """
   Retrieve the MCP registry for a session from the global ETS table.

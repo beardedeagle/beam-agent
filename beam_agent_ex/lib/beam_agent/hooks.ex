@@ -356,6 +356,7 @@ defmodule BeamAgent.Hooks do
   """
   @spec build_registry([hook_def()] | nil) :: hook_registry() | nil
   def build_registry(nil), do: nil
+
   def build_registry(opts) do
     case :beam_agent_hooks.build_registry(opts) do
       :undefined -> nil
