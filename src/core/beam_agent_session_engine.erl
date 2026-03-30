@@ -1038,10 +1038,23 @@ fire_state_enter(NewState, OldState,
     beam_agent_telemetry:state_change(Backend, OldForTelemetry, NewState),
     Data1 = case erlang:function_exported(H, on_state_enter, 3) of
         true ->
-            {ok, Actions, HState1} =
-                H:on_state_enter(NewState, OldForTelemetry, HState),
-            send_data(execute_send_actions(Actions,
-                                Data#engine{handler_state = HState1}));
+            try H:on_state_enter(NewState, OldForTelemetry, HState) of
+                {ok, Actions, HState1} ->
+                    send_data(execute_send_actions(Actions,
+                                    Data#engine{handler_state = HState1}));
+                Unexpected ->
+                    logger:warning("~s on_state_enter(~p, ~p, _) returned"
+                                   " unexpected: ~tp; ignoring",
+                                   [H, NewState, OldForTelemetry, Unexpected]),
+                    Data
+            catch
+                Class:Reason:Stack ->
+                    logger:warning("~s on_state_enter(~p, ~p, _) crashed:"
+                                   " ~p:~tp~n~p",
+                                   [H, NewState, OldForTelemetry,
+                                    Class, Reason, Stack]),
+                    Data
+            end;
         false ->
             Data
     end,
