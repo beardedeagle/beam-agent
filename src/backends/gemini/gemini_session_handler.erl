@@ -288,8 +288,8 @@ handle_set_model(Model, HState) ->
                           <<"session/setModel">>,
                           gemini_wire:set_model_params(
                               SessionId, Model)),
-            Pending = (HState#hstate.pending)#{
-                          Id => {set_model, undefined, Model}},
+            Cleaned = evict_stale_pending(model, HState#hstate.pending),
+            Pending = Cleaned#{Id => {set_model, undefined, Model}},
             HState1 = HState#hstate{pending = Pending, model = Model},
             HState2 = update_session_meta(HState1),
             {ok, Model, [{send, Encoded}], HState2}
@@ -324,8 +324,8 @@ handle_set_permission_mode(Mode, HState) ->
                           <<"session/setMode">>,
                           gemini_wire:set_mode_params(
                               SessionId, RequestedMode)),
-            Pending = (HState#hstate.pending)#{
-                          Id => {set_mode, undefined, RequestedMode}},
+            Cleaned = evict_stale_pending(mode, HState#hstate.pending),
+            Pending = Cleaned#{Id => {set_mode, undefined, RequestedMode}},
             %% NOTE: The engine will see {ok, ...} and reply immediately.
             %% For deferred reply we would need handle_control, but the
             %% engine's handle_set_permission_mode doesn't pass From.
@@ -941,8 +941,8 @@ maybe_apply_query_mode(Params, HState) ->
                               <<"session/setMode">>,
                               gemini_wire:set_mode_params(
                                   SessionId, RequestedMode)),
-            Pending = (HState#hstate.pending)#{
-                          Id => {set_mode_auto, RequestedMode}},
+            Cleaned = evict_stale_pending(mode, HState#hstate.pending),
+            Pending = Cleaned#{Id => {set_mode_auto, RequestedMode}},
             {ModeEncoded, HState#hstate{pending = Pending}};
         _ ->
             HState1 = update_session_meta(
@@ -950,6 +950,43 @@ maybe_apply_query_mode(Params, HState) ->
                                         current_mode = RequestedMode}),
             {[], HState1}
     end.
+
+%%====================================================================
+%% Internal: pending entry eviction
+%%====================================================================
+
+-doc """
+Remove stale pending entries for a category before adding a new request.
+
+When a model or mode switch is requested while a previous switch is still
+pending, the old entry would leak in the pending map if the server drops
+its response. This function evicts superseded entries and replies
+`{error, superseded}` to any waiting callers so they are not left hanging.
+""".
+-spec evict_stale_pending(model | mode, #{integer() => pending_entry()}) ->
+    #{integer() => pending_entry()}.
+evict_stale_pending(model, Pending) ->
+    maps:fold(fun
+        (_Id, {set_model, From, _}, Acc) ->
+            maybe_reply_superseded(From),
+            Acc;
+        (Id, Entry, Acc) ->
+            Acc#{Id => Entry}
+    end, #{}, Pending);
+evict_stale_pending(mode, Pending) ->
+    maps:fold(fun
+        (_Id, {set_mode, From, _}, Acc) ->
+            maybe_reply_superseded(From),
+            Acc;
+        (_Id, {set_mode_auto, _}, Acc) ->
+            Acc;
+        (Id, Entry, Acc) ->
+            Acc#{Id => Entry}
+    end, #{}, Pending).
+
+-spec maybe_reply_superseded(gen_statem:from() | undefined) -> ok.
+maybe_reply_superseded(undefined) -> ok;
+maybe_reply_superseded(From) -> gen_statem:reply(From, {error, superseded}).
 
 %%====================================================================
 %% Internal: mode/model extraction
