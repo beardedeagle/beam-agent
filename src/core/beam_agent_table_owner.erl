@@ -4,12 +4,13 @@ ETS table ownership and lifecycle management for the BEAM Agent SDK.
 
 Provides two operational modes for ETS table access control:
 
-  - `public` (default) — All tables use public access. Any process can
-    read and write.
+  - `hardened` (default) — All tables are protected and writes are proxied
+    through one or more linked shard owner processes. Reads remain zero-cost
+    from any process.
 
-  - `hardened` — All tables are protected and writes are proxied through
-    one or more linked shard owner processes. Reads remain zero-cost from
-    any process.
+  - `public` — All tables use public access. Any process can read and
+    write. Opt into this explicitly if your deployment does not need
+    write-path isolation.
 
 ## Write Sharding
 
@@ -131,7 +132,7 @@ and writes are proxied through the shard owner processes.
 %%--------------------------------------------------------------------
 
 -doc """
-Initialize ETS tables with default settings (public access).
+Initialize ETS tables with default settings (hardened access).
 Equivalent to `init(#{})`.
 """.
 -spec init() -> ok.
@@ -142,14 +143,14 @@ init() ->
 Initialize ETS tables with the given options.
 
 Options:
-  - `table_access` — `public` (default) or `hardened`
+  - `table_access` — `hardened` (default) or `public`
   - `shard_count`  — number of shard owner processes in hardened mode
     (default 1). Ignored in public mode.
 
-In `public` mode, tables are created in the calling process with public
-access. In `hardened` mode, `shard_count` linked helper processes are
-spawned to own the protected tables and proxy writes. Each table is
-assigned to a shard via consistent hashing.
+In `hardened` mode, `shard_count` linked helper processes are spawned
+to own the protected tables and proxy writes. Each table is assigned to
+a shard via consistent hashing. In `public` mode, tables are created in
+the calling process with public access.
 
 This function is idempotent. Calling it again after initialization is
 a no-op that returns `ok`.
@@ -163,7 +164,7 @@ init(Opts) ->
         true ->
             ok;
         false ->
-            Mode = maps:get(table_access, Opts, public),
+            Mode = maps:get(table_access, Opts, hardened),
             ShardCount = maps:get(shard_count, Opts, 1),
             do_init(Mode, ShardCount)
     end.

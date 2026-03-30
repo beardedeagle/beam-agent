@@ -240,7 +240,7 @@ checks for type => result.
 -type terminal_pred() :: beam_agent_core:terminal_pred().
 
 -doc """
-Initialize ETS tables with default settings (public access).
+Initialize ETS tables with default settings (hardened access).
 
 Equivalent to `init(#{})`. Must be called before any SDK functions that
 touch ETS. This is idempotent — calling it again after initialization is
@@ -260,19 +260,20 @@ init() ->
 Initialize ETS tables with the given options.
 
 Options:
-  - `table_access` — `public` (default) or `hardened`
+  - `table_access` — `hardened` (default) or `public`
 
-In `public` mode, all tables use public access. Any process can read and
-write. In `hardened` mode, a linked helper process is spawned to own
-protected tables and proxy writes, while reads remain zero-cost from any
-process.
+In `hardened` mode, a linked helper process is spawned to own protected
+tables and proxy writes, while reads remain zero-cost from any process.
+In `public` mode, all tables use public access — any process can read
+and write. Opt into this explicitly if you don't need write-path isolation.
 
 This function is idempotent. Calling it again after initialization is a
 no-op that returns `ok`. Should be called early in the consumer's `init/1`
 callback, before any SDK functions that touch ETS.
 
 ```erlang
-ok = beam_agent:init(#{table_access => hardened}).
+%% Explicit public mode (opt-in)
+ok = beam_agent:init(#{table_access => public}).
 ```
 """.
 -spec init(beam_agent_table_owner:init_opts()) -> ok.

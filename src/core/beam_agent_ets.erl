@@ -31,7 +31,7 @@ correct access mode (public or protected) based on the table name and
 the global access mode:
 
 ```erlang
-%% Before:
+%% Before (direct ETS with explicit access — avoid this):
 ets:new(?TABLE, [set, public, named_table, {read_concurrency, true}])
 
 %% After — note: omit the access specifier (public/protected/private):
