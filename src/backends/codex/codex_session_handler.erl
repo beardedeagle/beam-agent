@@ -197,15 +197,32 @@ build_session_info(#hstate{thread_id = ThreadId,
       approval_policy => ApprovalPolicy,
       sandbox_mode => SandboxMode}.
 
--doc "Clean up handler resources on termination.".
+-doc """
+Clean up handler resources on termination.
+
+Fires the session_end hook, then iterates the pending map to cancel any
+outstanding timers and reply `{error, session_terminated}` to callers
+blocked on `send_control`. Non-control pending entries (init, turn_start,
+thread_then_turn) have no blocked caller and are silently discarded.
+""".
 -spec terminate_handler(term(), #hstate{}) -> ok.
-terminate_handler(Reason, #hstate{sdk_hook_registry = HookReg,
+terminate_handler(Reason, #hstate{pending = Pending,
+                                   sdk_hook_registry = HookReg,
                                    session_id = SessionId}) ->
     _ = beam_agent_hooks_core:fire(session_end,
             #{event => session_end,
               session_id => SessionId,
               reason => Reason},
             HookReg),
+    %% Reply to all pending callers and cancel their timers
+    maps:foreach(
+        fun(_Id, {From, TimerRef}) ->
+            _ = erlang:cancel_timer(TimerRef),
+            gen_statem:reply(From, {error, session_terminated});
+           (_Id, _NonControlEntry) ->
+            ok
+        end,
+        Pending),
     ok.
 
 %%====================================================================
