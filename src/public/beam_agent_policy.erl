@@ -3,13 +3,11 @@
 Public API for canonical BeamAgent policy profiles.
 
 This module is the stable public API facade for policy profiles. It adds
-input validation guards and telemetry emission on top of the core
-implementation in `beam_agent_policy_core`.
+input validation guards on top of the core implementation in
+`beam_agent_policy_core`.
 
-Every public function validates its arguments before delegation and emits
-`[:beam_agent, :policy, :function_name, :start | :stop]` telemetry events
-with duration measurements and result status metadata. Telemetry emission is
-safe when the `telemetry` library is not loaded.
+Every public function validates its arguments before delegation to the core
+implementation.
 
 Policy profiles provide deterministic allow/deny evaluation for reusable
 runtime concerns such as approvals, command execution, backend selection,
@@ -66,16 +64,12 @@ without breaking callers. Type aliases re-exported here let callers depend on
 -doc "Ensure the policy profile table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    with_telemetry(ensure_tables, 0, fun() ->
-        beam_agent_policy_core:ensure_tables()
-    end).
+    beam_agent_policy_core:ensure_tables().
 
 -doc "Clear all policy profiles. Intended for tests and resets.".
 -spec clear() -> ok.
 clear() ->
-    with_telemetry(clear, 0, fun() ->
-        beam_agent_policy_core:clear()
-    end).
+    beam_agent_policy_core:clear().
 
 -doc "Insert or overwrite a policy profile.".
 -spec put_profile(binary(), map()) ->
@@ -84,9 +78,7 @@ clear() ->
         invalid_rule_action | unsupported_profile_key | unsupported_rule_key, term()} |
         {bad_arg, binary()}}.
 put_profile(ProfileId, Profile) when is_binary(ProfileId), is_map(Profile) ->
-    with_telemetry(put_profile, 2, fun() ->
-        beam_agent_policy_core:put_profile(ProfileId, Profile)
-    end);
+    beam_agent_policy_core:put_profile(ProfileId, Profile);
 put_profile(ProfileId, _) when not is_binary(ProfileId) ->
     {error, {bad_arg, <<"profile_id must be a binary">>}};
 put_profile(_, _) ->
@@ -95,18 +87,14 @@ put_profile(_, _) ->
 -doc "Fetch a policy profile by id.".
 -spec get_profile(binary()) -> {ok, profile()} | {error, not_found | {bad_arg, binary()}}.
 get_profile(ProfileId) when is_binary(ProfileId) ->
-    with_telemetry(get_profile, 1, fun() ->
-        beam_agent_policy_core:get_profile(ProfileId)
-    end);
+    beam_agent_policy_core:get_profile(ProfileId);
 get_profile(_) ->
     {error, {bad_arg, <<"profile_id must be a binary">>}}.
 
 -doc "List all policy profiles.".
 -spec list_profiles() -> {ok, [profile()]}.
 list_profiles() ->
-    with_telemetry(list_profiles, 0, fun() ->
-        beam_agent_policy_core:list_profiles()
-    end).
+    beam_agent_policy_core:list_profiles().
 
 -doc """
 Evaluate an action against a stored policy profile.
@@ -120,38 +108,13 @@ evaluate(undefined, _Action, _Context) ->
     allow;
 evaluate(ProfileId, Action, Context)
   when is_binary(ProfileId), is_atom(Action), is_map(Context) ->
-    with_telemetry(evaluate, 3, fun() ->
-        beam_agent_policy_core:evaluate(ProfileId, Action, Context)
-    end);
+    beam_agent_policy_core:evaluate(ProfileId, Action, Context);
 evaluate(ProfileId, Action, Context)
   when is_binary(ProfileId), is_binary(Action), is_map(Context) ->
-    with_telemetry(evaluate, 3, fun() ->
-        beam_agent_policy_core:evaluate(ProfileId, Action, Context)
-    end);
+    beam_agent_policy_core:evaluate(ProfileId, Action, Context);
 evaluate(ProfileId, _, _) when not is_binary(ProfileId) ->
     {error, {bad_arg, <<"profile_id must be a binary or undefined">>}};
 evaluate(_, Action, _) when not is_atom(Action), not is_binary(Action) ->
     {error, {bad_arg, <<"action must be an atom or binary">>}};
 evaluate(_, _, _) ->
     {error, {bad_arg, <<"context must be a map">>}}.
-
-%%--------------------------------------------------------------------
-%% Internal — telemetry wrapper
-%%--------------------------------------------------------------------
-
-with_telemetry(Function, Arity, Fun) ->
-    StartTime = beam_agent_telemetry:span_start(policy, Function, #{arity => Arity}),
-    Result = Fun(),
-    Status = case Result of
-        {ok, _} -> ok;
-        ok -> ok;
-        allow -> ok;
-        {deny, _} -> ok;
-        {error, _} -> error
-    end,
-    beam_agent_telemetry:span_stop(policy, Function, StartTime, #{
-        function => Function,
-        arity => Arity,
-        status => Status
-    }),
-    Result.

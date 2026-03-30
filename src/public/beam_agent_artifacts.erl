@@ -3,13 +3,11 @@
 Public API for canonical BeamAgent artifacts.
 
 This module is the stable public API facade for artifacts. It adds input
-validation guards and telemetry emission on top of the core implementation
-in `beam_agent_artifacts_core`.
+validation guards on top of the core implementation in
+`beam_agent_artifacts_core`.
 
-Every public function validates its arguments before delegation and emits
-`[:beam_agent, :artifacts, :function_name, :start | :stop]` telemetry events
-with duration measurements and result status metadata. Telemetry emission is
-safe when the `telemetry` library is not loaded.
+Every public function validates its arguments before delegation to the core
+implementation.
 
 Artifacts are durable context objects such as plans, diffs, reviews,
 summaries, approval packets, benchmark reports, and transcript snapshots.
@@ -83,36 +81,26 @@ ok = beam_agent_artifacts:attach(
 -doc "Ensure the artifacts ETS table exists. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    with_telemetry(ensure_tables, 0, fun() ->
-        beam_agent_artifacts_core:ensure_tables()
-    end).
+    beam_agent_artifacts_core:ensure_tables().
 
 -doc "Clear all artifacts. Intended for tests and resets.".
 -spec clear() -> ok.
 clear() ->
-    with_telemetry(clear, 0, fun() ->
-        beam_agent_artifacts_core:clear()
-    end).
+    beam_agent_artifacts_core:clear().
 
 -doc "Insert or update an artifact using embedded scope.".
 -spec put(artifact_input()) -> {ok, artifact()} | {error, term()}.
 put(Artifact) when is_map(Artifact) ->
-    with_telemetry(put, 1, fun() ->
-        beam_agent_artifacts_core:put(Artifact)
-    end);
+    beam_agent_artifacts_core:put(Artifact);
 put(_) ->
     {error, {bad_arg, <<"artifact must be a map">>}}.
 
 -doc "Insert or update an artifact with explicit scope.".
 -spec put(scope(), artifact_input()) -> {ok, artifact()} | {error, term()}.
 put(Scope, Artifact) when is_binary(Scope), is_map(Artifact) ->
-    with_telemetry(put, 2, fun() ->
-        beam_agent_artifacts_core:put(Scope, Artifact)
-    end);
+    beam_agent_artifacts_core:put(Scope, Artifact);
 put(Scope, Artifact) when is_map(Scope), is_map(Artifact) ->
-    with_telemetry(put, 2, fun() ->
-        beam_agent_artifacts_core:put(Scope, Artifact)
-    end);
+    beam_agent_artifacts_core:put(Scope, Artifact);
 put(_, Artifact) when is_map(Artifact) ->
     {error, {bad_arg, <<"scope must be a binary or map">>}};
 put(_, _) ->
@@ -121,43 +109,33 @@ put(_, _) ->
 -doc "Fetch an artifact by id.".
 -spec get(binary()) -> {ok, artifact()} | {error, not_found | {bad_arg, binary()}}.
 get(ArtifactId) when is_binary(ArtifactId) ->
-    with_telemetry(get, 1, fun() ->
-        beam_agent_artifacts_core:get(ArtifactId)
-    end);
+    beam_agent_artifacts_core:get(ArtifactId);
 get(_) ->
     {error, {bad_arg, <<"artifact_id must be a binary">>}}.
 
 -doc "List all artifacts without filters.".
 -spec list() -> {ok, [artifact()]}.
 list() ->
-    with_telemetry(list, 0, fun() ->
-        beam_agent_artifacts_core:list()
-    end).
+    beam_agent_artifacts_core:list().
 
 -doc "List artifacts with exact-match filters.".
 -spec list(artifact_filter()) -> {ok, [artifact()]} | {error, term()}.
 list(Filter) when is_map(Filter) ->
-    with_telemetry(list, 1, fun() ->
-        beam_agent_artifacts_core:list(Filter)
-    end);
+    beam_agent_artifacts_core:list(Filter);
 list(_) ->
     {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc "Search artifacts with a case-insensitive tokenized query.".
 -spec search(binary()) -> {ok, [artifact()]} | {error, {bad_arg, binary()}}.
 search(Query) when is_binary(Query) ->
-    with_telemetry(search, 1, fun() ->
-        beam_agent_artifacts_core:search(Query)
-    end);
+    beam_agent_artifacts_core:search(Query);
 search(_) ->
     {error, {bad_arg, <<"query must be a binary">>}}.
 
 -doc "Search artifacts with a query plus exact-match filters.".
 -spec search(binary(), artifact_filter()) -> {ok, [artifact()]} | {error, term()}.
 search(Query, Filter) when is_binary(Query), is_map(Filter) ->
-    with_telemetry(search, 2, fun() ->
-        beam_agent_artifacts_core:search(Query, Filter)
-    end);
+    beam_agent_artifacts_core:search(Query, Filter);
 search(Query, _) when not is_binary(Query) ->
     {error, {bad_arg, <<"query must be a binary">>}};
 search(_, _) ->
@@ -170,9 +148,7 @@ search(_, _) ->
         run_not_found | session_id_required_for_thread | {bad_arg, binary()}}.
 attach(ArtifactId, RefType, RefId)
   when is_binary(ArtifactId), (is_atom(RefType) orelse is_binary(RefType)), is_binary(RefId) ->
-    with_telemetry(attach, 3, fun() ->
-        beam_agent_artifacts_core:attach(ArtifactId, RefType, RefId)
-    end);
+    beam_agent_artifacts_core:attach(ArtifactId, RefType, RefId);
 attach(ArtifactId, _, _) when not is_binary(ArtifactId) ->
     {error, {bad_arg, <<"artifact_id must be a binary">>}};
 attach(_, RefType, _) when not is_atom(RefType), not is_binary(RefType) ->
@@ -183,27 +159,6 @@ attach(_, _, _) ->
 -doc "Delete an artifact by id.".
 -spec delete(binary()) -> ok | {error, not_found | {bad_arg, binary()}}.
 delete(ArtifactId) when is_binary(ArtifactId) ->
-    with_telemetry(delete, 1, fun() ->
-        beam_agent_artifacts_core:delete(ArtifactId)
-    end);
+    beam_agent_artifacts_core:delete(ArtifactId);
 delete(_) ->
     {error, {bad_arg, <<"artifact_id must be a binary">>}}.
-
-%%--------------------------------------------------------------------
-%% Internal — telemetry wrapper
-%%--------------------------------------------------------------------
-
-with_telemetry(Function, Arity, Fun) ->
-    StartTime = beam_agent_telemetry:span_start(artifacts, Function, #{arity => Arity}),
-    Result = Fun(),
-    Status = case Result of
-        {ok, _} -> ok;
-        ok -> ok;
-        {error, _} -> error
-    end,
-    beam_agent_telemetry:span_stop(artifacts, Function, StartTime, #{
-        function => Function,
-        arity => Arity,
-        status => Status
-    }),
-    Result.

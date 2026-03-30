@@ -3,13 +3,11 @@
 Public API for canonical BeamAgent orchestration primitives.
 
 This module is the stable public API facade for orchestration. It adds input
-validation guards and telemetry emission on top of the core implementation
-in `beam_agent_orchestrator_core`.
+validation guards on top of the core implementation in
+`beam_agent_orchestrator_core`.
 
-Every public function validates its arguments before delegation and emits
-`[:beam_agent, :orchestrator, :function_name, :start | :stop]` telemetry
-events with duration measurements and result status metadata. Telemetry
-emission is safe when the `telemetry` library is not loaded.
+Every public function validates its arguments before delegation to the core
+implementation.
 
 `beam_agent_orchestrator` models parent-child execution relationships on top of
 canonical runs, sessions, threads, and the durable journal. It intentionally
@@ -80,16 +78,12 @@ internal module name.
 -doc "Ensure the orchestrator ETS tables exist. Idempotent.".
 -spec ensure_tables() -> ok.
 ensure_tables() ->
-    with_telemetry(ensure_tables, 0, fun() ->
-        beam_agent_orchestrator_core:ensure_tables()
-    end).
+    beam_agent_orchestrator_core:ensure_tables().
 
 -doc "Clear all orchestrator lineage state. Intended for tests and resets.".
 -spec clear() -> ok.
 clear() ->
-    with_telemetry(clear, 0, fun() ->
-        beam_agent_orchestrator_core:clear()
-    end).
+    beam_agent_orchestrator_core:clear().
 
 -doc """
 Create a child orchestration record, optionally opening a child session or
@@ -97,13 +91,9 @@ thread substrate.
 """.
 -spec spawn(parent(), spawn_opts()) -> {ok, child()} | {error, term()}.
 spawn(Parent, Opts) when is_binary(Parent), is_map(Opts) ->
-    with_telemetry(spawn, 2, fun() ->
-        beam_agent_orchestrator_core:spawn(Parent, Opts)
-    end);
+    beam_agent_orchestrator_core:spawn(Parent, Opts);
 spawn(Parent, Opts) when is_map(Parent), is_map(Opts) ->
-    with_telemetry(spawn, 2, fun() ->
-        beam_agent_orchestrator_core:spawn(Parent, Opts)
-    end);
+    beam_agent_orchestrator_core:spawn(Parent, Opts);
 spawn(_, Opts) when is_map(Opts) ->
     {error, {bad_arg, <<"parent must be a binary run_id or run map">>}};
 spawn(_, _) ->
@@ -118,13 +108,9 @@ lineage metadata. BeamAgent does not start a worker process for it.
 -spec delegate(parent(), term(), map()) ->
     {ok, beam_agent_runs:run()} | {error, term()}.
 delegate(Parent, Task, Opts) when is_binary(Parent), is_map(Opts) ->
-    with_telemetry(delegate, 3, fun() ->
-        beam_agent_orchestrator_core:delegate(Parent, Task, Opts)
-    end);
+    beam_agent_orchestrator_core:delegate(Parent, Task, Opts);
 delegate(Parent, Task, Opts) when is_map(Parent), is_map(Opts) ->
-    with_telemetry(delegate, 3, fun() ->
-        beam_agent_orchestrator_core:delegate(Parent, Task, Opts)
-    end);
+    beam_agent_orchestrator_core:delegate(Parent, Task, Opts);
 delegate(_, _Task, Opts) when is_map(Opts) ->
     {error, {bad_arg, <<"parent must be a binary run_id or run map">>}};
 delegate(_, _Task, _) ->
@@ -134,9 +120,7 @@ delegate(_, _Task, _) ->
 -spec await(binary(), non_neg_integer()) ->
     {ok, await_result()} | {error, timeout | not_found | {invalid_timeout, term()} | {bad_arg, binary()}}.
 await(RunId, Timeout) when is_binary(RunId), is_integer(Timeout), Timeout >= 0 ->
-    with_telemetry(await, 2, fun() ->
-        beam_agent_orchestrator_core:await(RunId, Timeout)
-    end);
+    beam_agent_orchestrator_core:await(RunId, Timeout);
 await(RunId, _) when not is_binary(RunId) ->
     {error, {bad_arg, <<"run_id must be a binary">>}};
 await(_, _) ->
@@ -153,9 +137,7 @@ Supported opts:
 -spec collect(binary(), collect_opts()) ->
     {ok, collect_result()} | {error, term()}.
 collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
-    with_telemetry(collect, 2, fun() ->
-        beam_agent_orchestrator_core:collect(RunId, Opts)
-    end);
+    beam_agent_orchestrator_core:collect(RunId, Opts);
 collect(RunId, _) when not is_binary(RunId) ->
     {error, {bad_arg, <<"run_id must be a binary">>}};
 collect(_, _) ->
@@ -164,49 +146,22 @@ collect(_, _) ->
 -doc "Cancel a run and any active orchestrated descendants.".
 -spec cancel(binary(), term()) -> ok | {error, not_found | {bad_arg, binary()}}.
 cancel(RunId, Reason) when is_binary(RunId) ->
-    with_telemetry(cancel, 2, fun() ->
-        beam_agent_orchestrator_core:cancel(RunId, Reason)
-    end);
+    beam_agent_orchestrator_core:cancel(RunId, Reason);
 cancel(_, _) ->
     {error, {bad_arg, <<"run_id must be a binary">>}}.
 
 -doc "Return a summary status map for a run and its direct children.".
 -spec status(binary()) -> {ok, child_status()} | {error, not_found | {bad_arg, binary()}}.
 status(RunId) when is_binary(RunId) ->
-    with_telemetry(status, 1, fun() ->
-        beam_agent_orchestrator_core:status(RunId)
-    end);
+    beam_agent_orchestrator_core:status(RunId);
 status(_) ->
     {error, {bad_arg, <<"run_id must be a binary">>}}.
 
 -doc "List direct orchestrator children for a parent run, oldest first.".
 -spec list_children(parent()) -> {ok, [child()]} | {error, term()}.
 list_children(Parent) when is_binary(Parent) ->
-    with_telemetry(list_children, 1, fun() ->
-        beam_agent_orchestrator_core:list_children(Parent)
-    end);
+    beam_agent_orchestrator_core:list_children(Parent);
 list_children(Parent) when is_map(Parent) ->
-    with_telemetry(list_children, 1, fun() ->
-        beam_agent_orchestrator_core:list_children(Parent)
-    end);
+    beam_agent_orchestrator_core:list_children(Parent);
 list_children(_) ->
     {error, {bad_arg, <<"parent must be a binary run_id or run map">>}}.
-
-%%--------------------------------------------------------------------
-%% Internal — telemetry wrapper
-%%--------------------------------------------------------------------
-
-with_telemetry(Function, Arity, Fun) ->
-    StartTime = beam_agent_telemetry:span_start(orchestrator, Function, #{arity => Arity}),
-    Result = Fun(),
-    Status = case Result of
-        {ok, _} -> ok;
-        ok -> ok;
-        {error, _} -> error
-    end,
-    beam_agent_telemetry:span_stop(orchestrator, Function, StartTime, #{
-        function => Function,
-        arity => Arity,
-        status => Status
-    }),
-    Result.
