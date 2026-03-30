@@ -7,12 +7,38 @@ Backends that manage persistent sessions via the session engine
 `beam_agent_adapter`. This covers all agentic coder backends: Claude, Codex,
 Gemini, OpenCode, Copilot, and future additions (Cursor, Aider, Windsurf).
 
-The required callbacks handle session lifecycle and query dispatch. Optional
-callbacks cover control protocols, runtime model switching, and permission
-mode changes.
+## Required vs Optional Callbacks
 
-Formerly `beam_agent_behaviour` — renamed during the Phase 0 sub-behaviour
-contract refactor.
+5 of 11 callbacks are **required** — they form the minimal session
+lifecycle every backend must support:
+
+| Callback            | Purpose                          |
+|---------------------|----------------------------------|
+| `start_link/1`      | Launch a session process         |
+| `send_query/4`      | Submit a prompt to the backend   |
+| `receive_message/3` | Collect the next response chunk  |
+| `health/1`          | Report session readiness         |
+| `stop/1`            | Tear down the session            |
+
+6 callbacks are **optional** — they cover capabilities that not every
+backend exposes natively:
+
+| Callback                   | Capability              | Example backends  |
+|----------------------------|-------------------------|-------------------|
+| `send_control/3`           | Control protocol        | Claude            |
+| `interrupt/1`              | Cancel in-flight query  | Claude, OpenCode  |
+| `handle_control_request/2` | Inbound control request | Claude            |
+| `session_info/1`           | Session metadata        | Claude, Copilot   |
+| `set_model/2`              | Runtime model switch    | Claude, OpenCode  |
+| `set_permission_mode/2`    | Permission mode change  | Claude            |
+
+This split follows the Interface Segregation Principle: backends are
+not forced to stub out capabilities they lack. The session engine
+checks `erlang:function_exported/3` before dispatching optional
+callbacks and returns `{error, not_supported}` when absent.
+
+Formerly `beam_agent_behaviour` — renamed during the Phase 0
+sub-behaviour contract refactor.
 
 See also: `beam_agent_adapter`, `beam_agent_session_handler`.
 """.

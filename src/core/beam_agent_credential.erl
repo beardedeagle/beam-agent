@@ -231,16 +231,22 @@ auto_generate_and_cache() ->
     end.
 
 %% @private Spin until the winner caches the key in persistent_term.
-%% The critical section above completes in microseconds (one
+%% The critical section completes in microseconds (one
 %% `crypto:strong_rand_bytes` + `persistent_term:put`), so this
-%% spin is trivially short.
+%% spin is trivially short.  A bounded retry (1000 yields ≈ a few
+%% milliseconds) guards against infinite loops if the winner crashes.
 -spec await_cached_key() -> binary().
 await_cached_key() ->
+    await_cached_key(1000).
+
+await_cached_key(0) ->
+    error(credential_key_init_timeout);
+await_cached_key(Remaining) ->
     case persistent_term:get(?MODULE, undefined) of
         Key when is_binary(Key), byte_size(Key) =:= 32 -> Key;
         _ ->
             erlang:yield(),
-            await_cached_key()
+            await_cached_key(Remaining - 1)
     end.
 
 %%--------------------------------------------------------------------

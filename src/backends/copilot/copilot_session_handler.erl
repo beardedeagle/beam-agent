@@ -10,7 +10,8 @@
     handle_data/2,
     encode_query/3,
     build_session_info/1,
-    terminate_handler/2
+    terminate_handler/2,
+    is_terminal/1
 ]).
 
 %% Optional callbacks
@@ -62,7 +63,11 @@
     user_input_handler    :: fun() | undefined,
 
     %% Init-phase buffer for accumulating partial Content-Length frames
-    init_buffer = <<>>    :: binary()
+    init_buffer = <<>>    :: binary(),
+
+    %% Request ID of the connecting-phase ping (used to detect when
+    %% the ping has been acknowledged, decoupled from pending map size)
+    ping_req_id           :: binary() | undefined
 }).
 
 %%--------------------------------------------------------------------
@@ -225,6 +230,12 @@ terminate_handler(Reason, #hstate{pending = Pending} = HState) ->
         Pending),
     ok.
 
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result})                -> true;
+is_terminal(#{type := error, is_error := true}) -> true;
+is_terminal(#{type := error})                  -> false;
+is_terminal(_Message)                          -> false.
+
 %%====================================================================
 %% Optional callbacks
 %%====================================================================
@@ -251,12 +262,17 @@ handle_connecting({data, RawData}, HState) ->
     {RawMsgs, RestBuf} = copilot_frame:extract_messages(Combined),
     {_Events, HState1} = dispatch_jsonrpc(RawMsgs, HState, []),
     HState2 = HState1#hstate{init_buffer = RestBuf},
-    %% Check if ping response cleared pending
-    case maps:size(HState2#hstate.pending) of
-        0 ->
+    %% Check if the connecting-phase ping has been acknowledged.
+    %% Decoupled from pending map size — we check the specific ping
+    %% request ID so unrelated pending entries cannot block the
+    %% connecting → initializing transition.
+    PingId = HState2#hstate.ping_req_id,
+    case maps:is_key(PingId, HState2#hstate.pending) of
+        false ->
             {next_state, initializing, [],
-             HState2#hstate{init_buffer = <<>>}, RestBuf};
-        _ ->
+             HState2#hstate{init_buffer = <<>>, ping_req_id = undefined},
+             RestBuf};
+        true ->
             {keep_state, [], HState2}
     end;
 handle_connecting({exit, Status}, HState) ->
@@ -404,7 +420,8 @@ on_state_enter(connecting, _OldState, HState) ->
     HState1 = HState#hstate{
         next_id = HState#hstate.next_id + 1,
         pending = maps:put(ReqId, {internal, undefined},
-                           HState#hstate.pending)
+                           HState#hstate.pending),
+        ping_req_id = ReqId
     },
     {ok, [{send, Encoded}], HState1};
 on_state_enter(initializing, _OldState, HState) ->

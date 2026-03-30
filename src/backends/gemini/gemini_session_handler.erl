@@ -10,7 +10,8 @@
     handle_data/2,
     encode_query/3,
     build_session_info/1,
-    terminate_handler/2
+    terminate_handler/2,
+    is_terminal/1
 ]).
 
 %% Optional callbacks
@@ -227,6 +228,11 @@ terminate_handler(Reason, #hstate{sdk_hook_registry = HookReg,
             HookReg),
     beam_agent_control_core:clear_session_callbacks(StoreId),
     ok.
+
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result}) -> true;
+is_terminal(#{type := error})  -> true;
+is_terminal(_Message)          -> false.
 
 %%====================================================================
 %% Optional callbacks

@@ -10,7 +10,8 @@
     handle_data/2,
     encode_query/3,
     build_session_info/1,
-    terminate_handler/2
+    terminate_handler/2,
+    is_terminal/1
 ]).
 
 %% Optional callbacks
@@ -149,7 +150,7 @@ encode_query(Prompt, Params, #hstate{ws_ref = WsRef,
     case fire_hook(user_prompt_submit, HookCtx, HState) of
         {ok, FinalCtx} ->
             FinalPrompt = maps:get(prompt, FinalCtx),
-            _ThreadId = ensure_active_thread(SessionId),
+            _ = ensure_active_thread(SessionId),
             Messages = codex_realtime_protocol:text_messages(FinalPrompt),
             HState1 = HState#hstate{output_buffer = <<>>},
             {ok, {ws_frames, WsRef, Messages}, HState1};
@@ -192,6 +193,11 @@ terminate_handler(Reason, HState) ->
               reason => Reason},
             HState),
     ok.
+
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result}) -> true;
+is_terminal(#{type := error}) -> true;
+is_terminal(_Message) -> false.
 
 %%====================================================================
 %% Optional callbacks
@@ -389,33 +395,22 @@ accumulate_output(Messages, HState) ->
 %% Internal: thread management
 %%====================================================================
 
--spec ensure_active_thread(binary()) -> binary().
+-spec ensure_active_thread(binary()) -> {ok, binary()}.
 ensure_active_thread(SessionId) ->
     case beam_agent_threads_core:active_thread(SessionId) of
         {ok, ThreadId} ->
-            ThreadId;
+            {ok, ThreadId};
         {error, none} ->
             {ok, Thread} = beam_agent_threads_core:start_thread(
-                               SessionId,
-                               #{name => <<"codex-realtime">>}),
-            maps:get(thread_id, Thread)
+                     SessionId,
+                     #{name => <<"codex-realtime">>}),
+            {ok, maps:get(thread_id, Thread)}
     end.
 
--spec start_realtime_thread(map(), #hstate{}) -> {ok, map(), #hstate{}}.
+-spec start_realtime_thread(map(), #hstate{}) ->
+    {ok, map(), #hstate{}}.
 start_realtime_thread(Params, #hstate{session_id = SessionId} = HState) ->
-    ThreadId = case maps:get(thread_id, Params, undefined) of
-        Id when is_binary(Id), byte_size(Id) > 0 -> Id;
-        _ ->
-            case beam_agent_threads_core:active_thread(SessionId) of
-                {ok, Existing} -> Existing;
-                {error, none} ->
-                    {ok, Thread} = beam_agent_threads_core:start_thread(
-                                       SessionId,
-                                       #{name => maps:get(name, Params,
-                                                          <<"codex-realtime">>)}),
-                    maps:get(thread_id, Thread)
-            end
-    end,
+    {ok, ThreadId} = resolve_thread_id(Params, SessionId),
     ThreadInfo = #{
         thread_id  => ThreadId,
         session_id => SessionId,
@@ -429,6 +424,24 @@ start_realtime_thread(Params, #hstate{session_id = SessionId} = HState) ->
         }
     },
     {ok, ThreadInfo, HState1}.
+
+-spec resolve_thread_id(map(), binary()) -> {ok, binary()}.
+resolve_thread_id(Params, SessionId) ->
+    case maps:get(thread_id, Params, undefined) of
+        Id when is_binary(Id), byte_size(Id) > 0 ->
+            {ok, Id};
+        _ ->
+            case beam_agent_threads_core:active_thread(SessionId) of
+                {ok, Existing} ->
+                    {ok, Existing};
+                {error, none} ->
+                    {ok, Thread} = beam_agent_threads_core:start_thread(
+                             SessionId,
+                             #{name => maps:get(name, Params,
+                                               <<"codex-realtime">>)}),
+                    {ok, maps:get(thread_id, Thread)}
+            end
+    end.
 
 -spec thread_exists(binary(), #hstate{}) -> boolean().
 thread_exists(ThreadId, #hstate{session_id = SessionId,

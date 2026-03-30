@@ -10,7 +10,8 @@
     handle_data/2,
     encode_query/3,
     build_session_info/1,
-    terminate_handler/2
+    terminate_handler/2,
+    is_terminal/1
 ]).
 
 %% Optional callbacks
@@ -201,6 +202,11 @@ terminate_handler(Reason, #hstate{pending = Pending,
         Pending),
     cleanup_mcp_config(McpConfigPath),
     ok.
+
+-spec is_terminal(beam_agent_core:message()) -> boolean().
+is_terminal(#{type := result}) -> true;
+is_terminal(#{type := error})  -> true;
+is_terminal(_Message)          -> false.
 
 %%====================================================================
 %% Optional callbacks
@@ -1414,8 +1420,14 @@ decode_settings_json(JsonBin) ->
         false ->
             try json:decode(JsonBin) of
                 Map when is_map(Map) -> Map;
-                _                    -> #{}
-            catch _:_ -> #{}
+                _ ->
+                    logger:warning("claude_session_handler: settings JSON"
+                                   " decoded to non-map, returning #{}"),
+                    #{}
+            catch error:DecodeErr ->
+                    logger:warning("claude_session_handler: settings JSON"
+                                   " parse failed: ~p", [DecodeErr]),
+                    #{}
             end
     end.
 

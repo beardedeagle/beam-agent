@@ -716,59 +716,9 @@ defmodule BeamAgent.Runtime do
   defdelegate app_modes(session), to: :beam_agent_runtime
 
   # ---------------------------------------------------------------------------
-  # Todo operations
+  # Todo operations — use BeamAgent.Todo
   # ---------------------------------------------------------------------------
-
-  @typedoc "Todo item status: `:pending`, `:in_progress`, or `:completed`."
-  @type todo_status() :: :beam_agent_runtime.todo_status()
-
-  @typedoc "A parsed todo item map with `:content`, `:status`, and optional `:active_form`."
-  @type todo_item() :: :beam_agent_runtime.todo_item()
-
-  @doc """
-  Extract all todo items from a flat list of messages.
-
-  Scans the message list for messages that carry todo arrays and returns
-  all todo items in order. Pure function -- no ETS, no side effects.
-
-  ## Parameters
-
-  - `messages` -- list of session messages.
-
-  ## Returns
-
-  A list of todo item maps.
-  """
-  @spec extract_todos([BeamAgent.message()]) :: [todo_item()]
-  defdelegate extract_todos(messages), to: :beam_agent_runtime
-
-  @doc """
-  Filter a todo list by status.
-
-  ## Parameters
-
-  - `todos` -- list of todo item maps.
-  - `status` -- atom (`:pending`, `:in_progress`, or `:completed`).
-
-  ## Returns
-
-  Filtered list of todo items.
-  """
-  @spec filter_by_status([todo_item()], todo_status()) :: [todo_item()]
-  defdelegate filter_by_status(todos, status), to: :beam_agent_runtime
-
-  @doc """
-  Summarize a todo list as a count map.
-
-  ## Parameters
-
-  - `todos` -- list of todo item maps.
-
-  ## Returns
-
-  A map with `:total` and one key per distinct status.
-  """
-  @spec todo_summary([todo_item()]) ::
-          %{required(:total) => non_neg_integer(), atom() => non_neg_integer()}
-  defdelegate todo_summary(todos), to: :beam_agent_runtime
+  # Todo helpers (extract_todos/1, filter_by_status/2, todo_summary/1) live
+  # exclusively in BeamAgent.Todo to avoid API duplication. See that module
+  # for extracting and summarizing todo items from message streams.
 end

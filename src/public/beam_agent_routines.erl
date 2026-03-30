@@ -33,8 +33,6 @@ This keeps scheduled work aligned with the rest of the BeamAgent substrate.
     get/1,
     list/0,
     list/1,
-    due/0,
-    due/1,
     list_due/0,
     list_due/1,
     next_due_at/0
@@ -118,16 +116,6 @@ list() ->
 -spec list(job_filter()) -> {ok, [job_record()]} | {error, term()}.
 list(Filter) ->
     beam_agent_routines_core:list(Filter).
-
--doc "List jobs that are currently due as of now.".
--spec due() -> {ok, [job_record()]}.
-due() ->
-    list_due().
-
--doc "List jobs that are currently due using an explicit due filter.".
--spec due(map()) -> {ok, [job_record()]} | {error, term()}.
-due(Filter) ->
-    list_due(Filter).
 
 -doc "List jobs that are currently due as of now.".
 -spec list_due() -> {ok, [job_record()]}.

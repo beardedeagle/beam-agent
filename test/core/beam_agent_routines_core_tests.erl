@@ -49,7 +49,7 @@ cancelled_jobs_are_removed_from_due_listing_test() ->
         target => run_target(completed, #{result => ok})
     }),
     ok = beam_agent_routines_core:cancel(maps:get(job_id, Job)),
-    {ok, []} = beam_agent_routines_core:due(),
+    {ok, []} = beam_agent_routines_core:list_due(),
     reset().
 
 run_due_executes_once_job_and_marks_it_completed_test() ->

@@ -74,10 +74,10 @@ defmodule BeamAgent.RuntimeTest do
     assert function_exported?(BeamAgent.Runtime, :app_modes, 1)
   end
 
-  test "exports the todo operations surface" do
-    assert function_exported?(BeamAgent.Runtime, :extract_todos, 1)
-    assert function_exported?(BeamAgent.Runtime, :filter_by_status, 2)
-    assert function_exported?(BeamAgent.Runtime, :todo_summary, 1)
+  test "todo operations live exclusively in BeamAgent.Todo" do
+    refute function_exported?(BeamAgent.Runtime, :extract_todos, 1)
+    refute function_exported?(BeamAgent.Runtime, :filter_by_status, 2)
+    refute function_exported?(BeamAgent.Runtime, :todo_summary, 1)
   end
 
   test "ensure_tables and clear round-trip" do

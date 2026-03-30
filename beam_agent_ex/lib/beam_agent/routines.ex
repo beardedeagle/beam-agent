@@ -195,18 +195,6 @@ defmodule BeamAgent.Routines do
   defdelegate list(filter), to: :beam_agent_routines
 
   @doc """
-  Alias for `list_due/0`.
-  """
-  @spec due() :: {:ok, [job_record()]}
-  defdelegate due(), to: :beam_agent_routines
-
-  @doc """
-  Alias for `list_due/1`.
-  """
-  @spec due(due_filter()) :: {:ok, [job_record()]} | {:error, term()}
-  defdelegate due(filter), to: :beam_agent_routines
-
-  @doc """
   List jobs currently due as of now.
   """
   @spec list_due() :: {:ok, [job_record()]}

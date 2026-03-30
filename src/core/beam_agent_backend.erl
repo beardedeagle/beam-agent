@@ -25,7 +25,6 @@ small, contention is low, and lookups are on the hot path for query routing.
     available_backends/0,
     normalize/1,
     adapter_module/1,
-    backend_type/1,
     session_backend/1,
     register_session/2,
     unregister_session/1,
@@ -66,22 +65,27 @@ list of recognized aliases (atoms and binaries).
 """.
 registry() ->
     #{claude   => #{module  => claude_agent_sdk,
+                    handler => claude_session_handler,
                     aliases => [claude_agent_sdk,
                                 <<"claude">>, <<"claude_code">>,
                                 <<"claude_agent_sdk">>]},
       codex    => #{module  => codex_app_server,
+                    handler => codex_session_handler,
                     aliases => [codex_app_server,
                                 <<"codex">>, <<"codex_cli">>,
                                 <<"codex_app_server">>]},
       gemini   => #{module  => gemini_cli_client,
+                    handler => gemini_session_handler,
                     aliases => [gemini_cli_client,
                                 <<"gemini">>, <<"gemini_cli">>,
                                 <<"gemini_cli_client">>]},
       opencode => #{module  => opencode_client,
+                    handler => opencode_session_handler,
                     aliases => [opencode_client,
                                 <<"opencode">>,
                                 <<"opencode_client">>]},
       copilot  => #{module  => copilot_client,
+                    handler => copilot_session_handler,
                     aliases => [copilot_client,
                                 <<"copilot">>,
                                 <<"copilot_client">>]}}.
@@ -135,17 +139,6 @@ adapter_module(Backend) ->
         error -> error({unknown_backend, Backend})
     end.
 
--doc """
-Return the backend category for a canonical backend atom.
-
-Delegates to the facade module's `backend_type/0` callback. Used by
-`beam_agent_core` dispatch to choose session-based or stateless routing.
-""".
--spec backend_type(backend()) -> beam_agent_adapter:backend_type().
-backend_type(Backend) ->
-    Mod = adapter_module(Backend),
-    Mod:backend_type().
-
 -doc "Cache a live session pid with its backend.".
 -spec register_session(pid(), backend() | binary() | atom()) ->
     {ok, backend()} | {error, term()}.
@@ -190,28 +183,29 @@ session_backend(SessionId) when is_binary(SessionId), byte_size(SessionId) > 0 -
 -doc """
 Return whether a message should terminate collection for a backend.
 
-Copilot emits non-terminal `error` messages, so only `error` messages with
-`is_error := true` halt that backend's collection loop. This is behavioral
-semantics specific to each backend's wire protocol, not registry
-configuration, so it is defined here as explicit pattern matches.
+Dispatches to the backend's session handler module via the registry,
+keeping `beam_agent_backend` closed to modification when new backends
+are added (OCP). Each handler implements the required `is_terminal/1`
+callback with its own wire-protocol semantics.
+
+Crashes with `{unknown_backend, Backend}` if the backend atom is not
+in the registry — this is a programmer error, not a runtime condition.
 """.
 -spec is_terminal(backend(), map()) -> boolean().
-is_terminal(copilot, #{type := result}) ->
-    true;
-is_terminal(copilot, #{type := error, is_error := true}) ->
-    true;
-is_terminal(copilot, #{type := error}) ->
-    false;
-is_terminal(_, #{type := result}) ->
-    true;
-is_terminal(_, #{type := error}) ->
-    true;
-is_terminal(_, _) ->
-    false.
+is_terminal(Backend, Message) ->
+    Module = handler_module(Backend),
+    Module:is_terminal(Message).
 
 %%--------------------------------------------------------------------
 %% Internal helpers
 %%--------------------------------------------------------------------
+
+-spec handler_module(backend()) -> module().
+handler_module(Backend) ->
+    case maps:find(Backend, registry()) of
+        {ok, #{handler := Mod}} -> Mod;
+        error -> error({unknown_backend, Backend})
+    end.
 
 -spec lookup_alias(atom() | binary(), #{backend() => map()}) ->
     {ok, backend()} | {error, backend_error()}.

@@ -2,6 +2,13 @@
 -moduledoc """
 Public API for canonical BeamAgent long-term memory.
 
+This module is the stable public API facade for long-term memory. It adds
+input validation guards on top of the core implementation in
+`beam_agent_memory_core`.
+
+Every public function validates its arguments before delegation to the core
+implementation.
+
 Memories are durable cross-session facts and notes that can be scoped to
 sessions, threads, or runs, linked to artifacts and other typed references,
 and recalled later using lexical search. The implementation is process-free
@@ -111,26 +118,47 @@ When using DETS, callers must call
 application shutdown to flush pending writes.
 """.
 -spec configure_persistence(beam_agent_store:store_config()) ->
-    ok | {error, invalid_options | {invalid_adapter, atom()}}.
-configure_persistence(Config) ->
-    beam_agent_store:configure_domain(memory, Config).
+    ok | {error, invalid_options | {invalid_adapter, atom()} | {bad_arg, binary()}}.
+configure_persistence(Config) when is_map(Config) ->
+    beam_agent_store:configure_domain(memory, Config);
+configure_persistence(_) ->
+    {error, {bad_arg, <<"config must be a map">>}}.
 
 -doc "Remember content with embedded or explicit kind on a scope.".
 -spec remember(binary() | scope(), memory_input()) ->
-    {ok, memory_record()} | {error, memory_input_error()}.
-remember(Scope, MemoryInput) ->
-    beam_agent_memory_core:remember(Scope, MemoryInput).
+    {ok, memory_record()} | {error, memory_input_error() | {bad_arg, binary()}}.
+remember(Scope, MemoryInput) when is_binary(Scope), is_map(MemoryInput) ->
+    beam_agent_memory_core:remember(Scope, MemoryInput);
+remember(Scope, MemoryInput) when is_binary(Scope), is_binary(MemoryInput) ->
+    beam_agent_memory_core:remember(Scope, MemoryInput);
+remember(Scope, MemoryInput) when is_map(Scope), is_map(MemoryInput) ->
+    beam_agent_memory_core:remember(Scope, MemoryInput);
+remember(Scope, MemoryInput) when is_map(Scope), is_binary(MemoryInput) ->
+    beam_agent_memory_core:remember(Scope, MemoryInput);
+remember(_, _) ->
+    {error, {bad_arg, <<"scope must be a binary or map; memory_input must be a binary or map">>}}.
 
 -doc "Remember content with an explicit kind on a scope.".
 -spec remember(binary() | scope(), atom() | binary(), memory_input()) ->
-    {ok, memory_record()} | {error, memory_input_error()}.
-remember(Scope, Kind, MemoryInput) ->
-    beam_agent_memory_core:remember(Scope, Kind, MemoryInput).
+    {ok, memory_record()} | {error, memory_input_error() | {bad_arg, binary()}}.
+remember(Scope, Kind, MemoryInput)
+  when (is_binary(Scope) orelse is_map(Scope)),
+       (is_atom(Kind) orelse is_binary(Kind)),
+       (is_map(MemoryInput) orelse is_binary(MemoryInput)) ->
+    beam_agent_memory_core:remember(Scope, Kind, MemoryInput);
+remember(Scope, _, _) when not is_binary(Scope), not is_map(Scope) ->
+    {error, {bad_arg, <<"scope must be a binary or map">>}};
+remember(_, Kind, _) when not is_atom(Kind), not is_binary(Kind) ->
+    {error, {bad_arg, <<"kind must be an atom or binary">>}};
+remember(_, _, _) ->
+    {error, {bad_arg, <<"memory_input must be a binary or map">>}}.
 
 -doc "Fetch a memory by id.".
--spec get(binary()) -> {ok, memory_record()} | {error, not_found}.
-get(MemoryId) ->
-    beam_agent_memory_core:get(MemoryId).
+-spec get(binary()) -> {ok, memory_record()} | {error, not_found | {bad_arg, binary()}}.
+get(MemoryId) when is_binary(MemoryId) ->
+    beam_agent_memory_core:get(MemoryId);
+get(_) ->
+    {error, {bad_arg, <<"memory_id must be a binary">>}}.
 
 -doc "List all visible memories.".
 -spec list() -> {ok, [memory_record()]}.
@@ -138,30 +166,47 @@ list() ->
     beam_agent_memory_core:list().
 
 -doc "List memories with exact-match filters and visibility controls.".
--spec list(memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
-list(Filter) ->
-    beam_agent_memory_core:list(Filter).
+-spec list(memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error() | {bad_arg, binary()}}.
+list(Filter) when is_map(Filter) ->
+    beam_agent_memory_core:list(Filter);
+list(_) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc "Recall memories for a scope using lexical search.".
 -spec recall(binary() | scope(), binary()) ->
-    {ok, [memory_record()]} | {error, scope_error() | memory_filter_error()}.
-recall(Scope, Query) ->
-    beam_agent_memory_core:recall(Scope, Query).
+    {ok, [memory_record()]} | {error, scope_error() | memory_filter_error() | {bad_arg, binary()}}.
+recall(Scope, Query) when is_binary(Scope), is_binary(Query) ->
+    beam_agent_memory_core:recall(Scope, Query);
+recall(Scope, Query) when is_map(Scope), is_binary(Query) ->
+    beam_agent_memory_core:recall(Scope, Query);
+recall(_, Query) when not is_binary(Query) ->
+    {error, {bad_arg, <<"query must be a binary">>}};
+recall(_, _) ->
+    {error, {bad_arg, <<"scope must be a binary or map">>}}.
 
 -doc "Search memories across all scopes.".
--spec search(binary()) -> {ok, [memory_record()]}.
-search(Query) ->
-    beam_agent_memory_core:search(Query).
+-spec search(binary()) -> {ok, [memory_record()]} | {error, {bad_arg, binary()}}.
+search(Query) when is_binary(Query) ->
+    beam_agent_memory_core:search(Query);
+search(_) ->
+    {error, {bad_arg, <<"query must be a binary">>}}.
 
 -doc "Search memories with a lexical query plus exact-match filters.".
--spec search(binary(), memory_filter()) -> {ok, [memory_record()]} | {error, memory_filter_error()}.
-search(Query, Filter) ->
-    beam_agent_memory_core:search(Query, Filter).
+-spec search(binary(), memory_filter()) ->
+    {ok, [memory_record()]} | {error, memory_filter_error() | {bad_arg, binary()}}.
+search(Query, Filter) when is_binary(Query), is_map(Filter) ->
+    beam_agent_memory_core:search(Query, Filter);
+search(Query, _) when not is_binary(Query) ->
+    {error, {bad_arg, <<"query must be a binary">>}};
+search(_, _) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc "Forget a memory by id.".
--spec forget(binary()) -> ok | {error, not_found}.
-forget(MemoryId) ->
-    beam_agent_memory_core:forget(MemoryId).
+-spec forget(binary()) -> ok | {error, not_found | {bad_arg, binary()}}.
+forget(MemoryId) when is_binary(MemoryId) ->
+    beam_agent_memory_core:forget(MemoryId);
+forget(_) ->
+    {error, {bad_arg, <<"memory_id must be a binary">>}}.
 
 -doc """
 Update mutable fields of an existing memory record.
@@ -175,19 +220,27 @@ When `ttl` is updated, `expires_at` is automatically recalculated from the
 current time. The `updated_at` timestamp is always refreshed.
 """.
 -spec update(binary(), update_input()) ->
-    {ok, memory_record()} | {error, memory_update_error()}.
-update(MemoryId, Changes) ->
-    beam_agent_memory_core:update(MemoryId, Changes).
+    {ok, memory_record()} | {error, memory_update_error() | {bad_arg, binary()}}.
+update(MemoryId, Changes) when is_binary(MemoryId), is_map(Changes) ->
+    beam_agent_memory_core:update(MemoryId, Changes);
+update(MemoryId, _) when not is_binary(MemoryId) ->
+    {error, {bad_arg, <<"memory_id must be a binary">>}};
+update(_, _) ->
+    {error, {bad_arg, <<"changes must be a map">>}}.
 
 -doc "Pin a memory.".
--spec pin(binary()) -> ok | {error, not_found}.
-pin(MemoryId) ->
-    beam_agent_memory_core:pin(MemoryId).
+-spec pin(binary()) -> ok | {error, not_found | {bad_arg, binary()}}.
+pin(MemoryId) when is_binary(MemoryId) ->
+    beam_agent_memory_core:pin(MemoryId);
+pin(_) ->
+    {error, {bad_arg, <<"memory_id must be a binary">>}}.
 
 -doc "Unpin a memory.".
--spec unpin(binary()) -> ok | {error, not_found}.
-unpin(MemoryId) ->
-    beam_agent_memory_core:unpin(MemoryId).
+-spec unpin(binary()) -> ok | {error, not_found | {bad_arg, binary()}}.
+unpin(MemoryId) when is_binary(MemoryId) ->
+    beam_agent_memory_core:unpin(MemoryId);
+unpin(_) ->
+    {error, {bad_arg, <<"memory_id must be a binary">>}}.
 
 -doc "Expire all currently expired, unpinned memories.".
 -spec expire() -> {ok, non_neg_integer()}.
@@ -195,6 +248,8 @@ expire() ->
     beam_agent_memory_core:expire().
 
 -doc "Expire currently expired, unpinned memories matching a filter.".
--spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, memory_filter_error()}.
-expire(Filter) ->
-    beam_agent_memory_core:expire(Filter).
+-spec expire(memory_filter()) -> {ok, non_neg_integer()} | {error, memory_filter_error() | {bad_arg, binary()}}.
+expire(Filter) when is_map(Filter) ->
+    beam_agent_memory_core:expire(Filter);
+expire(_) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.

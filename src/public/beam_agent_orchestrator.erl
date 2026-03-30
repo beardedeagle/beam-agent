@@ -2,6 +2,13 @@
 -moduledoc """
 Public API for canonical BeamAgent orchestration primitives.
 
+This module is the stable public API facade for orchestration. It adds input
+validation guards on top of the core implementation in
+`beam_agent_orchestrator_core`.
+
+Every public function validates its arguments before delegation to the core
+implementation.
+
 `beam_agent_orchestrator` models parent-child execution relationships on top of
 canonical runs, sessions, threads, and the durable journal. It intentionally
 does not start a worker pool or scheduler process. Callers invoke these
@@ -83,8 +90,14 @@ Create a child orchestration record, optionally opening a child session or
 thread substrate.
 """.
 -spec spawn(parent(), spawn_opts()) -> {ok, child()} | {error, term()}.
-spawn(Parent, Opts) ->
-    beam_agent_orchestrator_core:spawn(Parent, Opts).
+spawn(Parent, Opts) when is_binary(Parent), is_map(Opts) ->
+    beam_agent_orchestrator_core:spawn(Parent, Opts);
+spawn(Parent, Opts) when is_map(Parent), is_map(Opts) ->
+    beam_agent_orchestrator_core:spawn(Parent, Opts);
+spawn(_, Opts) when is_map(Opts) ->
+    {error, {bad_arg, <<"parent must be a binary run_id or run map">>}};
+spawn(_, _) ->
+    {error, {bad_arg, <<"opts must be a map">>}}.
 
 -doc """
 Create a delegated child run under a parent run.
@@ -94,14 +107,24 @@ lineage metadata. BeamAgent does not start a worker process for it.
 """.
 -spec delegate(parent(), term(), map()) ->
     {ok, beam_agent_runs:run()} | {error, term()}.
-delegate(Parent, Task, Opts) ->
-    beam_agent_orchestrator_core:delegate(Parent, Task, Opts).
+delegate(Parent, Task, Opts) when is_binary(Parent), is_map(Opts) ->
+    beam_agent_orchestrator_core:delegate(Parent, Task, Opts);
+delegate(Parent, Task, Opts) when is_map(Parent), is_map(Opts) ->
+    beam_agent_orchestrator_core:delegate(Parent, Task, Opts);
+delegate(_, _Task, Opts) when is_map(Opts) ->
+    {error, {bad_arg, <<"parent must be a binary run_id or run map">>}};
+delegate(_, _Task, _) ->
+    {error, {bad_arg, <<"opts must be a map">>}}.
 
 -doc "Wait for a run to reach a terminal state by polling the canonical run store.".
 -spec await(binary(), non_neg_integer()) ->
-    {ok, await_result()} | {error, timeout | not_found | {invalid_timeout, term()}}.
-await(RunId, Timeout) ->
-    beam_agent_orchestrator_core:await(RunId, Timeout).
+    {ok, await_result()} | {error, timeout | not_found | {invalid_timeout, term()} | {bad_arg, binary()}}.
+await(RunId, Timeout) when is_binary(RunId), is_integer(Timeout), Timeout >= 0 ->
+    beam_agent_orchestrator_core:await(RunId, Timeout);
+await(RunId, _) when not is_binary(RunId) ->
+    {error, {bad_arg, <<"run_id must be a binary">>}};
+await(_, _) ->
+    {error, {bad_arg, <<"timeout must be a non-negative integer">>}}.
 
 -doc """
 Collect the canonical orchestration view for a run.
@@ -113,20 +136,32 @@ Supported opts:
 """.
 -spec collect(binary(), collect_opts()) ->
     {ok, collect_result()} | {error, term()}.
-collect(RunId, Opts) ->
-    beam_agent_orchestrator_core:collect(RunId, Opts).
+collect(RunId, Opts) when is_binary(RunId), is_map(Opts) ->
+    beam_agent_orchestrator_core:collect(RunId, Opts);
+collect(RunId, _) when not is_binary(RunId) ->
+    {error, {bad_arg, <<"run_id must be a binary">>}};
+collect(_, _) ->
+    {error, {bad_arg, <<"opts must be a map">>}}.
 
 -doc "Cancel a run and any active orchestrated descendants.".
--spec cancel(binary(), term()) -> ok | {error, not_found}.
-cancel(RunId, Reason) ->
-    beam_agent_orchestrator_core:cancel(RunId, Reason).
+-spec cancel(binary(), term()) -> ok | {error, not_found | {bad_arg, binary()}}.
+cancel(RunId, Reason) when is_binary(RunId) ->
+    beam_agent_orchestrator_core:cancel(RunId, Reason);
+cancel(_, _) ->
+    {error, {bad_arg, <<"run_id must be a binary">>}}.
 
 -doc "Return a summary status map for a run and its direct children.".
--spec status(binary()) -> {ok, child_status()} | {error, not_found}.
-status(RunId) ->
-    beam_agent_orchestrator_core:status(RunId).
+-spec status(binary()) -> {ok, child_status()} | {error, not_found | {bad_arg, binary()}}.
+status(RunId) when is_binary(RunId) ->
+    beam_agent_orchestrator_core:status(RunId);
+status(_) ->
+    {error, {bad_arg, <<"run_id must be a binary">>}}.
 
 -doc "List direct orchestrator children for a parent run, oldest first.".
 -spec list_children(parent()) -> {ok, [child()]} | {error, term()}.
-list_children(Parent) ->
-    beam_agent_orchestrator_core:list_children(Parent).
+list_children(Parent) when is_binary(Parent) ->
+    beam_agent_orchestrator_core:list_children(Parent);
+list_children(Parent) when is_map(Parent) ->
+    beam_agent_orchestrator_core:list_children(Parent);
+list_children(_) ->
+    {error, {bad_arg, <<"parent must be a binary run_id or run map">>}}.

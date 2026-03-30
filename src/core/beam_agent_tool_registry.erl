@@ -560,9 +560,18 @@ call_handler(Handler, Input) ->
         Class:Reason:Stack ->
             SafeStack = [{M, F, if is_list(A) -> length(A); true -> A end, L}
                          || {M, F, A, L} <- Stack],
+            logger:error("Tool handler crashed: ~p:~p~n~p",
+                         [Class, Reason, SafeStack]),
+            %% Return only the crash class and top frame to avoid
+            %% leaking sensitive data (keys, credentials) that may
+            %% be embedded in the raw Reason term.
+            TopFrame = case SafeStack of
+                           [Top | _] -> iolist_to_binary(io_lib:format("~p", [Top]));
+                           []        -> <<"unknown">>
+                       end,
             ErrMsg = iolist_to_binary(
-                io_lib:format("Handler ~p:~p~n~p",
-                              [Class, Reason, SafeStack])),
+                io_lib:format("Handler crashed (~p) at ~ts",
+                              [Class, TopFrame])),
             {error, ErrMsg}
     end.
 

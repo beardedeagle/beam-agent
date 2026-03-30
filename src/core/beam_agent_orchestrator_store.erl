@@ -17,7 +17,6 @@ collection behavior. Those concerns belong in `beam_agent_orchestrator_core`.
     clear/0,
     put_link/1,
     get_link/1,
-    delete_link/1,
     list_children/1
 ]).
 
@@ -93,20 +92,6 @@ get_link(ChildRunId) when is_binary(ChildRunId) ->
         [{_, Link}] when is_map(Link) ->
             {ok, Link};
         [] ->
-            {error, not_found}
-    end.
-
--doc "Delete a lineage record and remove its parent index entry.".
--spec delete_link(binary()) -> ok | {error, not_found}.
-delete_link(ChildRunId) when is_binary(ChildRunId) ->
-    ensure_tables(),
-    case get_link(ChildRunId) of
-        {ok, Link} ->
-            maybe_delete_parent_index(Link),
-            _ = beam_agent_store:delete(?STORE_DOMAIN, ?DOMAINS_TABLE,
-                {orch_link, ChildRunId}),
-            ok;
-        {error, not_found} ->
             {error, not_found}
     end.
 

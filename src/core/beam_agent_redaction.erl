@@ -41,7 +41,6 @@ rather than maintaining a separate, driftable list.
 
 -ifdef(TEST).
 -export([
-    key_variants/1,
     canonical_form/1,
     normalize_key/1,
     snake_to_camel/1

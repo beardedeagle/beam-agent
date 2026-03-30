@@ -305,6 +305,26 @@ defmodule GeminiEx do
     BeamAgent.stream(session, prompt, params)
   end
 
+  # ── Event Subscription ──────────────────────────────────────────────
+
+  @doc "Subscribe to the universal event stream for a Gemini session."
+  @spec event_subscribe(pid()) :: {:ok, reference()} | {:error, term()}
+  def event_subscribe(session) do
+    case get_session_id(session) do
+      {:ok, sid} -> :beam_agent_events.subscribe(sid)
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc "Unsubscribe from the universal event stream for a Gemini session."
+  @spec event_unsubscribe(pid(), reference()) :: :ok | {:error, term()}
+  def event_unsubscribe(session, ref) do
+    case get_session_id(session) do
+      {:ok, sid} -> :beam_agent_events.unsubscribe(sid, ref)
+      {:error, _} = err -> err
+    end
+  end
+
   # ── Session Info & Runtime Control ─────────────────────────────────
 
   @doc "Query session health."
@@ -772,6 +792,14 @@ defmodule GeminiEx do
 
   defp opts_to_map(opts) when is_list(opts), do: Map.new(opts)
   defp opts_to_map(opts) when is_map(opts), do: opts
+
+  defp get_session_id(session) do
+    case session_info(session) do
+      {:ok, %{session_id: sid}} -> {:ok, sid}
+      {:ok, info} -> {:error, {:missing_session_id, info}}
+      {:error, _} = err -> err
+    end
+  end
 
   defp extract_system_field(session, field, default) do
     case session_info(session) do

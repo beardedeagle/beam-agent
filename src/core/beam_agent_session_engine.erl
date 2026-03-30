@@ -54,7 +54,6 @@
     test_get_queue_max/1,
     test_get_reconnect_config/1,
     test_get_reconnect_attempts/1,
-    test_get_sdk_hook_registry/1,
     ensure_session_id/1,
     base_reconnect_delay/2,
     validate_reconnect_config/1
@@ -238,6 +237,14 @@ init({HandlerMod, Opts}) ->
                             TimeoutAction = timeout_action(InitState, Opts1),
                             {ok, InitState, Data, TimeoutAction};
                         {error, Reason} ->
+                            %% Handler init succeeded but transport
+                            %% failed to start.  Give the handler a
+                            %% chance to clean up resources it
+                            %% allocated during init (temp files, ETS
+                            %% entries, etc.).
+                            catch HandlerMod:terminate_handler(
+                                      {transport_start_failed, Reason},
+                                      HState),
                             {stop, {transport_start_failed, Reason}}
                     end;
                 {stop, Reason} ->
@@ -1031,10 +1038,23 @@ fire_state_enter(NewState, OldState,
     beam_agent_telemetry:state_change(Backend, OldForTelemetry, NewState),
     Data1 = case erlang:function_exported(H, on_state_enter, 3) of
         true ->
-            {ok, Actions, HState1} =
-                H:on_state_enter(NewState, OldForTelemetry, HState),
-            send_data(execute_send_actions(Actions,
-                                Data#engine{handler_state = HState1}));
+            try H:on_state_enter(NewState, OldForTelemetry, HState) of
+                {ok, Actions, HState1} ->
+                    send_data(execute_send_actions(Actions,
+                                    Data#engine{handler_state = HState1}));
+                Unexpected ->
+                    logger:warning("~tp on_state_enter(~p, ~p, _) returned"
+                                   " unexpected: ~tp; ignoring",
+                                   [H, NewState, OldForTelemetry, Unexpected]),
+                    Data
+            catch
+                Class:Reason:Stack ->
+                    logger:warning("~tp on_state_enter(~p, ~p, _) crashed:"
+                                   " ~p:~tp~n~p",
+                                   [H, NewState, OldForTelemetry,
+                                    Class, Reason, Stack]),
+                    Data
+            end;
         false ->
             Data
     end,
@@ -1115,7 +1135,12 @@ attempt_reconnect(#engine{handler_mod = HandlerMod, opts = Opts} = Data) ->
                     },
                     TimeoutAction = timeout_action(InitState, Opts),
                     {next_state, InitState, Data1, TimeoutAction};
-                {error, _Reason} ->
+                {error, Reason} ->
+                    %% Reconnect handler init succeeded but transport
+                    %% failed.  Clean up the NEW handler state's
+                    %% resources before falling back to retry.
+                    catch HandlerMod:terminate_handler(
+                              {transport_start_failed, Reason}, HState),
                     bump_or_exhaust(Data)
             end;
         {stop, _Reason} ->
@@ -1461,10 +1486,5 @@ test_get_reconnect_config(#engine{reconnect_config = V}) -> V.
 -doc false.
 -spec test_get_reconnect_attempts(#engine{}) -> non_neg_integer().
 test_get_reconnect_attempts(#engine{reconnect_attempts = V}) -> V.
-
--doc false.
--spec test_get_sdk_hook_registry(#engine{}) ->
-    beam_agent_hooks_core:hook_registry() | undefined.
-test_get_sdk_hook_registry(#engine{sdk_hook_registry = V}) -> V.
 
 -endif.

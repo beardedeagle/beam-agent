@@ -165,7 +165,7 @@ child_spec(Opts) when is_map(Opts) ->
             Module = beam_agent_backend:adapter_module(Backend),
             Module:child_spec(SessionOpts);
         {error, Reason} ->
-            erlang:error(Reason)
+            error({routing_failed, Reason})
     end.
 
 -doc "Stop a live unified session.".

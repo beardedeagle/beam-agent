@@ -2,6 +2,13 @@
 -moduledoc """
 Public API for the BeamAgent durable event journal.
 
+This module is the stable public API facade for the event journal. It adds
+input validation guards on top of the core implementation in
+`beam_agent_journal_core`.
+
+Every public function validates its arguments before delegation to the core
+implementation.
+
 The journal stores normalized BeamAgent domain events for replay, audit, and
 orchestration. It is intentionally distinct from `beam_agent_events`:
 
@@ -108,8 +115,14 @@ The envelope may include `session_id`, `thread_id`, `run_id`, `tags`,
 `timestamp`, and `payload`.
 """.
 -spec append(event_type(), event_input()) -> {ok, entry()} | {error, term()}.
-append(EventType, Event) ->
-    beam_agent_journal_core:append(EventType, Event).
+append(EventType, Event) when is_atom(EventType), is_map(Event) ->
+    beam_agent_journal_core:append(EventType, Event);
+append(EventType, Event) when is_binary(EventType), is_map(Event) ->
+    beam_agent_journal_core:append(EventType, Event);
+append(EventType, _) when not is_atom(EventType), not is_binary(EventType) ->
+    {error, {bad_arg, <<"event_type must be an atom or binary">>}};
+append(_, _) ->
+    {error, {bad_arg, <<"event must be a map">>}}.
 
 -doc "List all journal entries, oldest first.".
 -spec list() -> {ok, [entry()]}.
@@ -123,8 +136,10 @@ Supported filters are `event_id`, `event_type`, `session_id`, `thread_id`,
 `run_id`, `tag`, `since`, and `limit`.
 """.
 -spec list(event_filter()) -> {ok, [entry()]} | {error, term()}.
-list(Filter) ->
-    beam_agent_journal_core:list(Filter).
+list(Filter) when is_map(Filter) ->
+    beam_agent_journal_core:list(Filter);
+list(_) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc """
 Replay journal entries after the given cursor.
@@ -133,34 +148,52 @@ Use the `sequence` field from the last seen entry as the next cursor. Passing
 `0` replays from the start of the journal.
 """.
 -spec stream_from(non_neg_integer()) -> {ok, [entry()]} | {error, term()}.
-stream_from(Cursor) ->
-    beam_agent_journal_core:stream_from(Cursor).
+stream_from(Cursor) when is_integer(Cursor), Cursor >= 0 ->
+    beam_agent_journal_core:stream_from(Cursor);
+stream_from(_) ->
+    {error, {bad_arg, <<"cursor must be a non-negative integer">>}}.
 
 -doc "Replay journal entries after the given cursor with additional filters.".
 -spec stream_from(non_neg_integer(), event_filter()) ->
     {ok, [entry()]} | {error, term()}.
-stream_from(Cursor, Filter) ->
-    beam_agent_journal_core:stream_from(Cursor, Filter).
+stream_from(Cursor, Filter) when is_integer(Cursor), Cursor >= 0, is_map(Filter) ->
+    beam_agent_journal_core:stream_from(Cursor, Filter);
+stream_from(Cursor, _) when not is_integer(Cursor); Cursor < 0 ->
+    {error, {bad_arg, <<"cursor must be a non-negative integer">>}};
+stream_from(_, _) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc "Fetch a journal entry by id.".
--spec get(binary()) -> {ok, entry()} | {error, not_found}.
-get(EventId) ->
-    beam_agent_journal_core:get(EventId).
+-spec get(binary()) -> {ok, entry()} | {error, not_found | {bad_arg, binary()}}.
+get(EventId) when is_binary(EventId) ->
+    beam_agent_journal_core:get(EventId);
+get(_) ->
+    {error, {bad_arg, <<"event_id must be a binary">>}}.
 
 -doc "Acknowledge a journal entry for a consumer id. Idempotent.".
--spec ack(binary(), binary()) -> ok | {error, not_found}.
-ack(ConsumerId, EventId) ->
-    beam_agent_journal_core:ack(ConsumerId, EventId).
+-spec ack(binary(), binary()) -> ok | {error, not_found | {bad_arg, binary()}}.
+ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
+    beam_agent_journal_core:ack(ConsumerId, EventId);
+ack(ConsumerId, _) when not is_binary(ConsumerId) ->
+    {error, {bad_arg, <<"consumer_id must be a binary">>}};
+ack(_, _) ->
+    {error, {bad_arg, <<"event_id must be a binary">>}}.
 
 -doc "Fetch an ack record for a consumer and event.".
--spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found}.
-get_ack(ConsumerId, EventId) ->
-    beam_agent_journal_core:get_ack(ConsumerId, EventId).
+-spec get_ack(binary(), binary()) -> {ok, map()} | {error, not_found | {bad_arg, binary()}}.
+get_ack(ConsumerId, EventId) when is_binary(ConsumerId), is_binary(EventId) ->
+    beam_agent_journal_core:get_ack(ConsumerId, EventId);
+get_ack(ConsumerId, _) when not is_binary(ConsumerId) ->
+    {error, {bad_arg, <<"consumer_id must be a binary">>}};
+get_ack(_, _) ->
+    {error, {bad_arg, <<"event_id must be a binary">>}}.
 
 -doc "List all ack records for a consumer, newest first.".
--spec list_acks(binary()) -> {ok, [map()]}.
-list_acks(ConsumerId) ->
-    beam_agent_journal_core:list_acks(ConsumerId).
+-spec list_acks(binary()) -> {ok, [map()]} | {error, {bad_arg, binary()}}.
+list_acks(ConsumerId) when is_binary(ConsumerId) ->
+    beam_agent_journal_core:list_acks(ConsumerId);
+list_acks(_) ->
+    {error, {bad_arg, <<"consumer_id must be a binary">>}}.
 
 %%--------------------------------------------------------------------
 %% Audit Convenience API
@@ -173,10 +206,14 @@ list_events() ->
 
 -doc "List audit events with exact-match filters.".
 -spec list_events(audit_filter()) -> {ok, [audit_event()]} | {error, term()}.
-list_events(Filter) ->
-    beam_agent_audit_core:list_events(Filter).
+list_events(Filter) when is_map(Filter) ->
+    beam_agent_audit_core:list_events(Filter);
+list_events(_) ->
+    {error, {bad_arg, <<"filter must be a map">>}}.
 
 -doc "Fetch an audit event by id.".
--spec get_event(binary()) -> {ok, audit_event()} | {error, not_found}.
-get_event(EventId) ->
-    beam_agent_audit_core:get_event(EventId).
+-spec get_event(binary()) -> {ok, audit_event()} | {error, not_found | {bad_arg, binary()}}.
+get_event(EventId) when is_binary(EventId) ->
+    beam_agent_audit_core:get_event(EventId);
+get_event(_) ->
+    {error, {bad_arg, <<"event_id must be a binary">>}}.

@@ -29,7 +29,6 @@ The Erlang `:beam_agent` module works from Elixir, but this wrapper provides:
 | `BeamAgent.Account` | Account lifecycle operations — login, logout, rate limits, and account info |
 | `BeamAgent.Apps` | App and project management — listing, initializing, logging, and app modes |
 | `BeamAgent.Artifacts` | Durable runtime outputs — plans, diffs, reviews, summaries, and transcript snapshots |
-| `BeamAgent.Audit` | Durable audit records for policy decisions and higher-level control actions |
 | `BeamAgent.Capabilities` | Support-level / implementation / fidelity introspection |
 | `BeamAgent.Catalog` | Shared tools/skills/plugins/agents accessors |
 | `BeamAgent.Checkpoint` | Checkpoint save/restore for rollback and recovery |
@@ -107,7 +106,7 @@ BeamAgent.set_agent(session, "architect")
 BeamAgent.set_model(session, "o3")
 BeamAgent.set_permission_mode(session, "bypassPermissions")
 
-# Runtime capability discovery (23-capability matrix)
+# Runtime capability discovery (24-capability matrix)
 {:ok, caps} = BeamAgent.session_capabilities(session)
 ```
 

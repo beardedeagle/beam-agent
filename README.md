@@ -319,7 +319,7 @@ beam_agent_policy:evaluate(ProfileId, Action, Context)   -> allow | {deny, Reaso
 %% Canonical routines -- beam_agent_routines
 beam_agent_routines:create(Job)                          -> {ok, JobRecord} | {error, Reason}
 beam_agent_routines:update(JobId, Patch)                -> {ok, JobRecord} | {error, Reason}
-beam_agent_routines:due(Filter)                         -> {ok, [JobRecord]} | {error, Reason}
+beam_agent_routines:list_due(Filter)                     -> {ok, [JobRecord]} | {error, Reason}
 beam_agent_routines:run_due(Opts)                       -> {ok, [map()]} | {error, Reason}
 beam_agent_routines:run_now(JobId)                      -> {ok, Run} | {error, Reason}
 beam_agent_routines:next_due_at()                       -> {ok, DueAt} | {error, none}
@@ -342,7 +342,7 @@ beam_agent_context:maybe_compact(SessionOrThread, Opts)  -> {ok, Result} | {erro
 
 The Elixir `BeamAgent` wrapper exposes those stores directly through
 `BeamAgent.SessionStore`, `BeamAgent.Threads`, `BeamAgent.Runs`, and
-`BeamAgent.Artifacts`, `BeamAgent.Audit`, `BeamAgent.Context`,
+`BeamAgent.Artifacts`, `BeamAgent.Context`,
 `BeamAgent.Memory`, `BeamAgent.Orchestrator`, `BeamAgent.Policy`,
 `BeamAgent.Routing`, `BeamAgent.Routines`, and
 the runtime/catalog layers through `BeamAgent.Runtime`,

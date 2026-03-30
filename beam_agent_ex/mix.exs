@@ -85,7 +85,6 @@ defmodule BeamAgentEx.MixProject do
         ],
         "Canonical Domains": [
           BeamAgent.Artifacts,
-          BeamAgent.Audit,
           BeamAgent.Context,
           BeamAgent.Journal,
           BeamAgent.Memory,
@@ -98,6 +97,7 @@ defmodule BeamAgentEx.MixProject do
         ],
         "Backend Wrappers": [
           ClaudeEx,
+          ClaudeEx.Application,
           ClaudeEx.Session,
           CodexEx,
           CodexEx.Session,
