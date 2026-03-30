@@ -572,11 +572,11 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(ack | append | get | list | stream_from, map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(journal, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(journal, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(ack | append | get | list | stream_from, integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(journal, Operation, StartTime,
+    beam_agent_telemetry:span_stop(journal, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(append | list | stream_from,
@@ -588,7 +588,7 @@ telemetry_stop(Operation, StartTime, Metadata) ->
       | {invalid_filter, event_id | event_type | limit | run_id | session_id | since |
             tag | thread_id}}, map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(journal, Operation, Reason,
+    beam_agent_telemetry:span_exception(journal, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_event_meta(event_type(), map()) -> map().

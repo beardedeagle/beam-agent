@@ -453,11 +453,11 @@ audit_execution(JobId, RunId, Mode, Outcome, Payload) when is_binary(JobId) ->
       (run_due, #{at := integer(), claim_ttl_ms := pos_integer(), limit => pos_integer(),
           runner_id := binary()}) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(routine, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(routine, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(routine_runner_operation(), integer(), routine_runner_telemetry_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(routine, Operation, StartTime,
+    beam_agent_telemetry:span_stop(routine, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_run_meta(terminal_run()) -> routine_runner_telemetry_meta().

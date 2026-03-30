@@ -1346,18 +1346,18 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(memory_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(memory, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(memory, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(memory_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(memory, Operation, StartTime,
+    beam_agent_telemetry:span_stop(memory, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(remember | list | search | expire,
     memory_filter_error() | memory_input_error(),
     map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(memory, Operation, Reason,
+    beam_agent_telemetry:span_exception(memory, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_finish(memory_operation(), integer(),

@@ -1,6 +1,6 @@
 -module(beam_agent_telemetry).
 -moduledoc """
-Public wrapper for OpenTelemetry-style span and event emission inside `beam_agent`.
+OpenTelemetry-style span and event emission for the BeamAgent SDK.
 
 All five backend session handlers emit telemetry events via this module so that
 consuming applications can attach handlers once and observe every backend
@@ -8,33 +8,33 @@ uniformly. No OTLP export or collector is built in — this module follows the
 Erlang/OTP `telemetry` convention: the library emits events, applications handle
 them.
 
-## Optional dependency
+== Optional dependency
 
-The `telemetry` library is an **optional** dependency. When present, events are
+The `telemetry` library is an *optional* dependency. When present, events are
 emitted via `telemetry:execute/3`. When absent, all emission is a silent no-op
-with zero overhead. To enable telemetry, add `{telemetry, "~> 1.3"}` to your
+with zero overhead. To enable telemetry, add `{telemetry, \"~> 1.3\"}` to your
 application's `deps` in `rebar.config` and include `telemetry` in your
 application's `applications` list.
 
-## Event namespace
+== Event namespace
 
-All events are published under the `[:beam_agent, ...]` prefix. The Agent
+All events are published under the `[beam_agent, ...]` prefix. The Agent
 parameter (an atom such as `claude` or `codex`) becomes the second element of
 the event name list:
 
 ```
-[:beam_agent, claude, query, start]
-[:beam_agent, claude, query, stop]
-[:beam_agent, claude, query, exception]
-[:beam_agent, command, run, start]       %% shell command execution
-[:beam_agent, command, run, stop]        %% includes exit_code in metadata
-[:beam_agent, command, run, exception]   %% timeout or port failure
-[:beam_agent, session, state_change]     %% backend session lifecycle
-[:beam_agent, run, state_change]         %% canonical run lifecycle
-[:beam_agent, buffer, overflow]          %% always at this fixed path
+[beam_agent, claude, query, start]
+[beam_agent, claude, query, stop]
+[beam_agent, claude, query, exception]
+[beam_agent, command, run, start]       %% shell command execution
+[beam_agent, command, run, stop]        %% includes exit_code in metadata
+[beam_agent, command, run, exception]   %% timeout or port failure
+[beam_agent, session, state_change]     %% backend session lifecycle
+[beam_agent, run, state_change]         %% canonical run lifecycle
+[beam_agent, buffer, overflow]          %% always at this fixed path
 ```
 
-## Span lifecycle
+== Span lifecycle
 
 A span covers a single unit of work. Start it with `span_start/3`, which
 returns a monotonic start time. Pass that time to `span_stop/3` when the work
@@ -46,7 +46,7 @@ StartTime = beam_agent_telemetry:span_start(claude, query, #{prompt_length => 42
 beam_agent_telemetry:span_stop(claude, query, StartTime).
 ```
 
-## Attaching handlers
+== Attaching handlers
 
 Use the standard `telemetry:attach/4` or `telemetry:attach_many/4` call in your
 application startup:
@@ -62,181 +62,112 @@ telemetry:attach_many(
     []
 ).
 ```
-
-See the `telemetry` library documentation for handler function signature details.
-
-## Core concepts
-
-Telemetry is event-based instrumentation. The SDK emits events at key
-points (session start, query start, query complete, errors) and your
-application can subscribe to those events for logging, metrics, or
-monitoring dashboards.
-
-You do not call this module to subscribe. Instead, use the standard
-telemetry:attach/4 or telemetry:attach_many/4 in your application
-startup to register handler functions. This module is what the SDK
-uses internally to emit the events.
-
-A span covers a unit of work: span_start/3 begins it (returning a
-timestamp), and span_stop/3 or span_exception/3 ends it. The SDK
-computes the duration automatically from the start timestamp.
-
-## Architecture deep dive
-
-Events follow the Erlang telemetry library convention: event names are
-lists of atoms under the [beam_agent, ...] prefix. The Agent atom
-(claude, codex, etc.) is the second element for backend spans. Other
-BeamAgent domains such as run, artifact, and routine reuse that same
-position for canonical runtime instrumentation.
-
-Measurements include duration in native time units (computed from
-erlang:monotonic_time/0 deltas). Metadata maps carry backend or domain,
-session_id, and operation-specific fields. state_change/3, state_change/4,
-and buffer_overflow/2 are standalone events outside the span pattern.
-
-Zero overhead when no handlers are attached -- the telemetry library
-short-circuits when the handler list is empty. When the telemetry
-library is not present, all emission is a silent no-op. This module
-delegates to beam_agent_telemetry_core for all emission logic.
 """.
 
--export([span_start/3, span_stop/3, span_stop/4, span_exception/3, span_exception/4,
-         state_change/3, state_change/4, buffer_overflow/2]).
+-export([
+    span_start/3,
+    span_stop/3,
+    span_stop/4,
+    span_exception/3,
+    span_exception/4,
+    state_change/3,
+    state_change/4,
+    buffer_overflow/2
+]).
 
--doc """
-Emit a span start event and return a monotonic start time.
+%%--------------------------------------------------------------------
+%% API
+%%--------------------------------------------------------------------
 
-The returned integer must be passed unchanged to `span_stop/3` or
-`span_exception/3` so the duration can be computed.
-
-Parameters:
-- `Agent` — backend atom, e.g. `claude`, `codex`, `gemini`, `opencode`, `copilot`
-- `EventSuffix` — atom labelling the operation, e.g. `query`, `connect`
-- `Metadata` — arbitrary map attached to the telemetry event
-
-Returns a monotonic integer (result of `erlang:monotonic_time/0`).
-
-```erlang
-T = beam_agent_telemetry:span_start(claude, query, #{session_id => Id}),
-%% work...
-beam_agent_telemetry:span_stop(claude, query, T).
-```
-""".
+-doc "Emit a span start event. Returns monotonic start time for duration calculation in span_stop/3.".
 -spec span_start(atom(), atom(), map()) -> integer().
 span_start(Agent, EventSuffix, Metadata) ->
-    beam_agent_telemetry_core:span_start(Agent, EventSuffix, Metadata).
+    StartTime = erlang:monotonic_time(),
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, start],
+        #{system_time => erlang:system_time()},
+        Metadata#{agent => Agent}
+    ),
+    StartTime.
 
--doc """
-Emit a span stop event, computing duration from the start time returned by `span_start/3`.
-
-The event is published at `[:beam_agent, Agent, EventSuffix, stop]` with a
-`duration` measurement in native time units.
-
-Parameters:
-- `Agent` — same atom passed to `span_start/3`
-- `EventSuffix` — same atom passed to `span_start/3`
-- `StartTime` — the integer returned by `span_start/3`
-""".
+-doc "Emit a span stop event with duration measurement.".
 -spec span_stop(atom(), atom(), integer()) -> ok.
 span_stop(Agent, EventSuffix, StartTime) ->
-    beam_agent_telemetry_core:span_stop(Agent, EventSuffix, StartTime).
+    Duration = erlang:monotonic_time() - StartTime,
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, stop],
+        #{duration => Duration},
+        #{agent => Agent}
+    ).
 
--doc """
-Emit a span exception event when a unit of work fails.
+-doc "Emit a span stop event with duration measurement and additional metadata.".
+-spec span_stop(atom(), atom(), integer(), map()) -> ok.
+span_stop(Agent, EventSuffix, StartTime, Metadata) when is_map(Metadata) ->
+    Duration = erlang:monotonic_time() - StartTime,
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, stop],
+        #{duration => Duration},
+        Metadata#{agent => Agent}
+    ).
 
-The event is published at `[:beam_agent, Agent, EventSuffix, exception]`.
-Call this instead of `span_stop/3` when the work raised an error or exception.
-
-Parameters:
-- `Agent` — backend atom
-- `EventSuffix` — operation atom, must match the `span_start/3` call
-- `Reason` — the error reason or exception term
-""".
+-doc "Emit a span exception event.".
 -spec span_exception(atom(), atom(), term()) -> ok.
 span_exception(Agent, EventSuffix, Reason) ->
-    beam_agent_telemetry_core:span_exception(Agent, EventSuffix, Reason).
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, exception],
+        #{system_time => erlang:system_time()},
+        #{agent => Agent, reason => Reason}
+    ).
 
--doc """
-Emit a span exception event with additional metadata.
-
-Same as `span_exception/3` but merges caller-supplied metadata into the event.
-Useful when you need to attach context (e.g., command string, working directory)
-to the exception event.
-
-Parameters:
-- `Agent` — backend atom
-- `EventSuffix` — operation atom, must match the `span_start/3` call
-- `Reason` — the error reason or exception term
-- `Metadata` — arbitrary map merged into the telemetry metadata
-""".
+-doc "Emit a span exception event with additional metadata.".
 -spec span_exception(atom(), atom(), term(), map()) -> ok.
-span_exception(Agent, EventSuffix, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(Agent, EventSuffix, Reason, Metadata).
+span_exception(Agent, EventSuffix, Reason, Metadata) when is_map(Metadata) ->
+    maybe_execute(
+        [beam_agent, Agent, EventSuffix, exception],
+        #{system_time => erlang:system_time()},
+        Metadata#{agent => Agent, reason => Reason}
+    ).
 
--doc """
-Emit a span stop event with duration and additional metadata.
-
-Same as `span_stop/3` but merges caller-supplied metadata into the event.
-Useful when you need to attach result-specific information (e.g., exit codes,
-response sizes) to the stop event.
-
-Parameters:
-- `Agent` — same atom passed to `span_start/3`
-- `EventSuffix` — same atom passed to `span_start/3`
-- `StartTime` — the integer returned by `span_start/3`
-- `Metadata` — arbitrary map merged into the telemetry metadata
-""".
--spec span_stop(atom(), atom(), integer(), map()) -> ok.
-span_stop(Agent, EventSuffix, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(Agent, EventSuffix, StartTime, Metadata).
-
--doc """
-Emit a state change event for a gen_statem transition.
-
-The event is published at the fixed path `[:beam_agent, session, state_change]`.
-Backend session handlers call this on every state machine transition so that
-consumers can observe the full session lifecycle.
-
-Parameters:
-- `Agent` — backend atom identifying which session handler fired
-- `FromState` — the state the session is leaving (e.g. `connecting`, `ready`)
-- `ToState` — the state the session is entering
-
-Valid state atoms: `connecting`, `initializing`, `ready`, `active_query`, `error`.
-""".
+-doc "Emit a state change event for gen_statem transitions.".
 -spec state_change(atom(), atom(), atom()) -> ok.
 state_change(Agent, FromState, ToState) ->
-    beam_agent_telemetry_core:state_change(Agent, FromState, ToState).
+    maybe_execute(
+        [beam_agent, session, state_change],
+        #{system_time => erlang:system_time()},
+        #{agent => Agent, from_state => FromState, to_state => ToState}
+    ).
 
--doc """
-Emit a state change event for a non-session BeamAgent domain.
-
-The event is published at `[:beam_agent, Domain, state_change]`.
-Canonical BeamAgent domains such as runs, steps, and routines use this helper
-to report lifecycle transitions without introducing a separate telemetry style.
-
-Parameters:
-- `Domain` — BeamAgent domain atom such as `run`, `step`, or `routine`
-- `FromState` — the lifecycle state being left
-- `ToState` — the lifecycle state being entered
-- `Metadata` — additional domain-specific metadata such as ids or outcomes
-""".
+-doc "Emit a state change event for a non-session BeamAgent domain.".
 -spec state_change(atom(), atom(), atom(), map()) -> ok.
-state_change(Domain, FromState, ToState, Metadata) ->
-    beam_agent_telemetry_core:state_change(Domain, FromState, ToState, Metadata).
+state_change(Domain, FromState, ToState, Metadata) when is_map(Metadata) ->
+    maybe_execute(
+        [beam_agent, Domain, state_change],
+        #{system_time => erlang:system_time()},
+        Metadata#{
+            agent => Domain,
+            from_state => FromState,
+            to_state => ToState
+        }
+    ).
 
--doc """
-Emit a buffer overflow warning when accumulated transport data exceeds the limit.
-
-The event is published at the fixed path `[:beam_agent, buffer, overflow]`.
-This event fires when the session engine's inbound buffer grows beyond the
-configured maximum, which typically signals a misbehaving backend or extremely
-large responses.
-
-Parameters:
-- `BufferSize` — current size of the buffer in bytes
-- `Max` — the configured maximum in bytes
-""".
+-doc "Emit a buffer overflow warning.".
 -spec buffer_overflow(pos_integer(), pos_integer()) -> ok.
 buffer_overflow(BufferSize, Max) ->
-    beam_agent_telemetry_core:buffer_overflow(BufferSize, Max).
+    maybe_execute(
+        [beam_agent, buffer, overflow],
+        #{buffer_size => BufferSize},
+        #{max => Max}
+    ).
+
+%%--------------------------------------------------------------------
+%% Internal
+%%--------------------------------------------------------------------
+
+-spec maybe_execute([atom()], map(), map()) -> ok.
+maybe_execute(Event, Measurements, Metadata) ->
+    case erlang:function_exported(telemetry, execute, 3) of
+        true ->
+            apply(telemetry, execute, [Event, Measurements, Metadata]);
+        false ->
+            ok
+    end.

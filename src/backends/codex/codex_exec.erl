@@ -114,7 +114,7 @@ redact_data(Other) ->
 -spec idle(gen_statem:event_type(), term(), #data{}) ->
               state_callback_result().
 idle(enter, OldState, _Data) ->
-    beam_agent_telemetry_core:state_change(codex_exec, OldState, idle),
+    beam_agent_telemetry:state_change(codex_exec, OldState, idle),
     keep_state_and_data;
 idle({call, From}, {send_query, Prompt, Params}, Data) ->
     HookCtx =
@@ -184,10 +184,10 @@ idle({call, From}, _, _Data) ->
 -spec active_query(gen_statem:event_type(), term(), #data{}) ->
                       state_callback_result().
 active_query(enter, idle, _Data) ->
-    beam_agent_telemetry_core:state_change(codex_exec, idle, active_query),
+    beam_agent_telemetry:state_change(codex_exec, idle, active_query),
     keep_state_and_data;
 active_query(enter, OldState, _Data) ->
-    beam_agent_telemetry_core:state_change(codex_exec, OldState,
+    beam_agent_telemetry:state_change(codex_exec, OldState,
                                       active_query),
     keep_state_and_data;
 active_query(info,
@@ -258,7 +258,7 @@ active_query({call, From}, _, _Data) ->
 -spec error(gen_statem:event_type(), term(), #data{}) ->
                state_callback_result().
 error(enter, OldState, _Data) ->
-    beam_agent_telemetry_core:state_change(codex_exec, OldState, error),
+    beam_agent_telemetry:state_change(codex_exec, OldState, error),
     keep_state_and_data;
 error({call, From}, health, _Data) ->
     {keep_state_and_data, [{reply, From, error}]};
@@ -269,7 +269,7 @@ error({call, From}, _, _Data) ->
 do_exec_query(From, Prompt, Params, Data) ->
     Ref = make_ref(),
     StartTime =
-        beam_agent_telemetry_core:span_start(codex_exec, query,
+        beam_agent_telemetry:span_start(codex_exec, query,
                                         #{prompt_length => byte_size(Prompt)}),
     Model = maps:get(model, Params, Data#data.model),
     AP = maps:get(approval_policy, Params, Data#data.approval_policy),
@@ -289,7 +289,7 @@ do_exec_query(From, Prompt, Params, Data) ->
         {next_state, active_query, Data1, [{reply, From, {ok, Ref}}]}
     catch
         error:Reason ->
-            beam_agent_telemetry_core:span_exception(codex_exec, query,
+            beam_agent_telemetry:span_exception(codex_exec, query,
                                                 Reason),
             {keep_state_and_data,
              [{reply, From, {error, {open_port_failed, Reason}}}]}
@@ -425,10 +425,10 @@ fire_hook(Event, Context, #data{sdk_hook_registry = Registry}) ->
 maybe_span_stop(#data{query_start_time = undefined}) ->
     ok;
 maybe_span_stop(#data{query_start_time = StartTime}) ->
-    beam_agent_telemetry_core:span_stop(codex_exec, query, StartTime).
+    beam_agent_telemetry:span_stop(codex_exec, query, StartTime).
 -spec maybe_span_exception(#data{}, term()) -> ok.
 maybe_span_exception(#data{query_start_time = undefined}, _Reason) ->
     ok;
 maybe_span_exception(#data{query_start_time = _StartTime}, Reason) ->
-    beam_agent_telemetry_core:span_exception(codex_exec, query, Reason).
+    beam_agent_telemetry:span_exception(codex_exec, query, Reason).
 

@@ -633,7 +633,7 @@ safe_parse_sse(Bin, #hstate{sse_state = SseState,
     IncomingSize = byte_size(Bin),
     case CurrentSize + IncomingSize > BufferMax of
         true ->
-            beam_agent_telemetry_core:buffer_overflow(
+            beam_agent_telemetry:buffer_overflow(
                 CurrentSize + IncomingSize, BufferMax),
             {error, buffer_overflow};
         false ->

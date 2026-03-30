@@ -485,17 +485,17 @@ maybe_put(Key, Value, Map) ->
 
 -spec telemetry_start(policy_operation(), policy_start_meta()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(policy, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(policy, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(policy_operation(), integer(), policy_stop_meta()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(policy, Operation, StartTime,
+    beam_agent_telemetry:span_stop(policy, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(put_profile, {error, profile_error()},
     #{profile_id := binary(), rule_count := non_neg_integer()}) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(policy, Operation, Reason,
+    beam_agent_telemetry:span_exception(policy, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec compact_telemetry(#{

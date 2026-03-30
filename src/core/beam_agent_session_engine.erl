@@ -797,7 +797,7 @@ handle_send_query(From, Prompt, Params,
                 ok ->
                     Ref = make_ref(),
                     Backend = H:backend_name(),
-                    StartTime = beam_agent_telemetry_core:span_start(
+                    StartTime = beam_agent_telemetry:span_start(
                                     Backend, query,
                                     #{prompt_length => byte_size(Prompt)}),
                     Data1 = Data#engine{
@@ -890,7 +890,7 @@ handle_incoming_data(RawData, StateName,
     Combined = <<(Data#engine.buffer)/binary, RawData/binary>>,
     case byte_size(Combined) > Data#engine.buffer_max of
         true ->
-            beam_agent_telemetry_core:buffer_overflow(
+            beam_agent_telemetry:buffer_overflow(
                 byte_size(Combined), Data#engine.buffer_max),
             reply_consumer_error(buffer_overflow, Data),
             enter_error(buffer_overflow,
@@ -1028,7 +1028,7 @@ fire_state_enter(NewState, OldState,
         NewState -> undefined;  % gen_statem repeat_state
         Other    -> Other
     end,
-    beam_agent_telemetry_core:state_change(Backend, OldForTelemetry, NewState),
+    beam_agent_telemetry:state_change(Backend, OldForTelemetry, NewState),
     Data1 = case erlang:function_exported(H, on_state_enter, 3) of
         true ->
             {ok, Actions, HState1} =
@@ -1082,7 +1082,7 @@ maybe_span_stop(#engine{query_start_time = undefined}) ->
     ok;
 maybe_span_stop(#engine{handler_mod = H,
                          query_start_time = StartTime}) ->
-    beam_agent_telemetry_core:span_stop(H:backend_name(), query, StartTime).
+    beam_agent_telemetry:span_stop(H:backend_name(), query, StartTime).
 
 %%====================================================================
 %% Internal: reconnection logic
@@ -1222,7 +1222,7 @@ handle_transport_exit(Status, Data) ->
 maybe_span_exception(#engine{query_start_time = undefined}, _Reason) ->
     ok;
 maybe_span_exception(#engine{handler_mod = H}, Reason) ->
-    beam_agent_telemetry_core:span_exception(H:backend_name(), query, Reason).
+    beam_agent_telemetry:span_exception(H:backend_name(), query, Reason).
 
 %%====================================================================
 %% Internal: consumer management helpers

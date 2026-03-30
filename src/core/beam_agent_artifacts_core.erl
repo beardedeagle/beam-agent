@@ -915,17 +915,17 @@ artifact_summary(Artifact) ->
 
 -spec telemetry_start(artifact_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(artifact, Operation, compact_telemetry(Metadata)).
+    beam_agent_telemetry:span_start(artifact, Operation, compact_telemetry(Metadata)).
 
 -spec telemetry_stop(artifact_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(artifact, Operation, StartTime,
+    beam_agent_telemetry:span_stop(artifact, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(put | list | search | attach | delete, artifact_exception(), map()) ->
     ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(artifact, Operation, Reason,
+    beam_agent_telemetry:span_exception(artifact, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_scope_meta(scope()) -> map().

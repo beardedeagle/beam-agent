@@ -1320,19 +1320,19 @@ maybe_pair(Key, Value) ->
 
 -spec telemetry_start(orchestrator_operation(), map()) -> integer().
 telemetry_start(Operation, Metadata) ->
-    beam_agent_telemetry_core:span_start(orchestrator, Operation,
+    beam_agent_telemetry:span_start(orchestrator, Operation,
         compact_telemetry(Metadata)).
 
 -spec telemetry_stop(orchestrator_operation(), integer(), map()) -> ok.
 telemetry_stop(Operation, StartTime, Metadata) ->
-    beam_agent_telemetry_core:span_stop(orchestrator, Operation, StartTime,
+    beam_agent_telemetry:span_stop(orchestrator, Operation, StartTime,
         compact_telemetry(Metadata)).
 
 -spec telemetry_exception(orchestrator_operation(),
     {error, not_found | spawn_error() | collect_error()} | not_found | spawn_error() | collect_error(),
     map()) -> ok.
 telemetry_exception(Operation, Reason, Metadata) ->
-    beam_agent_telemetry_core:span_exception(orchestrator, Operation, Reason,
+    beam_agent_telemetry:span_exception(orchestrator, Operation, Reason,
         compact_telemetry(Metadata)).
 
 -spec telemetry_finish(await | collect | delegate | spawn | status, integer(),
