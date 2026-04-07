@@ -117,9 +117,18 @@ beam_agent_auth_core:login(claude, #{}, VaultEnv).
 ```
 """).
 
--spec from_vault([{string(), string()}]) -> vault_env().
+-spec from_vault([{string(), string()}]) -> vault_env() | no_return().
 from_vault(Vars) when is_list(Vars) ->
-    {vault_env, Vars}.
+    case lists:all(fun is_vault_env_entry/1, Vars) of
+        true  -> {vault_env, Vars};
+        false -> error({invalid_vault_env, Vars})
+    end;
+from_vault(Vars) ->
+    error({invalid_vault_env, Vars}).
+
+-spec is_vault_env_entry(term()) -> boolean().
+is_vault_env_entry({Key, Value}) when is_list(Key), is_list(Value) -> true;
+is_vault_env_entry(_) -> false.
 
 %%--------------------------------------------------------------------
 %% Default timeouts (milliseconds)

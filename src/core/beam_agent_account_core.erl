@@ -93,7 +93,10 @@ account_login(Session, Params) when is_map(Params) ->
     ProviderId = maps:get(provider_id, Params, undefined),
     %% Strip secret fields before persisting in ETS — api_key, tokens,
     %% and credentials must not linger in process-accessible storage.
-    SafeParams = maps:without([api_key, token, secret, password], Params),
+    %% Uses beam_agent_redaction:is_sensitive/1 as the canonical sensitive-key
+    %% check so new sensitive keys are automatically excluded.
+    SafeParams = maps:filter(
+        fun(K, _V) -> not beam_agent_redaction:is_sensitive(K) end, Params),
     State0 = #{
         session      => Session,
         status       => login_pending,
