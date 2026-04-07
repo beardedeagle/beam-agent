@@ -219,8 +219,16 @@ auth_status(Session) ->
     ensure_tables(),
     Key = beam_agent_ets:session_key(Session),
     case ets:lookup(?TABLE, {account, Key}) of
-        [{_, State}] ->
+        [{_, #{status := Status} = State}]
+          when Status =/= login_pending, Status =/= unknown ->
             {ok, State};
+        [{_, State}] ->
+            %% Transient states (login_pending, unknown) — re-probe the
+            %% backend only when resolvable, otherwise keep cached state.
+            case resolve_session_backend(Session) of
+                {ok, _} -> probe_and_cache_auth(Session);
+                {error, _} -> {ok, State}
+            end;
         [] ->
             probe_and_cache_auth(Session)
     end.

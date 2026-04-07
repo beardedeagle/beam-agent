@@ -1435,7 +1435,7 @@ via `open_pty_port/3`.
 strip_ansi(Bin) ->
     re:replace(Bin,
                %% CSI: \e[ params final-byte
-               "\\x1b\\[[0-9;]*[A-Za-z]"
+               "\\x1b\\[[0-9;]*[\\x40-\\x7E]"
                "|\\x1b\\][^\\x07\\x1b]*(?:\\x1b\\\\|\\x07)"
                "|\\x1b[P_^X][^\\x07\\x1b]*(?:\\x1b\\\\|\\x07)?"
                "|\\x1b."
