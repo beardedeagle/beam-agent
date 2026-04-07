@@ -25,11 +25,13 @@
 %% Authentication state stored per session in ETS.
 -type auth_state() :: #{
     session      := pid() | binary(),
-    status       := logged_in | logged_out | login_pending | login_cancelled,
+    status       := logged_in | logged_out | login_pending | login_cancelled | unknown,
+    source       => cli | api | env | manual | inferred | unavailable,
     provider_id  => binary(),
     login_params => map(),
     logged_in_at => integer(),
-    logged_out_at => integer()
+    logged_out_at => integer(),
+    details      => map()
 }.
 
 %% ETS table name.
@@ -71,38 +73,77 @@ clear_session(Session) ->
 Initiate a login flow for a session.
 
 Records login parameters and provider id (extracted from `Params` if present).
-Since this is a universal fallback with no real OAuth flow, the session
-transitions directly to `logged_in` to indicate it is authenticated via
-the backend's own transport mechanism.
+Attempts real CLI authentication via `beam_agent_auth_core` when the
+session's backend can be resolved.  Falls back to recording `login_pending`
+when the backend is unknown — callers should check `auth_status/1` after
+the transport connects.
 
-Returns `{ok, #{status => logged_in, provider_id => ProviderId}}`.
+Returns `{ok, #{status := logged_in | login_pending, ...}}`.
 """.
 -spec account_login(pid() | binary(), map()) ->
-    {ok, #{status := logged_in, provider_id => binary()}}.
+    {ok, #{status := logged_in | login_pending, provider_id => binary()}} |
+    {error, login_failed | timeout |
+            {login_failed, binary()} |
+            {opencode_unreachable, term()} |
+            {port_error, term()} |
+            {api_key_required, opencode}}.
 account_login(Session, Params) when is_map(Params) ->
     ensure_tables(),
-    Now = erlang:system_time(millisecond),
     ProviderId = maps:get(provider_id, Params, undefined),
+    %% Strip secret fields before persisting in ETS — api_key, tokens,
+    %% and credentials must not linger in process-accessible storage.
+    %% Uses beam_agent_redaction:is_sensitive/1 as the canonical sensitive-key
+    %% check so new sensitive keys are automatically excluded.
+    SafeParams = maps:filter(
+        fun(K, _V) -> not beam_agent_redaction:is_sensitive(K) end, Params),
     State0 = #{
         session      => Session,
         status       => login_pending,
-        login_params => Params,
-        logged_in_at => Now
+        login_params => SafeParams
     },
     State1 = case ProviderId of
         undefined -> State0;
         Id when is_binary(Id) -> State0#{provider_id => Id}
     end,
-    %% Transition immediately to logged_in: universal fallback has no
-    %% real OAuth handshake; the transport connection is the credential.
-    State2 = State1#{status => logged_in},
-    put_auth_state(Session, State2),
-    Result = #{status => logged_in},
-    Result2 = case ProviderId of
-        undefined -> Result;
-        Id2 when is_binary(Id2) -> Result#{provider_id => Id2}
-    end,
-    {ok, Result2}.
+    put_auth_state(Session, State1),
+    %% Attempt real CLI auth when the backend is resolvable.
+    case resolve_session_backend(Session) of
+        {ok, Backend} ->
+            AuthOpts = login_opts_from_params(Params),
+            LoginResult =
+                try beam_agent_auth_core:login(Backend, AuthOpts)
+                catch error:LoginErr -> {error, LoginErr}
+                end,
+            case LoginResult of
+                {ok, #{outcome := authenticated} = AuthResult} ->
+                    State2 = State1#{status => logged_in,
+                                     source => maps:get(method, AuthResult, cli),
+                                     logged_in_at => erlang:system_time(millisecond)},
+                    put_auth_state(Session, State2),
+                    {ok, maybe_add_provider(#{status => logged_in}, ProviderId)};
+                {ok, #{outcome := pending}} ->
+                    %% Device/OAuth flow started but not completed
+                    {ok, maybe_add_provider(#{status => login_pending}, ProviderId)};
+                {ok, #{outcome := failed, message := Msg}} ->
+                    put_auth_state(Session, State1#{status => unknown}),
+                    {error, {login_failed, Msg}};
+                {ok, #{outcome := failed}} ->
+                    put_auth_state(Session, State1#{status => unknown}),
+                    {error, login_failed};
+                {error, {not_supported, _, _, _}} ->
+                    %% Backend has no CLI login (e.g. gemini) — stay pending
+                    {ok, maybe_add_provider(#{status => login_pending}, ProviderId)};
+                {error, {cli_not_found, _}} ->
+                    %% CLI not installed — stay pending, transport is credential
+                    {ok, maybe_add_provider(#{status => login_pending}, ProviderId)};
+                {error, Reason} ->
+                    put_auth_state(Session, State1#{status => unknown}),
+                    {error, Reason}
+            end;
+        {error, _} ->
+            %% Cannot resolve backend — record pending, transport is credential
+            {ok, maybe_add_provider(#{status => login_pending}, ProviderId)}
+    end.
 
 -doc """
 Cancel a pending login for a session.
@@ -125,18 +166,41 @@ account_login_cancel(Session, Params) when is_map(Params) ->
 -doc """
 Log out a session.
 
-Sets status to `logged_out` with a `logged_out_at` timestamp.
-Clears `logged_in_at` from the stored state.
+Attempts real CLI logout via `beam_agent_auth_core` when the session's
+backend can be resolved.  Always records `logged_out` in ETS regardless
+of whether the CLI call succeeds — the session state is authoritative.
 """.
 -spec account_logout(pid() | binary()) ->
     {ok, #{status := logged_out}}.
 account_logout(Session) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    Existing = get_auth_state(Session),
-    Updated = (maps:without([logged_in_at], Existing))#{
+    %% Retrieve stored login params to pass relevant opts through to logout
+    %% (e.g. base_url for OpenCode, cli_path for custom binary locations).
+    Existing0 = get_auth_state(Session),
+    LogoutOpts = login_opts_from_params(maps:get(login_params, Existing0, #{})),
+    %% Best-effort real CLI logout — track whether CLI actually ran
+    %% so `source` accurately reflects the logout method.
+    Source =
+        case resolve_session_backend(Session) of
+            {ok, Backend} ->
+                case beam_agent_auth_core:logout(Backend, LogoutOpts) of
+                    ok ->
+                        logout_source(Backend);
+                    {error, {cli_not_found, _}} ->
+                        unavailable;
+                    {error, Reason} ->
+                        logger:warning("Logout failed for ~p: ~tp",
+                                       [Backend, Reason]),
+                        logout_source(Backend)
+                end;
+            {error, _} ->
+                unavailable
+        end,
+    Updated = (maps:without([logged_in_at], Existing0))#{
         session       => Session,
         status        => logged_out,
+        source        => Source,
         logged_out_at => Now
     },
     put_auth_state(Session, Updated),
@@ -149,15 +213,29 @@ account_logout(Session) ->
 -doc """
 Return the current authentication status for a session.
 
-If no entry exists for the session, returns
-`{ok, #{status => logged_in, source => inferred}}` — sessions are
-authenticated by default because the underlying transport connection
-itself serves as the credential.
+When the session has a cached auth state in ETS, returns that directly.
+Otherwise, attempts a real CLI auth check via `beam_agent_auth_core:status/2`
+and caches the result.  Returns `#{status => unknown}` when neither the
+cache nor the CLI check can determine the state.
 """.
 -spec auth_status(pid() | binary()) -> {ok, auth_state()}.
 auth_status(Session) ->
     ensure_tables(),
-    {ok, get_auth_state(Session)}.
+    Key = beam_agent_ets:session_key(Session),
+    case ets:lookup(?TABLE, {account, Key}) of
+        [{_, #{status := Status} = State}]
+          when Status =/= login_pending, Status =/= unknown ->
+            {ok, State};
+        [{_, State}] ->
+            %% Transient states (login_pending, unknown) — re-probe the
+            %% backend only when resolvable, otherwise keep cached state.
+            case resolve_session_backend(Session) of
+                {ok, _} -> probe_and_cache_auth(Session);
+                {error, _} -> {ok, State}
+            end;
+        [] ->
+            probe_and_cache_auth(Session)
+    end.
 
 -doc """
 Return rate limit information for a session.
@@ -186,8 +264,8 @@ account_info(Session) ->
 %% Internal Helpers
 %%--------------------------------------------------------------------
 
-%% Look up auth state from ETS. Returns a default inferred state when
-%% no entry is present.
+%% Look up auth state from ETS. Returns a default state when no entry
+%% is present — used only by internal functions that don't need CLI probing.
 -spec get_auth_state(pid() | binary()) -> auth_state().
 get_auth_state(Session) ->
     Key = beam_agent_ets:session_key(Session),
@@ -195,9 +273,7 @@ get_auth_state(Session) ->
         [{_, State}] ->
             State;
         [] ->
-            %% Default: sessions are authenticated by virtue of the
-            %% transport being connected.
-            #{session => Session, status => logged_in, source => inferred}
+            #{session => Session, status => unknown, source => unavailable}
     end.
 
 %% Insert or replace the auth state for a session.
@@ -206,3 +282,93 @@ put_auth_state(Session, State) ->
     Key = beam_agent_ets:session_key(Session),
     beam_agent_ets:insert(?TABLE, {{account, Key}, State}),
     ok.
+
+%% Probe real CLI auth and cache the result in ETS.
+-spec probe_and_cache_auth(pid() | binary()) ->
+    {ok, #{session := pid() | binary(),
+           status  := logged_in | logged_out | unknown,
+           source  := cli | api | env | manual | unavailable,
+           details => #{authenticated := boolean(),
+                        backend => beam_agent_backend:backend(),
+                        method => api | cli | env | manual}}}.
+probe_and_cache_auth(Session) ->
+    case resolve_session_backend(Session) of
+        {ok, Backend} ->
+            Cached = get_auth_state(Session),
+            StatusOpts = login_opts_from_params(
+                maps:get(login_params, Cached, #{})),
+            StatusResult =
+                try beam_agent_auth_core:status(Backend, StatusOpts)
+                catch error:Reason2 -> {error, Reason2}
+                end,
+            case StatusResult of
+                {ok, #{authenticated := true} = Details} ->
+                    SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
+                    Source = auth_source_from_details(Details),
+                    State = #{session => Session, status => logged_in,
+                              source => Source, details => SafeDetails},
+                    put_auth_state(Session, State),
+                    {ok, State};
+                {ok, #{authenticated := false} = Details} ->
+                    SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
+                    Source = auth_source_from_details(Details),
+                    State = #{session => Session, status => logged_out,
+                              source => Source, details => SafeDetails},
+                    put_auth_state(Session, State),
+                    {ok, State};
+                {error, {cli_not_found, _}} ->
+                    %% CLI not installed — cannot determine, don't cache
+                    {ok, #{session => Session, status => unknown,
+                           source => unavailable}};
+                {error, _} ->
+                    {ok, #{session => Session, status => unknown,
+                           source => unavailable}}
+            end;
+        {error, _} ->
+            {ok, #{session => Session, status => unknown,
+                   source => unavailable}}
+    end.
+
+%% Resolve the backend for a session, if possible.
+-spec resolve_session_backend(pid() | binary()) ->
+    {ok, beam_agent_backend:backend()} | {error, term()}.
+resolve_session_backend(Session) ->
+    beam_agent_backend:session_backend(Session).
+
+%% Extract auth options from login Params (api_key, env, etc).
+-spec login_opts_from_params(map()) -> beam_agent_auth_core:auth_opts().
+login_opts_from_params(Params) ->
+    lists:foldl(fun({ParamKey, OptKey}, Acc) ->
+        case maps:get(ParamKey, Params, undefined) of
+            undefined -> Acc;
+            Value     -> Acc#{OptKey => Value}
+        end
+    end, #{}, [
+        {api_key, api_key},
+        {cli_path, cli_path},
+        {timeout, timeout},
+        {base_url, base_url}
+    ]).
+
+%% Map the auth method from beam_agent_auth_core:status/2 to an account source.
+-spec auth_source_from_details(#{authenticated := boolean(),
+                                  backend := beam_agent_backend:backend(),
+                                  method := api | cli | env | manual,
+                                  _ => _}) ->
+    api | cli | env | manual.
+auth_source_from_details(#{method := api})    -> api;
+auth_source_from_details(#{method := env})    -> env;
+auth_source_from_details(#{method := manual}) -> manual;
+auth_source_from_details(#{method := cli})    -> cli.
+
+%% Map a backend to the source that describes how its logout is performed.
+-spec logout_source(beam_agent_backend:backend()) -> cli | api | manual.
+logout_source(opencode) -> api;
+logout_source(gemini)   -> manual;
+logout_source(_)        -> cli.
+
+%% Add provider_id to a result map when present.
+-spec maybe_add_provider(#{status := logged_in | login_pending}, binary() | undefined) ->
+    #{status := logged_in | login_pending, provider_id => binary()}.
+maybe_add_provider(Result, undefined) -> Result;
+maybe_add_provider(Result, Id) when is_binary(Id) -> Result#{provider_id => Id}.

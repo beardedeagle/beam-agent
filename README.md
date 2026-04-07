@@ -198,7 +198,7 @@ capability families through domain modules (`beam_agent_session_store`,
 `beam_agent_context`, `beam_agent_journal`, `beam_agent_memory`,
 `beam_agent_orchestrator`, `beam_agent_routing`, `beam_agent_routines`,
 `beam_agent_checkpoint`, `beam_agent_hooks`, `beam_agent_policy`, `beam_agent_runs`,
-`beam_agent_telemetry`).
+`beam_agent_telemetry`, `beam_agent_auth`).
 Their status and route shape for each
 backend/capability pair are tracked via
 `support_level`, `implementation`, and `fidelity` in the capability registry.
@@ -357,6 +357,48 @@ for domain configuration and DETS helpers.
 
 For a domain-by-domain explanation of ownership, storage, and process
 boundaries, see [docs/guides/canonical_domain_guide.md](docs/guides/canonical_domain_guide.md).
+
+Session-independent authentication — `beam_agent_auth` / `BeamAgent.Auth`:
+
+```erlang
+%% Check if a backend is authenticated (no running session required)
+beam_agent_auth:status(claude)                    -> {ok, #{authenticated := true, ...}}
+beam_agent_auth:status(gemini, #{timeout => 5000})-> {ok, #{authenticated := false, ...}}
+
+%% Establish credentials (interactive flows block until browser auth completes)
+beam_agent_auth:login(codex, #{api_key => <<"sk-...">>}) -> {ok, #{outcome := authenticated, ...}}
+beam_agent_auth:login(copilot)                           -> {ok, #{outcome := authenticated, ...}}
+
+%% Vault-sourced env vars bypass the allowlist (provenance-based trust)
+VaultEnv = beam_agent_auth:from_vault([{"ANTHROPIC_BASE_URL", "https://custom"}]),
+beam_agent_auth:login(claude, #{}, VaultEnv)
+
+%% Revoke credentials
+beam_agent_auth:logout(claude)                    -> ok
+
+%% Strip sensitive fields before exposing results to the agent
+{ok, Status} = beam_agent_auth:status(claude),
+Safe = beam_agent_auth:sanitize_for_agent(Status)
+```
+
+**Security hardening** — defense-in-depth against the agent itself:
+
+- **CLI path allowlist** — `cli_path` overrides are validated against canonical
+  binary names per backend.  The agent cannot execute arbitrary binaries.
+- **Environment variable allowlist** — only backend-specific credential variables
+  are permitted.  The `env` option is not part of the public API.  Vault-sourced
+  variables bypass the allowlist via `login/3` with an opaque `vault_env()` token
+  that only `from_vault/1` can construct (provenance-based trust).
+- **Inherited environment scrubbing** — spawned CLI processes have `LD_PRELOAD`,
+  `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, and other injection vectors
+  explicitly removed from the inherited environment.
+- **SSRF protection** — OpenCode `base_url` is restricted to localhost only.
+- **Symlink-aware safety checks** — symlink chains are fully resolved before
+  checking file type, permissions, and parent directory writability.
+- **Secret redaction** — API keys are passed via env vars, never CLI args.
+  Log output is redacted to prevent secret leakage.
+- **Agent output sanitization** — `sanitize_for_agent/1` strips `raw_output`,
+  `details`, and `oauth_url` from auth results before they reach the agent.
 
 ## Unified Message Format
 

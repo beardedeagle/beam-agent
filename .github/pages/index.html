@@ -496,39 +496,44 @@
     </p>
     <div class="features">
       <div class="feature">
-        <div class="feature-icon">&#9881;</div>
+        <div class="feature-icon" aria-hidden="true">&#9881;</div>
         <h3>OTP Supervision</h3>
         <p>Each agent session is a supervised gen_statem. Crashes are isolated and recoverable.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#9889;</div>
+        <div class="feature-icon" aria-hidden="true">&#9889;</div>
         <h3>Telemetry</h3>
         <p>State changes, queries, buffer overflows &mdash; optionally instrumented via :telemetry (zero overhead when absent).</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128274;</div>
+        <div class="feature-icon" aria-hidden="true">&#128274;</div>
         <h3>Fail-Closed Permissions</h3>
         <p>Permission handlers default to deny. Explicit opt-in for tool execution and file access.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128268;</div>
+        <div class="feature-icon" aria-hidden="true">&#128268;</div>
         <h3>MCP Servers</h3>
         <p>Define custom tools as Erlang functions. In-process MCP server registry with SDK integration.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128203;</div>
+        <div class="feature-icon" aria-hidden="true">&#128203;</div>
         <h3>Universal API</h3>
         <p>Threads, checkpoints, session store, and control protocol &mdash; available on every adapter.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#128257;</div>
+        <div class="feature-icon" aria-hidden="true">&#128257;</div>
         <h3>Content Blocks</h3>
         <p>Bidirectional conversion between messages and typed content blocks across all protocols.</p>
       </div>
       <div class="feature">
-        <div class="feature-icon">&#9888;</div>
+        <div class="feature-icon" aria-hidden="true">&#9888;</div>
         <h3>Error Categorization</h3>
         <p>Structured error categories (rate_limit, subscription_exhausted, context_exceeded, auth_expired, server_error, unknown) on every error message &mdash; pattern match, don&rsquo;t parse.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon" aria-hidden="true">&#128273;</div>
+        <h3>Session-Independent Auth</h3>
+        <p>Check, establish, and revoke backend credentials without a running session. Backend-appropriate auth flows across all five backends, including CLI, PTY-interactive, and REST-based implementations depending on the adapter. Defense-in-depth security: CLI path allowlist, environment variable allowlist, inherited environment scrubbing (LD_PRELOAD, DYLD_INSERT_LIBRARIES), SSRF-protected HTTP calls, symlink-aware safety checks, opaque vault_env type for provenance-based trust, and agent output sanitization that strips raw CLI output, OAuth URLs, and internal details before results reach the agent.</p>
       </div>
     </div>
   </section>
