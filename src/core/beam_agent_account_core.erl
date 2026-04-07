@@ -186,9 +186,9 @@ account_logout(Session) ->
                     {error, {cli_not_found, _}} ->
                         unavailable;
                     {error, Reason} ->
-                        logger:warning("CLI logout failed for ~p: ~tp",
+                        logger:warning("Logout failed for ~p: ~tp",
                                        [Backend, Reason]),
-                        cli
+                        logout_source(Backend)
                 end;
             {error, _} ->
                 unavailable

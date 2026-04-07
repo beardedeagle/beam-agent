@@ -117,18 +117,31 @@ beam_agent_auth_core:login(claude, #{}, VaultEnv).
 ```
 """).
 
--spec from_vault([{string(), string()}]) -> vault_env() | no_return().
+-spec from_vault([{string() | binary(), string() | binary()}]) ->
+    vault_env() | no_return().
 from_vault(Vars) when is_list(Vars) ->
     case lists:all(fun is_vault_env_entry/1, Vars) of
-        true  -> {vault_env, Vars};
+        true  -> {vault_env, lists:map(fun normalize_vault_entry/1, Vars)};
         false -> error({invalid_vault_env, Vars})
     end;
 from_vault(Vars) ->
     error({invalid_vault_env, Vars}).
 
 -spec is_vault_env_entry(term()) -> boolean().
-is_vault_env_entry({Key, Value}) when is_list(Key), is_list(Value) -> true;
+is_vault_env_entry({Key, Value})
+  when (is_list(Key) orelse is_binary(Key)),
+       (is_list(Value) orelse is_binary(Value)) -> true;
 is_vault_env_entry(_) -> false.
+
+%% Normalize vault env entries to charlists for open_port's {env, Env}.
+-spec normalize_vault_entry({string() | binary(), string() | binary()}) ->
+    {string(), string()}.
+normalize_vault_entry({Key, Value}) ->
+    {ensure_list(Key), ensure_list(Value)}.
+
+-spec ensure_list(string() | binary()) -> string().
+ensure_list(V) when is_list(V)   -> V;
+ensure_list(V) when is_binary(V) -> binary_to_list(V).
 
 %%--------------------------------------------------------------------
 %% Default timeouts (milliseconds)
@@ -921,9 +934,10 @@ validate_env(Env) ->
             error({disallowed_env_var,
                    Bad,
                    <<"Only backend-specific credential variables "
-                     "are permitted.  The env option is not part "
-                     "of the public API — environment variables "
-                     "are set internally by per-backend functions.">>})
+                     "may be added to the child environment.  "
+                     "Note: open_port merges these with the inherited "
+                     "parent environment — this check constrains only "
+                     "the variables set explicitly by this module.">>})
     end.
 
 %% Merge caller-supplied env vars with explicit removal of dangerous
