@@ -3,13 +3,14 @@
 %%%
 %%% Tests cover:
 %%%   - Table lifecycle (ensure_tables, clear)
-%%%   - auth_status: default inferred state for unknown sessions
-%%%   - account_login: sets logged_in, optional provider_id
+%%%   - auth_status: default unknown state for unresolvable sessions
+%%%   - account_login: sets login_pending when backend unresolvable
 %%%   - account_login_cancel: sets login_cancelled
-%%%   - account_logout: sets logged_out
+%%%   - account_logout: sets logged_out with CLI source
 %%%   - rate_limits: always empty universal
 %%%   - account_info: combined auth + rate_limits
 %%%   - Login flow: login -> verify -> logout -> verify
+%%%   - clear_session: removes per-session auth state
 %%% @end
 %%%-------------------------------------------------------------------
 -module(beam_agent_account_core_tests).
@@ -30,27 +31,26 @@ clear_removes_data_test() ->
     beam_agent_account_core:ensure_tables(),
     beam_agent_account_core:clear(),
     S = <<"acct_clear">>,
+    %% Login stores state (login_pending — no backend resolvable in test)
     {ok, _} = beam_agent_account_core:account_login(S, #{}),
     {ok, Auth1} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth1)),
-    %% source should NOT be inferred after explicit login
-    ?assertEqual(error, maps:find(source, Auth1)),
+    ?assertEqual(login_pending, maps:get(status, Auth1)),
     ok = beam_agent_account_core:clear(),
-    %% After clear, falls back to inferred default
+    %% After clear, falls back to unknown/unavailable default
     {ok, Auth2} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth2)),
-    ?assertEqual(inferred, maps:get(source, Auth2)).
+    ?assertEqual(unknown, maps:get(status, Auth2)),
+    ?assertEqual(unavailable, maps:get(source, Auth2)).
 
 %%====================================================================
 %% auth_status tests
 %%====================================================================
 
-auth_status_default_inferred_test() ->
+auth_status_default_unknown_test() ->
     beam_agent_account_core:ensure_tables(),
     beam_agent_account_core:clear(),
     {ok, State} = beam_agent_account_core:auth_status(<<"acct_unknown">>),
-    ?assertEqual(logged_in, maps:get(status, State)),
-    ?assertEqual(inferred, maps:get(source, State)),
+    ?assertEqual(unknown, maps:get(status, State)),
+    ?assertEqual(unavailable, maps:get(source, State)),
     ?assertEqual(<<"acct_unknown">>, maps:get(session, State)).
 
 %%====================================================================
@@ -60,8 +60,9 @@ auth_status_default_inferred_test() ->
 account_login_basic_test() ->
     beam_agent_account_core:ensure_tables(),
     beam_agent_account_core:clear(),
+    %% No backend resolvable in test — returns login_pending
     {ok, Result} = beam_agent_account_core:account_login(<<"acct_login">>, #{}),
-    ?assertEqual(logged_in, maps:get(status, Result)),
+    ?assertEqual(login_pending, maps:get(status, Result)),
     %% No provider_id when none given
     ?assertEqual(error, maps:find(provider_id, Result)).
 
@@ -70,7 +71,7 @@ account_login_with_provider_id_test() ->
     beam_agent_account_core:clear(),
     Params = #{provider_id => <<"github_123">>},
     {ok, Result} = beam_agent_account_core:account_login(<<"acct_login_pid">>, Params),
-    ?assertEqual(logged_in, maps:get(status, Result)),
+    ?assertEqual(login_pending, maps:get(status, Result)),
     ?assertEqual(<<"github_123">>, maps:get(provider_id, Result)).
 
 account_login_stores_state_test() ->
@@ -80,9 +81,8 @@ account_login_stores_state_test() ->
     Params = #{provider_id => <<"prov_1">>},
     {ok, _} = beam_agent_account_core:account_login(S, Params),
     {ok, Auth} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth)),
+    ?assertEqual(login_pending, maps:get(status, Auth)),
     ?assertEqual(<<"prov_1">>, maps:get(provider_id, Auth)),
-    ?assert(is_integer(maps:get(logged_in_at, Auth))),
     ?assertEqual(Params, maps:get(login_params, Auth)).
 
 %%====================================================================
@@ -127,6 +127,7 @@ account_logout_stores_state_test() ->
     {ok, _} = beam_agent_account_core:account_logout(S),
     {ok, Auth} = beam_agent_account_core:auth_status(S),
     ?assertEqual(logged_out, maps:get(status, Auth)),
+    ?assertEqual(cli, maps:get(source, Auth)),
     ?assert(is_integer(maps:get(logged_out_at, Auth))),
     %% logged_in_at should be removed
     ?assertEqual(error, maps:find(logged_in_at, Auth)).
@@ -152,9 +153,9 @@ account_info_combines_auth_and_rate_limits_test() ->
     S = <<"acct_info">>,
     {ok, _} = beam_agent_account_core:account_login(S, #{provider_id => <<"pi">>}),
     {ok, Info} = beam_agent_account_core:account_info(S),
-    %% Auth portion
+    %% Auth portion — login_pending since no backend resolvable
     Auth = maps:get(auth, Info),
-    ?assertEqual(logged_in, maps:get(status, Auth)),
+    ?assertEqual(login_pending, maps:get(status, Auth)),
     ?assertEqual(<<"pi">>, maps:get(provider_id, Auth)),
     %% Rate limits portion
     RL = maps:get(rate_limits, Info),
@@ -166,8 +167,8 @@ account_info_default_session_test() ->
     beam_agent_account_core:clear(),
     {ok, Info} = beam_agent_account_core:account_info(<<"acct_info_default">>),
     Auth = maps:get(auth, Info),
-    ?assertEqual(logged_in, maps:get(status, Auth)),
-    ?assertEqual(inferred, maps:get(source, Auth)).
+    ?assertEqual(unknown, maps:get(status, Auth)),
+    ?assertEqual(unavailable, maps:get(source, Auth)).
 
 %%====================================================================
 %% Login flow integration tests
@@ -177,22 +178,21 @@ login_then_logout_flow_test() ->
     beam_agent_account_core:ensure_tables(),
     beam_agent_account_core:clear(),
     S = <<"acct_flow">>,
-    %% Before login: inferred logged_in
+    %% Before login: unknown (no backend resolvable)
     {ok, Auth0} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth0)),
-    ?assertEqual(inferred, maps:get(source, Auth0)),
-    %% Login
+    ?assertEqual(unknown, maps:get(status, Auth0)),
+    ?assertEqual(unavailable, maps:get(source, Auth0)),
+    %% Login — pending since no backend
     {ok, _} = beam_agent_account_core:account_login(S, #{provider_id => <<"gh">>}),
     {ok, Auth1} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth1)),
-    ?assertEqual(error, maps:find(source, Auth1)),
+    ?assertEqual(login_pending, maps:get(status, Auth1)),
     %% Logout
     {ok, _} = beam_agent_account_core:account_logout(S),
     {ok, Auth2} = beam_agent_account_core:auth_status(S),
     ?assertEqual(logged_out, maps:get(status, Auth2)).
 
 %%====================================================================
-%% L9: clear_session/1
+%% clear_session/1
 %%====================================================================
 
 clear_session_removes_entry_test() ->
@@ -201,12 +201,11 @@ clear_session_removes_entry_test() ->
     S = <<"acct_clear_session">>,
     {ok, _} = beam_agent_account_core:account_login(S, #{provider_id => <<"gh">>}),
     {ok, Auth1} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(logged_in, maps:get(status, Auth1)),
-    ?assertEqual(error, maps:find(source, Auth1)),
+    ?assertEqual(login_pending, maps:get(status, Auth1)),
     ok = beam_agent_account_core:clear_session(S),
-    %% After clear_session the entry is gone; auth_status returns inferred default
+    %% After clear_session the entry is gone; auth_status returns unknown default
     {ok, Auth2} = beam_agent_account_core:auth_status(S),
-    ?assertEqual(inferred, maps:get(source, Auth2)),
+    ?assertEqual(unavailable, maps:get(source, Auth2)),
     beam_agent_account_core:clear().
 
 clear_session_nonexistent_is_ok_test() ->
@@ -220,8 +219,8 @@ clear_session_pid_removes_entry_test() ->
     Pid = self(),
     {ok, _} = beam_agent_account_core:account_login(Pid, #{}),
     {ok, Auth1} = beam_agent_account_core:auth_status(Pid),
-    ?assertEqual(logged_in, maps:get(status, Auth1)),
+    ?assertEqual(login_pending, maps:get(status, Auth1)),
     ok = beam_agent_account_core:clear_session(Pid),
     {ok, Auth2} = beam_agent_account_core:auth_status(Pid),
-    ?assertEqual(inferred, maps:get(source, Auth2)),
+    ?assertEqual(unavailable, maps:get(source, Auth2)),
     beam_agent_account_core:clear().
