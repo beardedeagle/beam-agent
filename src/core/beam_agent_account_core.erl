@@ -111,9 +111,9 @@ account_login(Session, Params) when is_map(Params) ->
         {ok, Backend} ->
             AuthOpts = login_opts_from_params(Params),
             case beam_agent_auth_core:login(Backend, AuthOpts) of
-                {ok, #{outcome := authenticated}} ->
+                {ok, #{outcome := authenticated} = AuthResult} ->
                     State2 = State1#{status => logged_in,
-                                     source => cli,
+                                     source => maps:get(method, AuthResult, cli),
                                      logged_in_at => erlang:system_time(millisecond)},
                     put_auth_state(Session, State2),
                     {ok, maybe_add_provider(#{status => logged_in}, ProviderId)};
@@ -182,7 +182,7 @@ account_logout(Session) ->
             {ok, Backend} ->
                 case beam_agent_auth_core:logout(Backend, LogoutOpts) of
                     ok ->
-                        cli;
+                        logout_source(Backend);
                     {error, {cli_not_found, _}} ->
                         unavailable;
                     {error, Reason} ->
@@ -349,6 +349,12 @@ auth_source_from_details(#{method := api})    -> api;
 auth_source_from_details(#{method := env})    -> env;
 auth_source_from_details(#{method := manual}) -> manual;
 auth_source_from_details(#{method := cli})    -> cli.
+
+%% Map a backend to the source that describes how its logout is performed.
+-spec logout_source(beam_agent_backend:backend()) -> cli | api | manual.
+logout_source(opencode) -> api;
+logout_source(gemini)   -> manual;
+logout_source(_)        -> cli.
 
 %% Add provider_id to a result map when present.
 -spec maybe_add_provider(#{status := logged_in | login_pending}, binary() | undefined) ->

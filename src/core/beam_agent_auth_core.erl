@@ -1163,7 +1163,9 @@ stream_hash(Fd, Ctx) ->
         eof ->
             Digest = crypto:hash_final(Ctx),
             HexDigest = binary:encode_hex(Digest, lowercase),
-            <<"sha256:", HexDigest/binary>>
+            <<"sha256:", HexDigest/binary>>;
+        {error, Reason} ->
+            error({executable_read_failed, Reason})
     end.
 
 -doc("Compute the SHA-256 hash of an executable.\n\nReturns a binary in the format `<<\"sha256:hexdigest\">>`.  Useful for\nout-of-band integrity verification (startup checks, monitoring,\ndeployment validation).\n\n```erlang\nHash = beam_agent_auth_core:hash_executable(\"/usr/local/bin/claude\"),\n%% => <<\"sha256:a1b2c3d4e5f6...\">>\n```").
