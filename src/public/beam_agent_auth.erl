@@ -87,7 +87,7 @@ Check the current authentication state for a backend with options.
 Options:
   - `cli_path` — override the CLI binary location
   - `timeout`  — override the default 10 s timeout
-  - `base_url` — OpenCode server URL (default `http://localhost:4096`)
+  - `base_url` — OpenCode server URL (localhost only, default `http://localhost:4096`)
 
 ```erlang
 {ok, #{authenticated := Auth}} = beam_agent_auth:status(claude).
@@ -120,6 +120,7 @@ Options:
   - `cli_path` — override the CLI binary location (basename must match
                   the canonical binary name for the backend)
   - `timeout`  — override the default 5 min timeout
+  - `base_url` — override the local OpenCode server base URL (localhost only)
 
 ```erlang
 %% Non-interactive with API key
@@ -177,6 +178,7 @@ Revoke or clear credentials for a backend with options.
 Options:
   - `cli_path` — override the CLI binary location
   - `timeout`  — override the default 10 s timeout
+  - `base_url` — override the local OpenCode server base URL (localhost only)
 
 ```erlang
 ok = beam_agent_auth:logout(claude).

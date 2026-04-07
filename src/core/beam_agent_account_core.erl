@@ -122,8 +122,10 @@ account_login(Session, Params) when is_map(Params) ->
                     %% Device/OAuth flow started but not completed
                     {ok, maybe_add_provider(#{status => login_pending}, ProviderId)};
                 {ok, #{outcome := failed, message := Msg}} ->
+                    put_auth_state(Session, State1#{status => unknown}),
                     {error, {login_failed, Msg}};
                 {ok, #{outcome := failed}} ->
+                    put_auth_state(Session, State1#{status => unknown}),
                     {error, login_failed};
                 {error, {not_supported, _, _, _}} ->
                     %% Backend has no CLI login (e.g. gemini) — stay pending
@@ -132,6 +134,7 @@ account_login(Session, Params) when is_map(Params) ->
                     %% CLI not installed — stay pending, transport is credential
                     {ok, maybe_add_provider(#{status => login_pending}, ProviderId)};
                 {error, Reason} ->
+                    put_auth_state(Session, State1#{status => unknown}),
                     {error, Reason}
             end;
         {error, _} ->
@@ -169,12 +172,16 @@ of whether the CLI call succeeds — the session state is authoritative.
 account_logout(Session) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
+    %% Retrieve stored login params to pass relevant opts through to logout
+    %% (e.g. base_url for OpenCode, cli_path for custom binary locations).
+    Existing0 = get_auth_state(Session),
+    LogoutOpts = login_opts_from_params(maps:get(login_params, Existing0, #{})),
     %% Best-effort real CLI logout — track whether CLI actually ran
     %% so `source` accurately reflects the logout method.
     Source =
         case resolve_session_backend(Session) of
             {ok, Backend} ->
-                case beam_agent_auth_core:logout(Backend, #{}) of
+                case beam_agent_auth_core:logout(Backend, LogoutOpts) of
                     ok ->
                         cli;
                     {error, {cli_not_found, _}} ->
@@ -187,8 +194,7 @@ account_logout(Session) ->
             {error, _} ->
                 unavailable
         end,
-    Existing = get_auth_state(Session),
-    Updated = (maps:without([logged_in_at], Existing))#{
+    Updated = (maps:without([logged_in_at], Existing0))#{
         session       => Session,
         status        => logged_out,
         source        => Source,

@@ -84,7 +84,7 @@ defmodule BeamAgent.Auth do
 
     * `:cli_path` — override the CLI binary location
     * `:timeout` — override the default 10s timeout
-    * `:base_url` — OpenCode server URL (default `http://localhost:4096`)
+    * `:base_url` — OpenCode server URL (localhost only, default `http://localhost:4096`)
 
   ## Examples
 
@@ -113,6 +113,7 @@ defmodule BeamAgent.Auth do
     * `:cli_path` — override the CLI binary location (basename must match
       the canonical binary name for the backend)
     * `:timeout` — override the default 5min timeout
+    * `:base_url` — override the local OpenCode server base URL (localhost only)
 
   For backends with device/OAuth flows (codex, copilot), the call blocks
   until the user completes authentication in a browser or the timeout
@@ -158,6 +159,7 @@ defmodule BeamAgent.Auth do
 
     * `:cli_path` — override the CLI binary location
     * `:timeout` — override the default 10s timeout
+    * `:base_url` — override the local OpenCode server base URL (localhost only)
   """
   @spec logout(backend(), auth_opts()) :: :ok | {:error, term()}
   defdelegate logout(backend, opts), to: :beam_agent_auth
