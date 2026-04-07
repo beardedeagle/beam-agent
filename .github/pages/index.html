@@ -533,7 +533,7 @@
       <div class="feature">
         <div class="feature-icon">&#128273;</div>
         <h3>Session-Independent Auth</h3>
-        <p>Check, establish, and revoke backend credentials without a running session. CLI and PTY-interactive flows for all five backends. Defense-in-depth security: CLI path allowlist, environment variable allowlist, inherited environment scrubbing (LD_PRELOAD, DYLD_INSERT_LIBRARIES), SSRF-protected HTTP calls, symlink-aware safety checks, opaque vault_env type for provenance-based trust, and agent output sanitization that strips raw CLI output, OAuth URLs, and internal details before results reach the agent.</p>
+        <p>Check, establish, and revoke backend credentials without a running session. Backend-appropriate auth flows across all five backends, including CLI, PTY-interactive, and REST-based implementations depending on the adapter. Defense-in-depth security: CLI path allowlist, environment variable allowlist, inherited environment scrubbing (LD_PRELOAD, DYLD_INSERT_LIBRARIES), SSRF-protected HTTP calls, symlink-aware safety checks, opaque vault_env type for provenance-based trust, and agent output sanitization that strips raw CLI output, OAuth URLs, and internal details before results reach the agent.</p>
       </div>
     </div>
   </section>

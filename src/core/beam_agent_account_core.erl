@@ -26,7 +26,7 @@
 -type auth_state() :: #{
     session      := pid() | binary(),
     status       := logged_in | logged_out | login_pending | login_cancelled | unknown,
-    source       => cli | inferred | unavailable,
+    source       => cli | api | env | manual | inferred | unavailable,
     provider_id  => binary(),
     login_params => map(),
     logged_in_at => integer(),
@@ -270,7 +270,7 @@ put_auth_state(Session, State) ->
 -spec probe_and_cache_auth(pid() | binary()) ->
     {ok, #{session := pid() | binary(),
            status  := logged_in | logged_out | unknown,
-           source  := cli | unavailable,
+           source  := cli | api | env | manual | unavailable,
            details => #{authenticated := boolean(),
                         backend => beam_agent_backend:backend(),
                         method => api | cli | env | manual}}}.
@@ -280,14 +280,16 @@ probe_and_cache_auth(Session) ->
             case beam_agent_auth_core:status(Backend, #{}) of
                 {ok, #{authenticated := true} = Details} ->
                     SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
+                    Source = auth_source_from_details(Details),
                     State = #{session => Session, status => logged_in,
-                              source => cli, details => SafeDetails},
+                              source => Source, details => SafeDetails},
                     put_auth_state(Session, State),
                     {ok, State};
                 {ok, #{authenticated := false} = Details} ->
                     SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
+                    Source = auth_source_from_details(Details),
                     State = #{session => Session, status => logged_out,
-                              source => cli, details => SafeDetails},
+                              source => Source, details => SafeDetails},
                     put_auth_state(Session, State),
                     {ok, State};
                 {error, {cli_not_found, _}} ->
@@ -323,6 +325,17 @@ login_opts_from_params(Params) ->
         {timeout, timeout},
         {base_url, base_url}
     ]).
+
+%% Map the auth method from beam_agent_auth_core:status/2 to an account source.
+-spec auth_source_from_details(#{authenticated := boolean(),
+                                  backend := beam_agent_backend:backend(),
+                                  method := api | cli | env | manual,
+                                  _ => _}) ->
+    api | cli | env | manual.
+auth_source_from_details(#{method := api})    -> api;
+auth_source_from_details(#{method := env})    -> env;
+auth_source_from_details(#{method := manual}) -> manual;
+auth_source_from_details(#{method := cli})    -> cli.
 
 %% Add provider_id to a result map when present.
 -spec maybe_add_provider(#{status := logged_in | login_pending}, binary() | undefined) ->

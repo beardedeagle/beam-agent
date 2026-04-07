@@ -862,17 +862,26 @@ cli_binary_name(opencode) ->
 cli_binary_name(gemini) ->
     "gemini".
 
--spec default_cli(beam_agent_backend:backend()) -> string().
+-spec default_cli(beam_agent_backend:backend()) -> string() | no_return().
 default_cli(claude) ->
     "claude";
 default_cli(codex) ->
-    os:getenv("CODEX_CLI_PATH", "codex");
+    env_cli(codex, "CODEX_CLI_PATH", "codex");
 default_cli(copilot) ->
     "copilot";
 default_cli(opencode) ->
     "opencode";
 default_cli(gemini) ->
-    os:getenv("GEMINI_CLI_PATH", "gemini").
+    env_cli(gemini, "GEMINI_CLI_PATH", "gemini").
+
+%% Read a CLI path from an environment variable, falling back to a default.
+%% Validates env-derived paths against the canonical binary name allowlist
+%% to prevent environment-based CLI substitution attacks.
+env_cli(Backend, EnvVar, Default) ->
+    case os:getenv(EnvVar) of
+        false -> Default;
+        Path  -> validate_cli_path(Backend, Path), Path
+    end.
 
 %%====================================================================
 %% Environment variable validation
@@ -920,8 +929,8 @@ validate_env(Env) ->
 %% Merge caller-supplied env vars with explicit removal of dangerous
 %% inherited variables.  open_port's {env, Env} merges with the parent
 %% environment — setting a var to `false` removes it from the child.
-%% This prevents LD_PRELOAD injection, PATH manipulation, and locale
-%% tricks against the spawned CLI binary.
+%% This strips dynamic-loader-related variables that could influence
+%% how the spawned CLI binary is loaded.
 %%
 %% IMPORTANT: Dangerous vars are stripped from CallerEnv first, then the
 %% `{Var, false}` removals are appended LAST.  open_port processes the

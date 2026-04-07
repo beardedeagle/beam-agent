@@ -19,7 +19,7 @@ defmodule BeamAgent.Auth do
   | Backend    | Status check | API key login | Interactive login | Logout |
   |------------|:-------------|:--------------|:------------------|:-------|
   | `:claude`  | `claude auth status` | via env | `claude auth login` | yes |
-  | `:codex`   | `codex login status` | `--with-api-key` | device flow | yes |
+  | `:codex`   | `codex login status` | via `OPENAI_API_KEY` env | device flow | yes |
   | `:copilot` | `copilot auth status` | n/a | OAuth device flow | yes |
   | `:opencode`| REST `/provider` | REST `/auth` | n/a | REST |
   | `:gemini`  | env / OAuth creds | via env | PTY-interactive OAuth | file delete |
