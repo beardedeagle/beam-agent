@@ -258,9 +258,12 @@ sanitize_for_agent(Result) ->
 %%====================================================================
 
 -spec with_backend(backend_like(), fun((beam_agent_backend:backend()) -> T)) ->
-    T | {error, {unknown_backend, term()}} when T :: term().
+    T | {error, {unknown_backend, term()} | term()} when T :: term().
 with_backend(Backend, Fun) ->
     case beam_agent_backend:normalize(Backend) of
-        {ok, B}          -> Fun(B);
+        {ok, B} ->
+            try Fun(B)
+            catch error:Reason -> {error, Reason}
+            end;
         {error, _} = Err -> Err
     end.

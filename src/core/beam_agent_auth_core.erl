@@ -1162,6 +1162,9 @@ compute_file_hash(Path) ->
         {ok, Fd} ->
             try
                 stream_hash(Fd, crypto:hash_init(sha256))
+            catch
+                error:{executable_read_failed, Info} ->
+                    error({executable_read_failed, Info#{path => Path}})
             after
                 file:close(Fd)
             end;

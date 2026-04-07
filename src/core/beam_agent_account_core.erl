@@ -110,7 +110,11 @@ account_login(Session, Params) when is_map(Params) ->
     case resolve_session_backend(Session) of
         {ok, Backend} ->
             AuthOpts = login_opts_from_params(Params),
-            case beam_agent_auth_core:login(Backend, AuthOpts) of
+            LoginResult =
+                try beam_agent_auth_core:login(Backend, AuthOpts)
+                catch error:LoginErr -> {error, LoginErr}
+                end,
+            case LoginResult of
                 {ok, #{outcome := authenticated} = AuthResult} ->
                     State2 = State1#{status => logged_in,
                                      source => maps:get(method, AuthResult, cli),
@@ -293,7 +297,11 @@ probe_and_cache_auth(Session) ->
             Cached = get_auth_state(Session),
             StatusOpts = login_opts_from_params(
                 maps:get(login_params, Cached, #{})),
-            case beam_agent_auth_core:status(Backend, StatusOpts) of
+            StatusResult =
+                try beam_agent_auth_core:status(Backend, StatusOpts)
+                catch error:Reason2 -> {error, Reason2}
+                end,
+            case StatusResult of
                 {ok, #{authenticated := true} = Details} ->
                     SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
                     Source = auth_source_from_details(Details),
