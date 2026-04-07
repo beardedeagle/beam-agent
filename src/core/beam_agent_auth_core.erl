@@ -807,7 +807,11 @@ resolve_cli(Backend, Opts) ->
                     B when is_binary(B) ->
                         binary_to_list(B);
                     L when is_list(L) ->
-                        L
+                        L;
+                    _ ->
+                        error({invalid_cli_path_type,
+                               #{backend => Backend,
+                                 value => P0}})
                 end,
             validate_cli_path(Backend, P),
             P
@@ -836,7 +840,8 @@ validate_cli_path(Backend, Path) ->
 
 -spec strip_exe_extension(string()) -> string().
 strip_exe_extension(Basename) ->
-    case filename:extension(Basename) of
+    Ext = string:lowercase(filename:extension(Basename)),
+    case Ext of
         ".exe" -> filename:rootname(Basename);
         ".cmd" -> filename:rootname(Basename);
         ".bat" -> filename:rootname(Basename);
@@ -1599,13 +1604,8 @@ looks_like_secret(A) ->
 log_cli_result(0, _Lines) ->
     logger:info("Auth CLI completed successfully"),
     ok;
-log_cli_result(ExitCode, Lines) ->
-    Preview =
-        case Lines of
-            [] ->
-                "(no output)";
-            [First | _] ->
-                First
-        end,
-    logger:warning("Auth CLI exited ~b: ~s", [ExitCode, Preview]),
+log_cli_result(ExitCode, _Lines) ->
+    %% Only log exit code — CLI output may contain tokens, OAuth URLs,
+    %% device codes, or other sensitive material that must not leak to logs.
+    logger:warning("Auth CLI exited with non-zero status: ~b", [ExitCode]),
     ok.
