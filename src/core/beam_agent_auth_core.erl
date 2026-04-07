@@ -1165,7 +1165,7 @@ stream_hash(Fd, Ctx) ->
             HexDigest = binary:encode_hex(Digest, lowercase),
             <<"sha256:", HexDigest/binary>>;
         {error, Reason} ->
-            error({executable_read_failed, Reason})
+            error({executable_read_failed, #{reason => Reason}})
     end.
 
 -doc("Compute the SHA-256 hash of an executable.\n\nReturns a binary in the format `<<\"sha256:hexdigest\">>`.  Useful for\nout-of-band integrity verification (startup checks, monitoring,\ndeployment validation).\n\n```erlang\nHash = beam_agent_auth_core:hash_executable(\"/usr/local/bin/claude\"),\n%% => <<\"sha256:a1b2c3d4e5f6...\">>\n```").
@@ -1261,20 +1261,20 @@ collect_output(Port, Acc, Timeout) ->
 %% In {line, N} mode, lines exceeding N bytes arrive as {noeol, Chunk}
 %% fragments followed by a final {eol, Tail}.  We buffer noeol chunks
 %% and flush on eol to preserve long lines (e.g. JSON) intact.
--spec collect_output(port(), [string()], string(), pos_integer()) ->
+-spec collect_output(port(), [string()], [string()], pos_integer()) ->
                         {ok, non_neg_integer(), [string()]} | {error, timeout}.
 collect_output(Port, Acc, LineBuf, Timeout) ->
     receive
         {Port, {data, {eol, Line}}} ->
-            CompletedLine = LineBuf ++ Line,
+            CompletedLine = lists:flatten(lists:reverse([Line | LineBuf])),
             collect_output(Port, [CompletedLine | Acc], [], Timeout);
         {Port, {data, {noeol, Line}}} ->
-            collect_output(Port, Acc, LineBuf ++ Line, Timeout);
+            collect_output(Port, Acc, [Line | LineBuf], Timeout);
         {Port, {exit_status, ExitCode}} ->
             flush_port(Port),
             FinalAcc = case LineBuf of
                 [] -> Acc;
-                _  -> [LineBuf | Acc]
+                _  -> [lists:flatten(lists:reverse(LineBuf)) | Acc]
             end,
             Lines = lists:reverse(FinalAcc),
             log_cli_result(ExitCode, Lines),

@@ -290,7 +290,10 @@ put_auth_state(Session, State) ->
 probe_and_cache_auth(Session) ->
     case resolve_session_backend(Session) of
         {ok, Backend} ->
-            case beam_agent_auth_core:status(Backend, #{}) of
+            Cached = get_auth_state(Session),
+            StatusOpts = login_opts_from_params(
+                maps:get(login_params, Cached, #{})),
+            case beam_agent_auth_core:status(Backend, StatusOpts) of
                 {ok, #{authenticated := true} = Details} ->
                     SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
                     Source = auth_source_from_details(Details),
