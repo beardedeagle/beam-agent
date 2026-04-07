@@ -21,16 +21,17 @@
 %%====================================================================
 
 hash_executable_returns_sha256_prefix_test() ->
-    %% "sh" is on every POSIX system's PATH.
-    Result = beam_agent_auth_core:hash_executable("sh"),
+    Exe = portable_exe(),
+    Result = beam_agent_auth_core:hash_executable(Exe),
     ?assertMatch(<<"sha256:", _/binary>>, Result),
     %% Hex digest is 64 chars (256 bits)
     <<"sha256:", Hex/binary>> = Result,
     ?assertEqual(64, byte_size(Hex)).
 
 hash_executable_deterministic_test() ->
-    A = beam_agent_auth_core:hash_executable("sh"),
-    B = beam_agent_auth_core:hash_executable("sh"),
+    Exe = portable_exe(),
+    A = beam_agent_auth_core:hash_executable(Exe),
+    B = beam_agent_auth_core:hash_executable(Exe),
     ?assertEqual(A, B).
 
 hash_executable_nonexistent_crashes_test() ->
@@ -167,9 +168,15 @@ resolve_symlinks_follows_link_test() ->
         Target = filename:join(TmpDir, "target"),
         Link = filename:join(TmpDir, "link"),
         ok = file:write_file(Target, <<"data">>),
-        ok = file:make_symlink(Target, Link),
-        Resolved = beam_agent_auth_core:resolve_symlinks(Link),
-        ?assertEqual(Target, Resolved)
+        case file:make_symlink(Target, Link) of
+            ok ->
+                Resolved = beam_agent_auth_core:resolve_symlinks(Link),
+                ?assertEqual(Target, Resolved);
+            {error, enotsup} ->
+                ok;  %% Symlinks not supported on this platform
+            {error, eperm} ->
+                ok   %% Insufficient privileges (e.g. Windows without developer mode)
+        end
     after
         rm_rf(TmpDir)
     end.
@@ -256,6 +263,14 @@ scrub_env_all_dangerous_vars_stripped_test() ->
 %%====================================================================
 %% Helpers
 %%====================================================================
+
+%% Return a cross-platform executable name for hash tests.
+%% Uses "erl" (available on all platforms with Erlang) instead of "sh".
+portable_exe() ->
+    case os:find_executable("erl") of
+        false -> "escript";  %% fallback — also ships with OTP
+        _     -> "erl"
+    end.
 
 make_tmp_dir() ->
     Base = filename:basedir(user_cache, "beam_agent_test"),

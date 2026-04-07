@@ -819,15 +819,28 @@ resolve_cli(Backend, Opts) ->
 -spec validate_cli_path(beam_agent_backend:backend(), string()) -> ok | no_return().
 validate_cli_path(Backend, Path) ->
     Expected = cli_binary_name(Backend),
-    case filename:basename(Path) of
+    Basename = filename:basename(Path),
+    %% On Windows, strip .exe/.cmd/.bat extensions before comparing
+    %% so that "C:\...\claude.exe" matches the canonical name "claude".
+    Actual = strip_exe_extension(Basename),
+    case Actual of
         Expected ->
             ok;
-        Actual ->
+        _ ->
             error({invalid_cli_path,
                    #{backend => Backend,
                      expected => Expected,
                      actual => Actual,
                      path => Path}})
+    end.
+
+-spec strip_exe_extension(string()) -> string().
+strip_exe_extension(Basename) ->
+    case filename:extension(Basename) of
+        ".exe" -> filename:rootname(Basename);
+        ".cmd" -> filename:rootname(Basename);
+        ".bat" -> filename:rootname(Basename);
+        _      -> Basename
     end.
 
 %% Canonical binary name for each backend.  Used by validate_cli_path/2
