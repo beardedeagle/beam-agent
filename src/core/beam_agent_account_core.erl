@@ -89,7 +89,6 @@ Returns `{ok, #{status := logged_in | login_pending, ...}}`.
             {api_key_required, opencode}}.
 account_login(Session, Params) when is_map(Params) ->
     ensure_tables(),
-    Now = erlang:system_time(millisecond),
     ProviderId = maps:get(provider_id, Params, undefined),
     %% Strip secret fields before persisting in ETS — api_key, tokens,
     %% and credentials must not linger in process-accessible storage.
@@ -115,7 +114,7 @@ account_login(Session, Params) when is_map(Params) ->
                 {ok, #{outcome := authenticated}} ->
                     State2 = State1#{status => logged_in,
                                      source => cli,
-                                     logged_in_at => Now},
+                                     logged_in_at => erlang:system_time(millisecond)},
                     put_auth_state(Session, State2),
                     {ok, maybe_add_provider(#{status => logged_in}, ProviderId)};
                 {ok, #{outcome := pending}} ->
