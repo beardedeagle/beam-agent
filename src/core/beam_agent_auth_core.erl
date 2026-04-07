@@ -99,16 +99,17 @@ for Claude) rather than passing the secret on the command line — avoiding
 %% not type-check.  This prevents internal callers from accidentally
 %% passing agent-supplied data as trusted environment variables.
 %%
-%% These variables bypass the internal allowlist because their provenance
-%% is trusted: the user stored them in the Vault, not the agent.
+%% These variables bypass the internal allowlist because their intended
+%% provenance is trusted: the user stored them in the Vault, not the agent.
 -opaque vault_env() :: {vault_env, [{string(), string()}]}.
 
 -doc("""
 Construct a `vault_env()` from a list of environment variable tuples.
 
-This is the only way to create a `vault_env()` value.  The opaque type
-prevents accidental misuse — a bare proplist will not match the
-`vault_env()` type in specs or pattern matches.
+Internal callers should use `from_vault/1` to construct this value.
+The `-opaque` type helps Dialyzer catch accidental misuse — a bare
+proplist will not match `vault_env()` in type-checked code — but this
+is a static guarantee only, not a runtime-enforced security boundary.
 
 ```erlang
 VaultEnv = beam_agent_auth_core:from_vault([{\"ANTHROPIC_BASE_URL\", \"...\"}]),
@@ -495,12 +496,10 @@ opencode_login(#{api_key := Key} = Opts, _VaultEnv) when is_binary(Key) ->
             {error, {opencode_unreachable, Reason}}
     end;
 opencode_login(_Opts, _VaultEnv) ->
-    {error,
-     {api_key_required,
-      opencode,
-      <<"OpenCode login requires an api_key option. "
-        "Pass #{api_key => <<\"sk-...\">>} or configure "
-        "the key through the OpenCode server UI.">>}}.
+    logger:info("OpenCode login requires an api_key option. "
+                "Pass #{api_key => <<\"sk-...\">>} or configure "
+                "the key through the OpenCode server UI."),
+    {error, {api_key_required, opencode}}.
 
 opencode_logout(Opts) ->
     BaseUrl = validate_base_url(Opts),
@@ -590,11 +589,9 @@ gemini_login(Opts, _VaultEnv) ->
     Timeout = maps:get(timeout, Opts, ?LOGIN_TIMEOUT),
     case os:find_executable(Cli) of
         false ->
-            {error,
-             {cli_not_found,
-              Cli,
-              <<"Gemini CLI not found. Install it or set "
-                "GEMINI_API_KEY in the environment.">>}};
+            logger:info("Gemini CLI (~s) not found. Install it or set "
+                        "GEMINI_API_KEY in the environment.", [Cli]),
+            {error, {cli_not_found, Cli}};
         GeminiExe ->
             case run_gemini_auth(GeminiExe, Timeout) of
                 {ok, authenticated, OAuthUrl, RawBuf} ->

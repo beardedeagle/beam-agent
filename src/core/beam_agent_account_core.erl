@@ -86,8 +86,7 @@ Returns `{ok, #{status := logged_in | login_pending, ...}}`.
             {login_failed, binary()} |
             {opencode_unreachable, term()} |
             {port_error, term()} |
-            {api_key_required, opencode, binary()} |
-            {cli_not_found, [1..255, ...], binary()}}.
+            {api_key_required, opencode}}.
 account_login(Session, Params) when is_map(Params) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
