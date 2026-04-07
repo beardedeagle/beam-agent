@@ -127,7 +127,8 @@ account_logout_stores_state_test() ->
     {ok, _} = beam_agent_account_core:account_logout(S),
     {ok, Auth} = beam_agent_account_core:auth_status(S),
     ?assertEqual(logged_out, maps:get(status, Auth)),
-    ?assertEqual(cli, maps:get(source, Auth)),
+    %% No backend resolvable in test — source is unavailable, not cli
+    ?assertEqual(unavailable, maps:get(source, Auth)),
     ?assert(is_integer(maps:get(logged_out_at, Auth))),
     %% logged_in_at should be removed
     ?assertEqual(error, maps:find(logged_in_at, Auth)).

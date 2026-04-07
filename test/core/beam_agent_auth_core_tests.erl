@@ -234,12 +234,13 @@ scrub_env_preserves_caller_vars_test() ->
     ?assert(lists:member({"ANTHROPIC_API_KEY", "sk-test"}, Result)).
 
 scrub_env_caller_vars_override_strip_test() ->
-    %% If caller explicitly sets a stripped var, caller wins (appears later).
+    %% Dangerous vars in CallerEnv are stripped — false entry always wins.
     CallerEnv = [{"LD_PRELOAD", "/safe/lib.so"}],
     Result = beam_agent_auth_core:scrub_env(CallerEnv),
-    %% The false entry appears first, caller entry appears second.
-    %% open_port processes env left-to-right; last value wins.
-    ?assert(lists:member({"LD_PRELOAD", "/safe/lib.so"}, Result)).
+    %% Caller's LD_PRELOAD value must be removed.
+    ?assertNot(lists:member({"LD_PRELOAD", "/safe/lib.so"}, Result)),
+    %% The false removal entry must be present.
+    ?assert(lists:member({"LD_PRELOAD", false}, Result)).
 
 scrub_env_all_dangerous_vars_stripped_test() ->
     Result = beam_agent_auth_core:scrub_env([]),

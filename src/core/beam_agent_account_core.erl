@@ -92,10 +92,13 @@ account_login(Session, Params) when is_map(Params) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
     ProviderId = maps:get(provider_id, Params, undefined),
+    %% Strip secret fields before persisting in ETS — api_key, tokens,
+    %% and credentials must not linger in process-accessible storage.
+    SafeParams = maps:without([api_key, token, secret, password], Params),
     State0 = #{
         session      => Session,
         status       => login_pending,
-        login_params => Params
+        login_params => SafeParams
     },
     State1 = case ProviderId of
         undefined -> State0;
@@ -164,24 +167,29 @@ of whether the CLI call succeeds — the session state is authoritative.
 account_logout(Session) ->
     ensure_tables(),
     Now = erlang:system_time(millisecond),
-    %% Best-effort real CLI logout
-    case resolve_session_backend(Session) of
-        {ok, Backend} ->
-            case beam_agent_auth_core:logout(Backend, #{}) of
-                ok -> ok;
-                {error, {cli_not_found, _}} -> ok;
-                {error, Reason} ->
-                    logger:warning("CLI logout failed for ~p: ~tp",
-                                   [Backend, Reason])
-            end;
-        {error, _} ->
-            ok
-    end,
+    %% Best-effort real CLI logout — track whether CLI actually ran
+    %% so `source` accurately reflects the logout method.
+    Source =
+        case resolve_session_backend(Session) of
+            {ok, Backend} ->
+                case beam_agent_auth_core:logout(Backend, #{}) of
+                    ok ->
+                        cli;
+                    {error, {cli_not_found, _}} ->
+                        unavailable;
+                    {error, Reason} ->
+                        logger:warning("CLI logout failed for ~p: ~tp",
+                                       [Backend, Reason]),
+                        cli
+                end;
+            {error, _} ->
+                unavailable
+        end,
     Existing = get_auth_state(Session),
     Updated = (maps:without([logged_in_at], Existing))#{
         session       => Session,
         status        => logged_out,
-        source        => cli,
+        source        => Source,
         logged_out_at => Now
     },
     put_auth_state(Session, Updated),
@@ -262,22 +270,22 @@ put_auth_state(Session, State) ->
            status  := logged_in | logged_out | unknown,
            source  := cli | unavailable,
            details => #{authenticated := boolean(),
-                        backend := beam_agent_backend:backend(),
-                        method := api | cli | env | manual,
-                        details => map(),
-                        raw_output => binary()}}}.
+                        backend => beam_agent_backend:backend(),
+                        method => api | cli | env | manual}}}.
 probe_and_cache_auth(Session) ->
     case resolve_session_backend(Session) of
         {ok, Backend} ->
             case beam_agent_auth_core:status(Backend, #{}) of
                 {ok, #{authenticated := true} = Details} ->
+                    SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
                     State = #{session => Session, status => logged_in,
-                              source => cli, details => Details},
+                              source => cli, details => SafeDetails},
                     put_auth_state(Session, State),
                     {ok, State};
                 {ok, #{authenticated := false} = Details} ->
+                    SafeDetails = beam_agent_auth_core:sanitize_for_agent(Details),
                     State = #{session => Session, status => logged_out,
-                              source => cli, details => Details},
+                              source => cli, details => SafeDetails},
                     put_auth_state(Session, State),
                     {ok, State};
                 {error, {cli_not_found, _}} ->

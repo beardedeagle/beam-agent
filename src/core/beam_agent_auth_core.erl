@@ -898,17 +898,28 @@ validate_env(Env) ->
 %% environment — setting a var to `false` removes it from the child.
 %% This prevents LD_PRELOAD injection, PATH manipulation, and locale
 %% tricks against the spawned CLI binary.
+%%
+%% IMPORTANT: Dangerous vars are stripped from CallerEnv first, then the
+%% `{Var, false}` removals are appended LAST.  open_port processes the
+%% list sequentially — later entries override earlier ones — so the false
+%% entries must come after any caller values to guarantee removal.
 -spec scrub_env([{string(), string()}]) -> [{string(), string() | false}].
 scrub_env(CallerEnv) ->
-    Stripped =
-        [{"LD_PRELOAD", false},
-         {"LD_LIBRARY_PATH", false},
-         {"DYLD_INSERT_LIBRARIES", false},  %% macOS equivalent
-         {"DYLD_LIBRARY_PATH", false},       %% macOS
-         {"DYLD_FRAMEWORK_PATH", false},     %% macOS
-         {"LD_AUDIT", false},
-         {"LD_PROFILE", false}],
-    Stripped ++ CallerEnv.
+    Dangerous = dangerous_env_vars(),
+    SafeCallerEnv =
+        [{K, V} || {K, V} <- CallerEnv, not lists:member(K, Dangerous)],
+    Removals = [{Var, false} || Var <- Dangerous],
+    SafeCallerEnv ++ Removals.
+
+-spec dangerous_env_vars() -> [[1..255, ...], ...].
+dangerous_env_vars() ->
+    ["LD_PRELOAD",
+     "LD_LIBRARY_PATH",
+     "DYLD_INSERT_LIBRARIES",  %% macOS equivalent
+     "DYLD_LIBRARY_PATH",      %% macOS
+     "DYLD_FRAMEWORK_PATH",    %% macOS
+     "LD_AUDIT",
+     "LD_PROFILE"].
 
 %%====================================================================
 %% URL validation
@@ -926,18 +937,28 @@ scrub_env(CallerEnv) ->
 validate_base_url(Opts) ->
     BaseUrl = to_list(maps:get(base_url, Opts, ?OPENCODE_DEFAULT_URL)),
     case uri_string:parse(list_to_binary(BaseUrl)) of
-        #{host := Host} ->
-            case is_localhost(Host) of
-                true ->
-                    BaseUrl;
+        #{scheme := Scheme, host := Host} ->
+            case is_allowed_scheme(Scheme) of
                 false ->
                     error({disallowed_base_url,
                            #{url => BaseUrl,
-                             host => Host,
+                             scheme => Scheme,
                              message =>
-                                 <<"OpenCode base_url must be localhost. "
-                                   "Remote URLs are not permitted — this "
-                                   "prevents SSRF and API key exfiltration.">>}})
+                                 <<"OpenCode base_url must use http or https. "
+                                   "Other schemes are not permitted.">>}});
+                true ->
+                    case is_localhost(Host) of
+                        true ->
+                            BaseUrl;
+                        false ->
+                            error({disallowed_base_url,
+                                   #{url => BaseUrl,
+                                     host => Host,
+                                     message =>
+                                         <<"OpenCode base_url must be localhost. "
+                                           "Remote URLs are not permitted — this "
+                                           "prevents SSRF and API key exfiltration.">>}})
+                    end
             end;
         _ ->
             error({invalid_base_url,
@@ -946,6 +967,11 @@ validate_base_url(Opts) ->
                          <<"Could not parse base_url. Expected a valid "
                            "URL with scheme and host.">>}})
     end.
+
+-spec is_allowed_scheme(binary()) -> boolean().
+is_allowed_scheme(<<"http">>) -> true;
+is_allowed_scheme(<<"https">>) -> true;
+is_allowed_scheme(_) -> false.
 
 -spec is_localhost(binary()) -> boolean().
 is_localhost(<<"localhost">>) ->
@@ -1191,17 +1217,31 @@ run_port(ExePath, Args, AllEnv, Timeout) ->
             {error, {port_error, {Class, Reason}}}
     end.
 
--spec collect_output(port(), [string()], pos_integer()) ->
+-spec collect_output(port(), [], pos_integer()) ->
                         {ok, non_neg_integer(), [string()]} | {error, timeout}.
 collect_output(Port, Acc, Timeout) ->
+    collect_output(Port, Acc, [], Timeout).
+
+%% Accumulate output with a line buffer for noeol fragments.
+%% In {line, N} mode, lines exceeding N bytes arrive as {noeol, Chunk}
+%% fragments followed by a final {eol, Tail}.  We buffer noeol chunks
+%% and flush on eol to preserve long lines (e.g. JSON) intact.
+-spec collect_output(port(), [string()], string(), pos_integer()) ->
+                        {ok, non_neg_integer(), [string()]} | {error, timeout}.
+collect_output(Port, Acc, LineBuf, Timeout) ->
     receive
         {Port, {data, {eol, Line}}} ->
-            collect_output(Port, [Line | Acc], Timeout);
+            CompletedLine = LineBuf ++ Line,
+            collect_output(Port, [CompletedLine | Acc], [], Timeout);
         {Port, {data, {noeol, Line}}} ->
-            collect_output(Port, [Line | Acc], Timeout);
+            collect_output(Port, Acc, LineBuf ++ Line, Timeout);
         {Port, {exit_status, ExitCode}} ->
             flush_port(Port),
-            Lines = lists:reverse(Acc),
+            FinalAcc = case LineBuf of
+                [] -> Acc;
+                _  -> [LineBuf | Acc]
+            end,
+            Lines = lists:reverse(FinalAcc),
             log_cli_result(ExitCode, Lines),
             {ok, ExitCode, Lines}
     after Timeout ->
@@ -1393,7 +1433,8 @@ join_lines([]) ->
 join_lines(Lines) ->
     list_to_binary(string:join(Lines, "\n")).
 
--spec parse_json_output([string()]) -> #{raw := binary(), binary() => json_term()}.
+-spec parse_json_output([string()]) ->
+    #{binary() => json_term()} | #{raw := binary()}.
 parse_json_output(Lines) ->
     Raw = join_lines(Lines),
     case beam_agent_json:safe_decode(Raw) of
