@@ -51,7 +51,7 @@ for Claude) rather than passing the secret on the command line — avoiding
 `/proc` exposure on Linux.
 """).
 
--export([status/2, login/2, login/3, logout/2, resolve_cli/2, strip_ansi/1,
+-export([status/2, login/2, login/3, logout/2, resolve_cli/2, run_capture_cli/3, strip_ansi/1,
          hash_executable/1, from_vault/1, sanitize_for_agent/1]).
 
     %% Utility — exposed for external callers (e.g. account_core fallback)
@@ -1338,6 +1338,23 @@ run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
             run_port(ExePath, Args, InternalEnv ++ VaultVars, Timeout)
     end.
 
+-doc("""
+Execute a CLI command with the same executable and environment hardening as
+the auth flows, returning captured stdout/stderr lines only when the command
+exits successfully.
+""").
+-spec run_capture_cli(string(), [string()], pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_cli(Program, Args, Timeout) ->
+    case run_cli(Program, Args, [], Timeout) of
+        {ok, 0, Lines} ->
+            {ok, Lines};
+        {ok, ExitCode, Lines} ->
+            {error, {cli_exit, ExitCode, Lines}};
+        {error, _} = Err ->
+            Err
+    end.
+
 run_copilot_auth_command(Program, PreferredArgs, LegacyArgs, InternalEnv, Timeout, Command) ->
     case run_cli(Program, PreferredArgs, InternalEnv, Timeout) of
         {ok, ExitCode, Lines} ->
@@ -1530,7 +1547,7 @@ the port and draining messages via `flush_port/1`.
   - Dangerous inherited env vars (LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.) are scrubbed
 """).
 
--dialyzer({nowarn_function, open_pty_port/3}).
+-dialyzer({nowarn_function, [open_pty_port/3, run_capture_cli/3]}).
 
 -spec open_pty_port(string(), [string()], [{string(), string()}]) ->
                        {ok, port()} |

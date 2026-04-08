@@ -1056,52 +1056,7 @@ model_entry(ModelId) ->
 -spec run_model_cli(string(), [string(), ...]) ->
     {ok, [string()]} | {error, term()}.
 run_model_cli(Program, Args) ->
-    case os:find_executable(Program) of
-        false ->
-            {error, {cli_not_found, Program}};
-        ExePath ->
-            PortOpts = [{args, Args},
-                        exit_status,
-                        stderr_to_stdout,
-                        {line, 65536},
-                        hide],
-            try
-                Port = open_port({spawn_executable, ExePath}, PortOpts),
-                collect_model_cli_output(Port, [])
-            catch
-                Class:Reason ->
-                    {error, {port_error, {Class, Reason}}}
-            end
-    end.
-
--spec collect_model_cli_output(port(), [string()]) ->
-    {ok, [string()]} | {error, term()}.
-collect_model_cli_output(Port, Acc) ->
-    receive
-        {Port, {data, {eol, Line}}} ->
-            collect_model_cli_output(Port, [Line | Acc]);
-        {Port, {data, {noeol, Line}}} ->
-            collect_model_cli_output(Port, [Line | Acc]);
-        {Port, {exit_status, 0}} ->
-            flush_model_cli_port(Port),
-            {ok, lists:reverse(Acc)};
-        {Port, {exit_status, ExitCode}} ->
-            flush_model_cli_port(Port),
-            {error, {cli_exit, ExitCode}}
-    after 10000 ->
-        catch port_close(Port),
-        flush_model_cli_port(Port),
-        {error, timeout}
-    end.
-
--spec flush_model_cli_port(port()) -> ok.
-flush_model_cli_port(Port) ->
-    receive
-        {Port, _} ->
-            flush_model_cli_port(Port)
-    after 0 ->
-        ok
-    end.
+    beam_agent_auth_core:run_capture_cli(Program, Args, 10000).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
