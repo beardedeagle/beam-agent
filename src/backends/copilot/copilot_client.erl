@@ -532,7 +532,16 @@ supported_commands(Session) ->
     extract_init_field(Session, commands, slash_commands, []).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    %% Copilot is command-driven — no init_response with model data.
+    %% Query the CLI via the native models.list RPC command.
+    case model_list(Session) of
+        {ok, #{<<"models">> := Models}} when is_list(Models) ->
+            {ok, Models};
+        {ok, _} ->
+            extract_init_field(Session, models, models, []);
+        {error, _} = Err ->
+            Err
+    end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
