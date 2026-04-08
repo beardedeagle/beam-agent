@@ -114,7 +114,7 @@ init_handler(Opts) ->
                       maps:get(sdk_mcp_servers, Opts, undefined)),
     TransportOpts = #{
         executable  => CliPath,
-        args        => ["--app-server"],
+        args        => ["app-server"],
         env         => [{"CODEX_SDK_VERSION", "0.14.0"}
                         | maps:get(env, Opts, [])],
         cd          => maps:get(work_dir, Opts, undefined),
