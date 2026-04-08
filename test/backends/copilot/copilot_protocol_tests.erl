@@ -354,6 +354,10 @@ build_cli_args_with_log_level_test() ->
     ?assert(lists:member("--log-level", Args)),
     ?assert(lists:member("debug", Args)).
 
+build_cli_args_appends_user_args_after_required_transport_args_test() ->
+    Args = copilot_protocol:build_cli_args(#{cli_args => ["--foo", "bar"]}),
+    ?assertEqual(["--acp", "--foo", "bar"], Args).
+
 build_env_default_test() ->
     Env = copilot_protocol:build_env(#{}),
     ?assert(lists:keymember("NO_COLOR", 1, Env)),

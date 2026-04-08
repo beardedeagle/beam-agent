@@ -44,6 +44,15 @@ claude_config_path_without_home_returns_undefined_test() ->
             ?assertEqual({ok, []}, claude_agent_sdk:discover_models_from_claude_config())
         end).
 
+claude_config_path_empty_home_returns_undefined_test() ->
+    with_env_value(
+        "HOME",
+        "",
+        fun() ->
+            ?assertEqual(undefined, claude_agent_sdk:claude_config_path()),
+            ?assertEqual({ok, []}, claude_agent_sdk:discover_models_from_claude_config())
+        end).
+
 make_tmp_dir() ->
     Base = filename:basedir(user_cache, "beam_agent_test"),
     Unique = integer_to_list(erlang:unique_integer([positive])),
@@ -77,5 +86,17 @@ with_env_unset(Name, Fun) ->
         case Previous of
             false -> os:unsetenv(Name);
             Value -> os:putenv(Name, Value)
+        end
+    end.
+
+with_env_value(Name, Value, Fun) ->
+    Previous = os:getenv(Name),
+    os:putenv(Name, Value),
+    try
+        Fun()
+    after
+        case Previous of
+            false -> os:unsetenv(Name);
+            OldValue -> os:putenv(Name, OldValue)
         end
     end.

@@ -630,7 +630,7 @@ build_cli_args(Opts) ->
                  ensure_list(A) ||
                      A <- UserArgs
                  ],
-            ExtraStrings ++ WithLogLevel
+            WithLogLevel ++ ExtraStrings
     end.
 -spec build_env(map()) -> [{string(), string()}].
 build_env(Opts) ->

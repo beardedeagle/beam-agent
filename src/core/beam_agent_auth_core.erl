@@ -495,7 +495,20 @@ check_copilot_config() ->
                            #{hint =>
                                  <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
                                    "or ~/.copilot/config.json found.  Run `copilot "
-                                   "login` to authenticate.">>}}}
+                                   "login` to authenticate.">>}}};
+                {error, Reason} ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 iolist_to_binary(
+                                     io_lib:format(
+                                         "Could not read ~~/.copilot/config.json (~s): ~p. "
+                                         "Run `copilot login` to authenticate or fix the "
+                                         "config path permissions.",
+                                         [ConfigPath, Reason]))}}}
             end
     end.
 
@@ -785,7 +798,12 @@ home_dir() ->
         false ->
             undefined;
         Home ->
-            Home
+            case string:trim(Home) of
+                "" ->
+                    undefined;
+                TrimmedHome ->
+                    TrimmedHome
+            end
     end.
 
 %%--------------------------------------------------------------------

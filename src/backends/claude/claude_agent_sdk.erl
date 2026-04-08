@@ -797,7 +797,12 @@ claude_config_path() ->
         false ->
             undefined;
         Home ->
-            filename:join([Home, ".claude.json"])
+            case string:trim(Home) of
+                "" ->
+                    undefined;
+                TrimmedHome ->
+                    filename:join([TrimmedHome, ".claude.json"])
+            end
     end.
 
 -spec discover_models_from_claude_config(file:filename_all()) ->

@@ -342,6 +342,29 @@ copilot_config_without_home_is_unauthenticated_test() ->
             ?assertEqual(false, maps:get(authenticated, Status))
         end).
 
+home_dir_empty_returns_undefined_test() ->
+    with_env_value(
+        "HOME",
+        "",
+        fun() ->
+            ?assertEqual(undefined, beam_agent_auth_core:home_dir())
+        end).
+
+copilot_config_read_error_is_unauthenticated_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ok = file:write_file(filename:join(TmpDir, ".copilot"), <<"not a directory">>),
+        with_env_value(
+            "HOME",
+            TmpDir,
+            fun() ->
+                {ok, Status} = beam_agent_auth_core:check_copilot_config(),
+                ?assertEqual(false, maps:get(authenticated, Status))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -387,6 +410,18 @@ with_env_unset(Name, Fun) ->
         case Previous of
             false -> os:unsetenv(Name);
             Value -> os:putenv(Name, Value)
+        end
+    end.
+
+with_env_value(Name, Value, Fun) ->
+    Previous = os:getenv(Name),
+    os:putenv(Name, Value),
+    try
+        Fun()
+    after
+        case Previous of
+            false -> os:unsetenv(Name);
+            OldValue -> os:putenv(Name, OldValue)
         end
     end.
 
