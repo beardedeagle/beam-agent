@@ -28,6 +28,7 @@
 
 %% Thread resume result — canonical definition in beam_agent_adapter_types.
 -type thread_resume_result() :: beam_agent_adapter_types:thread_resume_result().
+-type discovered_model() :: #{binary() => binary()}.
 
 -export([start_session/1,
          stop/1,
@@ -164,6 +165,10 @@
          mcp_auth_callback/3,
          mcp_auth_authenticate/3]).
 
+-ifdef(TEST).
+-export([discover_cli_models/1, parse_cli_model_lines/1]).
+-endif.
+
 %% Return shape is from universal core; map() is intentional.
 -dialyzer({nowarn_function,
            [{config_value_write, 3},
@@ -180,7 +185,9 @@
             {thread_realtime_stop, 2},
             {review_start, 2},
             {with_adapter_source, 2},
-            {maybe_include_thread_read, 4}]}).
+            {maybe_include_thread_read, 4},
+            {discover_cli_models, 1},
+            {run_model_cli, 2}]}).
 -dialyzer({no_underspecs,
            [{send_control, 3},
             {fork_session, 2},
@@ -897,10 +904,9 @@ supported_models(Session) ->
                 end, Provs),
             {ok, Models};
         {ok, _} ->
-            %% Unexpected shape — fall back to init_response.
-            extract_init_field(Session, models, models, []);
+            cli_or_init_models(Session);
         {error, _} ->
-            extract_init_field(Session, models, models, [])
+            cli_or_init_models(Session)
     end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
@@ -997,6 +1003,104 @@ extract_from_system_info(Info, Key, Default) ->
             {ok, Value};
         _ ->
             {ok, Default}
+    end.
+
+-spec cli_or_init_models(pid()) -> {ok, list()} | {error, term()}.
+cli_or_init_models(Session) ->
+    case discover_cli_models(session_cli_opts(Session)) of
+        {ok, Models} when Models =/= [] ->
+            {ok, Models};
+        _ ->
+            extract_init_field(Session, models, models, [])
+    end.
+
+-spec session_cli_opts(pid()) -> #{cli_path := string() | binary()}.
+session_cli_opts(Session) ->
+    case session_info(Session) of
+        {ok, Info} ->
+            #{cli_path => maps:get(cli_path, Info, "opencode")};
+        {error, _} ->
+            #{cli_path => "opencode"}
+    end.
+
+-spec discover_cli_models(#{cli_path := string() | binary()}) ->
+    {ok, [discovered_model()]} | {error, term()}.
+discover_cli_models(Opts) when is_map(Opts) ->
+    Cli = beam_agent_auth_core:resolve_cli(opencode, Opts),
+    case run_model_cli(Cli, ["models"]) of
+        {ok, Lines} ->
+            {ok, parse_cli_model_lines(Lines)};
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec parse_cli_model_lines([string()]) -> [discovered_model()].
+parse_cli_model_lines(Lines) ->
+    lists:foldr(
+        fun(RawLine, Acc) ->
+            case string:trim(RawLine) of
+                [] ->
+                    Acc;
+                Line ->
+                    [model_entry(unicode:characters_to_binary(Line)) | Acc]
+            end
+        end,
+        [],
+        Lines).
+
+-spec model_entry(binary()) -> discovered_model().
+model_entry(ModelId) ->
+    #{<<"modelId">> => ModelId,
+      <<"name">> => ModelId}.
+
+-spec run_model_cli(string(), [string(), ...]) ->
+    {ok, [string()]} | {error, term()}.
+run_model_cli(Program, Args) ->
+    case os:find_executable(Program) of
+        false ->
+            {error, {cli_not_found, Program}};
+        ExePath ->
+            PortOpts = [{args, Args},
+                        exit_status,
+                        stderr_to_stdout,
+                        {line, 65536},
+                        hide],
+            try
+                Port = open_port({spawn_executable, ExePath}, PortOpts),
+                collect_model_cli_output(Port, [])
+            catch
+                Class:Reason ->
+                    {error, {port_error, {Class, Reason}}}
+            end
+    end.
+
+-spec collect_model_cli_output(port(), [string()]) ->
+    {ok, [string()]} | {error, term()}.
+collect_model_cli_output(Port, Acc) ->
+    receive
+        {Port, {data, {eol, Line}}} ->
+            collect_model_cli_output(Port, [Line | Acc]);
+        {Port, {data, {noeol, Line}}} ->
+            collect_model_cli_output(Port, [Line | Acc]);
+        {Port, {exit_status, 0}} ->
+            flush_model_cli_port(Port),
+            {ok, lists:reverse(Acc)};
+        {Port, {exit_status, ExitCode}} ->
+            flush_model_cli_port(Port),
+            {error, {cli_exit, ExitCode}}
+    after 10000 ->
+        catch port_close(Port),
+        flush_model_cli_port(Port),
+        {error, timeout}
+    end.
+
+-spec flush_model_cli_port(port()) -> ok.
+flush_model_cli_port(Port) ->
+    receive
+        {Port, _} ->
+            flush_model_cli_port(Port)
+    after 0 ->
+        ok
     end.
 
 -spec with_adapter_source(pid(), map()) -> session_view().

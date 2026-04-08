@@ -13,6 +13,7 @@
 -type system_info_key() :: beam_agent_adapter_types:system_info_key().
 -type init_default() :: beam_agent_adapter_types:init_default().
 -type session_health() :: beam_agent_adapter_types:session_health().
+-type discovered_model() :: #{binary() => binary()}.
 -type checkpoint_restore_error() ::
           {restore_failed, binary(), atom()}.
 -type adapter_status() :: #{
@@ -173,6 +174,10 @@
          tools_list/1,
          account_quota/1]).
 
+-ifdef(TEST).
+-export([discover_prompt_models/1, parse_prompt_model_lines/1]).
+-endif.
+
 %% Universal core return shape; map() is intentional.
 -dialyzer({nowarn_function, [thread_realtime_start/2,
                              thread_realtime_append_audio/3,
@@ -180,7 +185,10 @@
                              thread_realtime_stop/2,
                              review_start/2,
                              with_adapter_source/1,
-                             send_query_to/4]}).
+                             send_query_to/4,
+                             discover_prompt_models/1,
+                             model_entry/1,
+                             run_model_cli/2]}).
 
 -spec start_session(beam_agent_core:session_opts()) ->
                        {ok, pid()} | {error, term()}.
@@ -533,14 +541,20 @@ supported_commands(Session) ->
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
     %% Copilot is command-driven — no init_response with model data.
-    %% Query the CLI via the native models.list RPC command.
-    case model_list(Session) of
+    %% Query the CLI via the native models.list RPC command. If the ACP
+    %% transport cannot answer, fall back to a direct non-interactive CLI
+    %% probe so model discovery still works.
+    case catch model_list(Session) of
         {ok, #{<<"models">> := Models}} when is_list(Models) ->
             {ok, Models};
+        {ok, #{<<"data">> := Models}} when is_list(Models) ->
+            {ok, Models};
         {ok, _} ->
-            extract_init_field(Session, models, models, []);
-        {error, _} = Err ->
-            Err
+            prompt_or_init_models(Session);
+        {'EXIT', _} ->
+            prompt_or_init_models(Session);
+        {error, _} ->
+            prompt_or_init_models(Session)
     end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
@@ -1142,6 +1156,142 @@ extract_from_system_info(Info, Key, Default) ->
             {ok, Value};
         _ ->
             {ok, Default}
+    end.
+
+-spec prompt_or_init_models(pid()) -> {ok, list()} | {error, term()}.
+prompt_or_init_models(Session) ->
+    case discover_prompt_models(session_cli_opts(Session)) of
+        {ok, Models} when Models =/= [] ->
+            {ok, Models};
+        _ ->
+            extract_init_field(Session, models, models, [])
+    end.
+
+-spec session_cli_opts(pid()) -> #{cli_path := string() | binary()}.
+session_cli_opts(Session) ->
+    case session_info(Session) of
+        {ok, Info} ->
+            #{cli_path => maps:get(cli_path, Info, "copilot")};
+        {error, _} ->
+            #{cli_path => "copilot"}
+    end.
+
+-spec discover_prompt_models(#{cli_path := string() | binary()}) ->
+    {ok, [discovered_model()]} | {error, term()}.
+discover_prompt_models(Opts) when is_map(Opts) ->
+    Cli = beam_agent_auth_core:resolve_cli(copilot, Opts),
+    case run_model_cli(
+        Cli,
+        ["--prompt",
+         "List the available models only, one per line.",
+         "--silent",
+         "--allow-all-tools",
+         "--no-custom-instructions"]) of
+        {ok, Lines} ->
+            {ok, parse_prompt_model_lines(Lines)};
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec parse_prompt_model_lines([string()]) -> [discovered_model()].
+parse_prompt_model_lines(Lines) ->
+    lists:foldr(
+        fun(RawLine, Acc) ->
+            case normalize_prompt_model_line(RawLine) of
+                undefined ->
+                    Acc;
+                ModelId ->
+                    [model_entry(ModelId) | Acc]
+            end
+        end,
+        [],
+        Lines).
+
+-spec normalize_prompt_model_line(string()) -> binary() | undefined.
+normalize_prompt_model_line(Line0) ->
+    Line1 = string:trim(Line0),
+    Line2 = strip_line_prefix(Line1, "- "),
+    Line3 = strip_line_prefix(Line2, "* "),
+    Line4 = strip_line_prefix(Line3, "• "),
+    Line5 = string:trim(Line4, both, "`'\""),
+    case string:trim(Line5) of
+        [] ->
+            undefined;
+        Clean ->
+            ModelId = unicode:characters_to_binary(Clean),
+            case is_model_id(ModelId) of
+                true -> ModelId;
+                false -> undefined
+            end
+    end.
+
+-spec strip_line_prefix(string(), string()) -> string().
+strip_line_prefix(Line, Prefix) ->
+    case lists:prefix(Prefix, Line) of
+        true ->
+            lists:nthtail(length(Prefix), Line);
+        false ->
+            Line
+    end.
+
+-spec is_model_id(binary()) -> boolean().
+is_model_id(ModelId) ->
+    ModelId =/= <<>> andalso
+        binary:match(ModelId, <<" ">>) =:= nomatch andalso
+        binary:match(ModelId, <<"\t">>) =:= nomatch.
+
+-spec model_entry(binary()) -> discovered_model().
+model_entry(ModelId) ->
+    #{<<"modelId">> => ModelId,
+      <<"name">> => ModelId}.
+
+-spec run_model_cli(string(), [string(), ...]) ->
+    {ok, [string()]} | {error, term()}.
+run_model_cli(Program, Args) ->
+    case os:find_executable(Program) of
+        false ->
+            {error, {cli_not_found, Program}};
+        ExePath ->
+            PortOpts = [{args, Args},
+                        exit_status,
+                        stderr_to_stdout,
+                        {line, 65536},
+                        hide],
+            try
+                Port = open_port({spawn_executable, ExePath}, PortOpts),
+                collect_model_cli_output(Port, [])
+            catch
+                Class:Reason ->
+                    {error, {port_error, {Class, Reason}}}
+            end
+    end.
+
+-spec collect_model_cli_output(port(), [string()]) ->
+    {ok, [string()]} | {error, term()}.
+collect_model_cli_output(Port, Acc) ->
+    receive
+        {Port, {data, {eol, Line}}} ->
+            collect_model_cli_output(Port, [Line | Acc]);
+        {Port, {data, {noeol, Line}}} ->
+            collect_model_cli_output(Port, [Line | Acc]);
+        {Port, {exit_status, 0}} ->
+            flush_model_cli_port(Port),
+            {ok, lists:reverse(Acc)};
+        {Port, {exit_status, Status}} ->
+            flush_model_cli_port(Port),
+            {error, {cli_exit, Status, lists:reverse(Acc)}}
+    after 30000 ->
+        catch port_close(Port),
+        {error, timeout}
+    end.
+
+-spec flush_model_cli_port(port()) -> ok.
+flush_model_cli_port(Port) ->
+    receive
+        {Port, _} ->
+            flush_model_cli_port(Port)
+    after 0 ->
+        ok
     end.
 
 %%====================================================================
