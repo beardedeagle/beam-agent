@@ -771,7 +771,20 @@ supported_commands(Session) ->
     extract_init_field(Session, commands, slash_commands, []).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    %% Codex init response (ServerInfo) does not include models.
+    %% Query via the native model/list control message first,
+    %% fall back to init_response for forward-compatibility.
+    %% Codex wraps the list in a pagination envelope: {"data": [...]}.
+    case model_list(Session) of
+        {ok, #{<<"models">> := Models}} when is_list(Models) ->
+            {ok, Models};
+        {ok, #{<<"data">> := Models}} when is_list(Models) ->
+            {ok, Models};
+        {ok, _} ->
+            extract_init_field(Session, models, models, []);
+        {error, _} ->
+            extract_init_field(Session, models, models, [])
+    end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
