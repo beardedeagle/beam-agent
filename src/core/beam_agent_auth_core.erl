@@ -397,34 +397,46 @@ codex_logout(Opts) ->
 %%====================================================================
 
 copilot_status(_Opts) ->
-    case os:getenv("COPILOT_GITHUB_TOKEN") of
+    %% Check env vars in copilot CLI precedence order.
+    check_copilot_env([
+        {<<"COPILOT_GITHUB_TOKEN">>, "COPILOT_GITHUB_TOKEN"},
+        {<<"GH_TOKEN">>,            "GH_TOKEN"},
+        {<<"GITHUB_TOKEN">>,        "GITHUB_TOKEN"}
+    ]).
+
+check_copilot_env([]) ->
+    check_copilot_config();
+check_copilot_env([{Label, Var} | Rest]) ->
+    case os:getenv(Var) of
         false ->
-            case os:getenv("GH_TOKEN") of
-                false ->
-                    case os:getenv("GITHUB_TOKEN") of
-                        false ->
-                            check_copilot_config();
-                        _Key ->
-                            {ok,
-                             #{backend => copilot,
-                               authenticated => true,
-                               method => env,
-                               details => #{source => <<"GITHUB_TOKEN env">>}}}
-                    end;
-                _Key ->
-                    {ok,
-                     #{backend => copilot,
-                       authenticated => true,
-                       method => env,
-                       details => #{source => <<"GH_TOKEN env">>}}}
-            end;
-        _Key ->
-            {ok,
-             #{backend => copilot,
-               authenticated => true,
-               method => env,
-               details => #{source => <<"COPILOT_GITHUB_TOKEN env">>}}}
+            check_copilot_env(Rest);
+        "" ->
+            check_copilot_env(Rest);
+        Value ->
+            validate_copilot_token(list_to_binary(Value), Label)
     end.
+
+%% Validate the token type.  The copilot CLI explicitly rejects classic
+%% personal access tokens (ghp_).  Supported types:
+%%   - github_pat_  (fine-grained PAT with "Copilot Requests" permission)
+%%   - gho_         (OAuth token from copilot CLI or gh CLI app)
+%%   - ghs_         (GitHub Actions server-to-server token)
+validate_copilot_token(<<"ghp_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => false,
+       method => env,
+       details => #{source => Source,
+                    hint => <<"Classic personal access tokens (ghp_) are not "
+                              "supported by Copilot.  Use a fine-grained PAT "
+                              "(github_pat_) with the 'Copilot Requests' "
+                              "permission, or run `copilot login`.">>}}};
+validate_copilot_token(_Token, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}}.
 
 %% Check for Copilot CLI credentials at ~/.copilot/config.json.
 %% The copilot CLI stores login state in a JSON file with a
