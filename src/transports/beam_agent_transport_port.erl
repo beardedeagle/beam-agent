@@ -12,27 +12,35 @@
 -doc "Start a CLI subprocess via Erlang port.".
 -spec start(map()) -> {ok, port()} | {error, term()}.
 start(#{executable := Exe} = Opts) ->
-    Args       = maps:get(args, Opts, []),
-    Env        = maps:get(env, Opts, []),
-    Cd         = maps:get(cd, Opts, undefined),
-    Mode       = maps:get(mode, Opts, line),
-    ExtraOpts  = maps:get(extra_port_opts, Opts, []),
-    ModeOpts   = case Mode of
-        line ->
-            LineBuffer = maps:get(line_buffer, Opts, 1_048_576),
-            [{line, LineBuffer}, stderr_to_stdout];
-        raw ->
-            [stream]
-    end,
-    PortOpts   = [binary, exit_status, use_stdio | ModeOpts]
-                 ++ [{args, Args}, {env, Env}]
-                 ++ [{cd, Cd} || Cd =/= undefined]
-                 ++ ExtraOpts,
-    try
-        Port = open_port({spawn_executable, Exe}, PortOpts),
-        {ok, Port}
+    try beam_agent_command_core:resolve_executable(Exe) of
+        ResolvedExe ->
+            Args       = maps:get(args, Opts, []),
+            Env        = maps:get(env, Opts, []),
+            Cd         = maps:get(cd, Opts, undefined),
+            Mode       = maps:get(mode, Opts, line),
+            ExtraOpts  = maps:get(extra_port_opts, Opts, []),
+            ModeOpts   = case Mode of
+                line ->
+                    LineBuffer = maps:get(line_buffer, Opts, 1_048_576),
+                    [{line, LineBuffer}, stderr_to_stdout];
+                raw ->
+                    [stream]
+            end,
+            PortOpts   = [binary, exit_status, use_stdio | ModeOpts]
+                         ++ [{args, Args}, {env, Env}]
+                         ++ [{cd, Cd} || Cd =/= undefined]
+                         ++ ExtraOpts,
+            try
+                Port = open_port({spawn_executable, ResolvedExe}, PortOpts),
+                {ok, Port}
+            catch
+                error:Reason -> {error, Reason}
+            end
     catch
-        error:Reason -> {error, Reason}
+        error:{executable_not_found, _} = Reason ->
+            {error, Reason};
+        error:Reason ->
+            {error, Reason}
     end;
 start(_Opts) ->
     {error, {missing_option, executable}}.
