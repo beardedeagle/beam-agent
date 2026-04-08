@@ -38,6 +38,8 @@ start(#{executable := Exe} = Opts) ->
             end
     catch
         error:{executable_not_found, _} = Reason ->
+            {error, Reason};
+        error:Reason ->
             {error, Reason}
     end;
 start(_Opts) ->

@@ -563,6 +563,17 @@ segment_string(Bin) when is_binary(Bin) ->
 segment_string(Str) when is_list(Str) ->
     Str.
 
+-doc """
+Resolve an executable name to an absolute path via `$PATH` lookup.
+
+Returns the absolute path as a string. Raises `error({executable_not_found, Name})`
+when the name has no path separator and cannot be found via `os:find_executable/1`.
+Names containing a path separator (e.g., `"./my_cli"`) are returned as-is.
+
+This is the canonical resolution point for all process spawning in the SDK.
+Transport modules must call this before `open_port({spawn_executable, ...})`
+since `spawn_executable` does not search `$PATH`.
+""".
 -spec resolve_executable(binary() | string()) -> string().
 resolve_executable(Program) ->
     ProgramStr = segment_string(Program),
