@@ -14,7 +14,7 @@ Each backend dispatches to its native CLI or API:
 
   - **claude** — `claude auth status | login | logout`
   - **codex**  — `codex login status`, `codex login [--with-api-key KEY]`
-  - **copilot** — env vars / `~/.copilot/config.json`, `copilot auth login | logout`
+  - **copilot** — env vars / `~/.copilot/config.json`, `copilot login | logout`
   - **opencode** — REST via `opencode_http` (`/auth` endpoints)
   - **gemini** — PTY-interactive; checks env keys / `~/.gemini/oauth_creds.json`
 
@@ -384,7 +384,7 @@ codex_logout(Opts) ->
     end.
 
 %%====================================================================
-%% Copilot — file/env-based auth detection, `copilot auth login|logout`
+%% Copilot — file/env-based auth detection, `copilot login|logout`
 %%
 %% The copilot CLI has no `auth status` command.  Auth state is detected
 %% by checking environment variables and the config file that the CLI
@@ -484,21 +484,26 @@ check_copilot_config() ->
                    #{hint =>
                          <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
                            "or ~/.copilot/config.json found.  Run `copilot "
-                           "auth login` to authenticate.">>}}}
+                           "login` to authenticate.">>}}}
     end.
 
 copilot_login(Opts, VaultEnv) ->
     Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "login"],
     Timeout = maps:get(timeout, Opts, ?LOGIN_TIMEOUT),
-    case run_cli(Cli, Args, [], VaultEnv, Timeout) of
-        {ok, 0, Lines} ->
+    case run_copilot_auth_command(Cli,
+                                  ["login"],
+                                  ["auth", "login"],
+                                  [],
+                                  VaultEnv,
+                                  Timeout,
+                                  login) of
+        {ok, Lines} ->
             {ok,
              #{backend => copilot,
                outcome => authenticated,
                method => cli,
                raw_output => join_lines(Lines)}};
-        {ok, _N, Lines} ->
+        {error, {command_failed, Lines}} ->
             {ok,
              #{backend => copilot,
                outcome => failed,
@@ -511,12 +516,16 @@ copilot_login(Opts, VaultEnv) ->
 
 copilot_logout(Opts) ->
     Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "logout"],
     Timeout = maps:get(timeout, Opts, ?LOGOUT_TIMEOUT),
-    case run_cli(Cli, Args, [], Timeout) of
-        {ok, 0, _Lines} ->
+    case run_copilot_auth_command(Cli,
+                                  ["logout"],
+                                  ["auth", "logout"],
+                                  [],
+                                  Timeout,
+                                  logout) of
+        {ok, _Lines} ->
             ok;
-        {ok, _N, Lines} ->
+        {error, {command_failed, Lines}} ->
             {error, {logout_failed, join_lines(Lines)}};
         {error, _} = Err ->
             Err
@@ -1328,6 +1337,109 @@ run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
             logger:info("Auth CLI exec: ~s ~s", [Program, args_summary(Args)]),
             run_port(ExePath, Args, InternalEnv ++ VaultVars, Timeout)
     end.
+
+run_copilot_auth_command(Program, PreferredArgs, LegacyArgs, InternalEnv, Timeout, Command) ->
+    case run_cli(Program, PreferredArgs, InternalEnv, Timeout) of
+        {ok, ExitCode, Lines} ->
+            maybe_retry_copilot_auth_command(Program,
+                                             ExitCode,
+                                             Lines,
+                                             LegacyArgs,
+                                             InternalEnv,
+                                             Timeout,
+                                             Command);
+        {error, _} = Err ->
+            Err
+    end.
+
+run_copilot_auth_command(Program,
+                         PreferredArgs,
+                         LegacyArgs,
+                         InternalEnv,
+                         VaultEnv,
+                         Timeout,
+                         Command) ->
+    case run_cli(Program, PreferredArgs, InternalEnv, VaultEnv, Timeout) of
+        {ok, ExitCode, Lines} ->
+            maybe_retry_copilot_auth_command(Program,
+                                             ExitCode,
+                                             Lines,
+                                             LegacyArgs,
+                                             InternalEnv,
+                                             VaultEnv,
+                                             Timeout,
+                                             Command);
+        {error, _} = Err ->
+            Err
+    end.
+
+maybe_retry_copilot_auth_command(Program,
+                                 ExitCode,
+                                 Lines,
+                                 LegacyArgs,
+                                 InternalEnv,
+                                 Timeout,
+                                 Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            case run_cli(Program, LegacyArgs, InternalEnv, Timeout) of
+                {ok, LegacyExit, LegacyLines} ->
+                    finalize_copilot_auth_command(LegacyExit, LegacyLines, Command);
+                {error, _} = Err ->
+                    Err
+            end;
+        false ->
+            finalize_copilot_auth_command(ExitCode, Lines, Command)
+    end.
+
+maybe_retry_copilot_auth_command(Program,
+                                 ExitCode,
+                                 Lines,
+                                 LegacyArgs,
+                                 InternalEnv,
+                                 VaultEnv,
+                                 Timeout,
+                                 Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            case run_cli(Program, LegacyArgs, InternalEnv, VaultEnv, Timeout) of
+                {ok, LegacyExit, LegacyLines} ->
+                    finalize_copilot_auth_command(LegacyExit, LegacyLines, Command);
+                {error, _} = Err ->
+                    Err
+            end;
+        false ->
+            finalize_copilot_auth_command(ExitCode, Lines, Command)
+    end.
+
+finalize_copilot_auth_command(0, Lines, _Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            {error, unsupported_copilot_auth_command()};
+        false ->
+            {ok, Lines}
+    end;
+finalize_copilot_auth_command(_ExitCode, Lines, _Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            {error, unsupported_copilot_auth_command()};
+        false ->
+            {error, {command_failed, Lines}}
+    end.
+
+-spec copilot_top_level_help([string()]) -> boolean().
+copilot_top_level_help([Line | _]) ->
+    string:trim(Line) =:= "Usage: copilot [options] [command]";
+copilot_top_level_help([]) ->
+    false.
+
+unsupported_copilot_auth_command() ->
+    {not_supported,
+     copilot,
+     auth,
+     <<"Installed Copilot CLI did not recognize either the top-level or "
+       "legacy auth commands. Upgrade the CLI and use `copilot login` "
+       "or `copilot logout`.">>}.
 
 -spec run_port(string(), [string()], [{string(), string()}], pos_integer()) ->
                   {ok, non_neg_integer(), [string()]} | {error, term()}.

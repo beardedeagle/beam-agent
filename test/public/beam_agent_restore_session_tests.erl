@@ -38,7 +38,7 @@ safe_restore(SessionId, Opts) ->
     case Result of
         {ok, Pid} when is_pid(Pid) ->
             %% Session started successfully — stop it to avoid leaks.
-            catch beam_agent:stop_session(Pid);
+            catch beam_agent:stop(Pid);
         _ ->
             ok
     end,

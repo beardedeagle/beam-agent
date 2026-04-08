@@ -9,6 +9,7 @@
 %%%   - verify_executable_safety/1 (world-writable rejection, file type)
 %%%   - resolve_symlinks/1 (follows links, detects loops)
 %%%   - is_localhost/1 (allowlist)
+%%%   - CLI command-shape regression coverage for auth backends
 %%%
 %%% All tests use real filesystem operations — no mocks.
 %%%-------------------------------------------------------------------
@@ -261,6 +262,72 @@ scrub_env_all_dangerous_vars_stripped_test() ->
         end, Dangerous).
 
 %%====================================================================
+%% CLI command-shape regression coverage
+%%====================================================================
+
+claude_status_uses_json_flag_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ArgsPath = filename:join(TmpDir, "claude.args"),
+        CliPath = write_fake_cli(TmpDir, "claude",
+            ["printf '%s\\n' \"$@\" > ", sh_quote(ArgsPath), "\n",
+             "printf '%s\\n' '{\"loggedIn\":true}'\n"]),
+        {ok, Status} = beam_agent_auth_core:status(claude, #{cli_path => CliPath}),
+        ?assertEqual(true, maps:get(authenticated, Status)),
+        ?assertEqual(["auth", "status", "--json"], read_lines(ArgsPath))
+    after
+        rm_rf(TmpDir)
+    end.
+
+copilot_login_prefers_top_level_command_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ArgsPath = filename:join(TmpDir, "copilot-login.args"),
+        CliPath = write_fake_cli(TmpDir, "copilot",
+            ["printf '%s\\n' \"$@\" > ", sh_quote(ArgsPath), "\n",
+             "printf '%s\\n' 'login ok'\n"]),
+        {ok, Result} = beam_agent_auth_core:login(copilot, #{cli_path => CliPath}),
+        ?assertEqual(authenticated, maps:get(outcome, Result)),
+        ?assertEqual(["login"], read_lines(ArgsPath))
+    after
+        rm_rf(TmpDir)
+    end.
+
+copilot_login_falls_back_to_legacy_auth_subcommand_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ArgsPath = filename:join(TmpDir, "copilot-fallback.args"),
+        CliPath = write_fake_cli(TmpDir, "copilot",
+            ["printf '%s\\n' \"$@\" >> ", sh_quote(ArgsPath), "\n",
+             "printf '%s\\n' '--' >> ", sh_quote(ArgsPath), "\n",
+             "if [ \"$1\" = \"login\" ]; then\n",
+             "  printf '%s\\n' 'Usage: copilot [options] [command]'\n",
+             "  exit 0\n",
+             "fi\n",
+             "printf '%s\\n' 'legacy login ok'\n"]),
+        {ok, Result} = beam_agent_auth_core:login(copilot, #{cli_path => CliPath}),
+        ?assertEqual(authenticated, maps:get(outcome, Result)),
+        ?assertEqual(["login", "--", "auth", "login", "--"], read_lines(ArgsPath))
+    after
+        rm_rf(TmpDir)
+    end.
+
+copilot_logout_help_output_is_not_treated_as_success_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ArgsPath = filename:join(TmpDir, "copilot-logout.args"),
+        CliPath = write_fake_cli(TmpDir, "copilot",
+            ["printf '%s\\n' \"$@\" >> ", sh_quote(ArgsPath), "\n",
+             "printf '%s\\n' '--' >> ", sh_quote(ArgsPath), "\n",
+             "printf '%s\\n' 'Usage: copilot [options] [command]'\n"]),
+        ?assertMatch({error, {not_supported, copilot, auth, _}},
+                     beam_agent_auth_core:logout(copilot, #{cli_path => CliPath})),
+        ?assertEqual(["logout", "--", "auth", "logout", "--"], read_lines(ArgsPath))
+    after
+        rm_rf(TmpDir)
+    end.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -277,7 +344,24 @@ make_tmp_dir() ->
     Unique = integer_to_list(erlang:unique_integer([positive])),
     Dir = filename:join(Base, "auth_core_test_" ++ Unique),
     ok = filelib:ensure_dir(filename:join(Dir, "placeholder")),
+    _ = file:change_mode(Dir, 8#700),
     Dir.
+
+write_fake_cli(Dir, Name, BodyLines) ->
+    Path = filename:join(Dir, Name),
+    ok = file:write_file(Path,
+                         iolist_to_binary(["#!/bin/sh\n" | BodyLines])),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+read_lines(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    [binary_to_list(Line)
+     || Line <- binary:split(Bin, <<"\n">>, [global]),
+        Line =/= <<>>].
+
+sh_quote(Path) ->
+    ["'", Path, "'"].
 
 rm_rf(Dir) ->
     case file:list_dir(Dir) of
