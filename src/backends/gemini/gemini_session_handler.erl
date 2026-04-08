@@ -191,11 +191,16 @@ build_session_info(#hstate{session_id = SessionId,
                             updated_at = UpdatedAt,
                             available_commands = AvailCmds,
                             opts = Opts}) ->
+    %% Merge available_models into init_response so the generic
+    %% extract_init_field(Session, models, models, []) contract works.
+    %% Gemini's two-phase init populates models from session/start,
+    %% not initialize — but consumers expect init_response.<<"models">>.
+    MergedInit = InitResponse#{<<"models">> => AvailModels},
     #{adapter => gemini,
       transport => gemini_cli,
       protocol => acp,
       gemini_session_id => SessionId,
-      init_response => InitResponse,
+      init_response => MergedInit,
       agent_capabilities => AgentCaps,
       modes => #{available_modes => AvailModes,
                  current_mode_id => CurMode},

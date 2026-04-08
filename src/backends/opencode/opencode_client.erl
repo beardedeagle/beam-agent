@@ -884,7 +884,24 @@ supported_commands(Session) ->
     extract_init_field(Session, commands, slash_commands, []).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    %% Opencode does not populate models during init. Query the
+    %% provider endpoint which returns the full model catalog.
+    case provider_list(Session) of
+        {ok, #{<<"models">> := Models}} when is_list(Models) ->
+            {ok, Models};
+        {ok, #{<<"providers">> := Provs}} when is_list(Provs) ->
+            %% Flatten models across all providers into a single list.
+            Models = lists:flatmap(
+                fun(#{<<"models">> := Ms}) when is_list(Ms) -> Ms;
+                   (_) -> []
+                end, Provs),
+            {ok, Models};
+        {ok, _} ->
+            %% Unexpected shape — fall back to init_response.
+            extract_init_field(Session, models, models, []);
+        {error, _} ->
+            extract_init_field(Session, models, models, [])
+    end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
