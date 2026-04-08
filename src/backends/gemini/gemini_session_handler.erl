@@ -195,7 +195,12 @@ build_session_info(#hstate{session_id = SessionId,
     %% extract_init_field(Session, models, models, []) contract works.
     %% Gemini's two-phase init populates models from session/start,
     %% not initialize — but consumers expect init_response.<<"models">>.
-    MergedInit = InitResponse#{<<"models">> => AvailModels},
+    %% Only overwrite when session/start returned models; preserve any
+    %% model data from the initialize handshake during early init.
+    MergedInit = case AvailModels of
+        [] -> InitResponse;
+        _  -> InitResponse#{<<"models">> => AvailModels}
+    end,
     #{adapter => gemini,
       transport => gemini_cli,
       protocol => acp,

@@ -538,7 +538,7 @@ supported_models(Session) ->
         {ok, #{<<"models">> := Models}} when is_list(Models) ->
             {ok, Models};
         {ok, _} ->
-            {ok, []};
+            extract_init_field(Session, models, models, []);
         {error, _} = Err ->
             Err
     end.
