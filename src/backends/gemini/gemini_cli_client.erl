@@ -623,7 +623,18 @@ external_agent_config_import(Session, Opts) when is_map(Opts) ->
     beam_agent_config:external_agent_config_import(Session, Opts).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    %% Gemini populates available_models from the session/start response,
+    %% stored at session_info.models.available_models — not inside
+    %% init_response where extract_init_field looks.  Check the
+    %% session-start path first, fall back to init_response for
+    %% forward-compatibility.
+    case session_info(Session) of
+        {ok, #{models := #{available_models := Models}}}
+          when is_list(Models), Models =/= [] ->
+            {ok, Models};
+        _ ->
+            extract_init_field(Session, models, models, [])
+    end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
