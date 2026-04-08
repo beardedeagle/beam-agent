@@ -19,6 +19,12 @@ normalize_model_list_result_keeps_list_results_test() ->
     ?assertEqual({ok, Models},
                  beam_agent_catalog:normalize_model_list_result({ok, Models})).
 
+normalize_model_list_result_rejects_unexpected_success_shape_test() ->
+    ?assertEqual(
+        {error, {unexpected_model_list_shape, #{<<"items">> => []}}},
+        beam_agent_catalog:normalize_model_list_result(
+            {ok, #{<<"items">> => []}})).
+
 maybe_fallback_model_list_uses_supported_models_on_session_error_test() ->
     Models = [#{<<"modelId">> => <<"gpt-5">>}],
     ?assertEqual(

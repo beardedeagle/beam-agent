@@ -327,6 +327,21 @@ copilot_logout_help_output_is_not_treated_as_success_test() ->
         rm_rf(TmpDir)
     end.
 
+home_dir_missing_returns_undefined_test() ->
+    with_env_unset(
+        "HOME",
+        fun() ->
+            ?assertEqual(undefined, beam_agent_auth_core:home_dir())
+        end).
+
+copilot_config_without_home_is_unauthenticated_test() ->
+    with_env_unset(
+        "HOME",
+        fun() ->
+            {ok, Status} = beam_agent_auth_core:check_copilot_config(),
+            ?assertEqual(false, maps:get(authenticated, Status))
+        end).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -362,6 +377,18 @@ read_lines(Path) ->
 
 sh_quote(Path) ->
     ["'", Path, "'"].
+
+with_env_unset(Name, Fun) ->
+    Previous = os:getenv(Name),
+    os:unsetenv(Name),
+    try
+        Fun()
+    after
+        case Previous of
+            false -> os:unsetenv(Name);
+            Value -> os:putenv(Name, Value)
+        end
+    end.
 
 rm_rf(Dir) ->
     case file:list_dir(Dir) of

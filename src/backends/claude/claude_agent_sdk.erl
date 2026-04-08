@@ -124,7 +124,8 @@
 -export([discover_models_from_claude_config/0,
          discover_models_from_claude_config/1,
          collect_claude_model_ids/1,
-         normalize_claude_model_id/1]).
+         normalize_claude_model_id/1,
+         claude_config_path/0]).
 -endif.
 
 %% Universal core return shape; map() is intentional.
@@ -783,9 +784,21 @@ extract_from_system_info(Info, Key, Default) ->
 
 -spec discover_models_from_claude_config() -> {ok, [map()]}.
 discover_models_from_claude_config() ->
-    Home = os:getenv("HOME", "/tmp"),
-    discover_models_from_claude_config(
-        filename:join([Home, ".claude.json"])).
+    case claude_config_path() of
+        undefined ->
+            {ok, []};
+        Path ->
+            discover_models_from_claude_config(Path)
+    end.
+
+-spec claude_config_path() -> file:filename_all() | undefined.
+claude_config_path() ->
+    case os:getenv("HOME") of
+        false ->
+            undefined;
+        Home ->
+            filename:join([Home, ".claude.json"])
+    end.
 
 -spec discover_models_from_claude_config(file:filename_all()) ->
     {ok, [map()]}.

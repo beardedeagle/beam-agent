@@ -36,6 +36,14 @@ normalize_claude_model_id_strips_context_suffix_test() ->
                  claude_agent_sdk:normalize_claude_model_id(
                      <<"claude-sonnet-4-6[1m]">>)).
 
+claude_config_path_without_home_returns_undefined_test() ->
+    with_env_unset(
+        "HOME",
+        fun() ->
+            ?assertEqual(undefined, claude_agent_sdk:claude_config_path()),
+            ?assertEqual({ok, []}, claude_agent_sdk:discover_models_from_claude_config())
+        end).
+
 make_tmp_dir() ->
     Base = filename:basedir(user_cache, "beam_agent_test"),
     Unique = integer_to_list(erlang:unique_integer([positive])),
@@ -58,4 +66,16 @@ rm_rf(Dir) ->
             file:del_dir(Dir);
         {error, _} ->
             ok
+    end.
+
+with_env_unset(Name, Fun) ->
+    Previous = os:getenv(Name),
+    os:unsetenv(Name),
+    try
+        Fun()
+    after
+        case Previous of
+            false -> os:unsetenv(Name);
+            Value -> os:putenv(Name, Value)
+        end
     end.

@@ -169,6 +169,7 @@ beam_agent_catalog_core     beam_agent_registry
     file_find_symbols/2,
     file_read_impl/2,
     file_resolve_glob/3,
+    maybe_fallback_model_list/2,
     prefer_model_fallback/2
 ]}).
 
@@ -322,7 +323,7 @@ model_list(Session, Opts) ->
             fun() -> supported_models(Session) end)).
 
 -spec maybe_fallback_model_list({ok, term()} | {error, term()},
-                                fun(() -> {ok, list()} | {error, term()})) ->
+                                fun(() -> {ok, term()} | {error, term()})) ->
     {ok, term()} | {error, term()}.
 maybe_fallback_model_list({error, session_error} = Err, Fallback) ->
     prefer_model_fallback(Err, Fallback);
@@ -338,8 +339,8 @@ maybe_fallback_model_list(Result, _Fallback) ->
     Result.
 
 -spec prefer_model_fallback({error, term()},
-                            fun(() -> {ok, list()} | {error, term()})) ->
-    {ok, list()} | {error, term()}.
+                            fun(() -> {ok, term()} | {error, term()})) ->
+    {ok, term()} | {error, term()}.
 prefer_model_fallback(Err, Fallback) ->
     try Fallback() of
         {ok, _} = Ok ->
@@ -365,8 +366,8 @@ normalize_model_list_result({ok, Models}) when is_list(Models) ->
     {ok, Models};
 normalize_model_list_result({error, _} = Err) ->
     Err;
-normalize_model_list_result({ok, _Other}) ->
-    {ok, []}.
+normalize_model_list_result({ok, Other}) ->
+    {error, {unexpected_model_list_shape, Other}}.
 
 %%--------------------------------------------------------------------
 %% List Functions

@@ -61,7 +61,8 @@ for Claude) rather than passing the secret on the command line — avoiding
 -ifdef(TEST).
 
 -export([validate_base_url/1, verify_executable_safety/1, resolve_symlinks/1,
-         compute_file_hash/1, is_localhost/1, scrub_env/1]).
+         compute_file_hash/1, is_localhost/1, scrub_env/1, home_dir/0,
+         check_copilot_config/0]).
 
 -endif.
 
@@ -443,48 +444,59 @@ validate_copilot_token(_Token, Source) ->
 %% `logged_in_users` array.  A non-empty array means at least one
 %% GitHub account is authenticated.
 check_copilot_config() ->
-    Home = os:getenv("HOME", "/tmp"),
-    ConfigPath = filename:join([Home, ".copilot", "config.json"]),
-    case file:read_file(ConfigPath) of
-        {ok, Bin} ->
-            try json:decode(Bin) of
-                #{<<"logged_in_users">> := Users} when is_list(Users), Users =/= [] ->
-                    {ok,
-                     #{backend => copilot,
-                       authenticated => true,
-                       method => config_file,
-                       details => #{source => <<"~/.copilot/config.json">>,
-                                    accounts => length(Users)}}};
-                _ ->
-                    {ok,
-                     #{backend => copilot,
-                       authenticated => false,
-                       method => config_file,
-                       details =>
-                           #{hint =>
-                                 <<"~/.copilot/config.json exists but contains "
-                                   "no logged-in users.">>}}}
-            catch
-                _:_ ->
-                    {ok,
-                     #{backend => copilot,
-                       authenticated => false,
-                       method => config_file,
-                       details =>
-                           #{hint =>
-                                 <<"~/.copilot/config.json exists but could "
-                                   "not be parsed.">>}}}
-            end;
-        {error, enoent} ->
+    case home_dir() of
+        undefined ->
             {ok,
              #{backend => copilot,
                authenticated => false,
                method => config_file,
                details =>
                    #{hint =>
-                         <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
-                           "or ~/.copilot/config.json found.  Run `copilot "
-                           "login` to authenticate.">>}}}
+                         <<"HOME is not set, so ~/.copilot/config.json cannot "
+                           "be consulted safely.">>}}};
+        Home ->
+            ConfigPath = filename:join([Home, ".copilot", "config.json"]),
+            case file:read_file(ConfigPath) of
+                {ok, Bin} ->
+                    try json:decode(Bin) of
+                        #{<<"logged_in_users">> := Users} when is_list(Users), Users =/= [] ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => true,
+                               method => config_file,
+                               details => #{source => <<"~/.copilot/config.json">>,
+                                            accounts => length(Users)}}};
+                        _ ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => false,
+                               method => config_file,
+                               details =>
+                                   #{hint =>
+                                         <<"~/.copilot/config.json exists but contains "
+                                           "no logged-in users.">>}}}
+                    catch
+                        _:_ ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => false,
+                               method => config_file,
+                               details =>
+                                   #{hint =>
+                                         <<"~/.copilot/config.json exists but could "
+                                           "not be parsed.">>}}}
+                    end;
+                {error, enoent} ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
+                                   "or ~/.copilot/config.json found.  Run `copilot "
+                                   "login` to authenticate.">>}}}
+            end
     end.
 
 copilot_login(Opts, VaultEnv) ->
@@ -656,25 +668,36 @@ gemini_status(Opts) ->
 %% with gcloud ADC.  Consumer Gemini subscription auth uses a dedicated
 %% OAuth Client ID that gcloud tokens cannot satisfy.
 check_gemini_oauth_creds(_Opts) ->
-    Home = os:getenv("HOME", "/tmp"),
-    CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
-    case filelib:is_regular(CredsPath) of
-        true ->
-            {ok,
-             #{backend => gemini,
-               authenticated => true,
-               method => manual,
-               details => #{source => <<"Gemini CLI OAuth">>, path => list_to_binary(CredsPath)}}};
-        false ->
+    case home_dir() of
+        undefined ->
             {ok,
              #{backend => gemini,
                authenticated => false,
                method => manual,
                details =>
                    #{hint =>
-                         <<"No GEMINI_API_KEY, GOOGLE_API_KEY, or Gemini CLI "
-                           "OAuth credentials found.  Run the gemini CLI to "
-                           "authenticate via browser OAuth.">>}}}
+                         <<"HOME is not set, so Gemini CLI OAuth credentials "
+                           "cannot be consulted safely.">>}}};
+        Home ->
+            CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
+            case filelib:is_regular(CredsPath) of
+                true ->
+                    {ok,
+                     #{backend => gemini,
+                       authenticated => true,
+                       method => manual,
+                       details => #{source => <<"Gemini CLI OAuth">>, path => list_to_binary(CredsPath)}}};
+                false ->
+                    {ok,
+                     #{backend => gemini,
+                       authenticated => false,
+                       method => manual,
+                       details =>
+                           #{hint =>
+                                 <<"No GEMINI_API_KEY, GOOGLE_API_KEY, or Gemini CLI "
+                                   "OAuth credentials found.  Run the gemini CLI to "
+                                   "authenticate via browser OAuth.">>}}}
+            end
     end.
 
 %% Login via the `gemini` CLI's own OAuth flow.
@@ -739,17 +762,30 @@ gemini_login(Opts, _VaultEnv) ->
 %% file directly.
 %% (Verified from gemini-cli source: GEMINI_DIR='.gemini', OAUTH_FILE='oauth_creds.json')
 gemini_logout(_Opts) ->
-    Home = os:getenv("HOME", "/tmp"),
-    CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
-    case file:delete(CredsPath) of
-        ok ->
-            logger:info("Gemini logout: removed ~s", [CredsPath]),
+    case home_dir() of
+        undefined ->
             ok;
-        {error, enoent} ->
-            logger:info("Gemini logout: no credential file at ~s", [CredsPath]),
-            ok;
-        {error, Reason} ->
-            {error, {logout_failed, {CredsPath, Reason}}}
+        Home ->
+            CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
+            case file:delete(CredsPath) of
+                ok ->
+                    logger:info("Gemini logout: removed ~s", [CredsPath]),
+                    ok;
+                {error, enoent} ->
+                    logger:info("Gemini logout: no credential file at ~s", [CredsPath]),
+                    ok;
+                {error, Reason} ->
+                    {error, {logout_failed, {CredsPath, Reason}}}
+            end
+    end.
+
+-spec home_dir() -> string() | undefined.
+home_dir() ->
+    case os:getenv("HOME") of
+        false ->
+            undefined;
+        Home ->
+            Home
     end.
 
 %%--------------------------------------------------------------------
