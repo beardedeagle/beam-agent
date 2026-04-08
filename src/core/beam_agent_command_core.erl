@@ -107,7 +107,8 @@ Usage:
 
 -export([
     run/1,
-    run/2
+    run/2,
+    resolve_executable/1
 ]).
 
 -export_type([command_opts/0, command_result/0]).
