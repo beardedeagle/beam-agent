@@ -14,7 +14,7 @@ Each backend dispatches to its native CLI or API:
 
   - **claude** — `claude auth status | login | logout`
   - **codex**  — `codex login status`, `codex login [--with-api-key KEY]`
-  - **copilot** — `copilot auth status`, `copilot auth login | logout`
+  - **copilot** — env vars / `~/.copilot/config.json`, `copilot auth login | logout`
   - **opencode** — REST via `opencode_http` (`/auth` endpoints)
   - **gemini** — PTY-interactive; checks env keys / `~/.gemini/oauth_creds.json`
 
@@ -384,28 +384,95 @@ codex_logout(Opts) ->
     end.
 
 %%====================================================================
-%% Copilot — `copilot auth status`, `copilot auth login|logout`
+%% Copilot — file/env-based auth detection, `copilot auth login|logout`
+%%
+%% The copilot CLI has no `auth status` command.  Auth state is detected
+%% by checking environment variables and the config file that the CLI
+%% itself reads:
+%%
+%%   1. COPILOT_GITHUB_TOKEN env var (explicit override)
+%%   2. GH_TOKEN env var (GitHub CLI token, accepted by copilot)
+%%   3. GITHUB_TOKEN env var (CI/Actions token, accepted by copilot)
+%%   4. ~/.copilot/config.json — `logged_in_users` non-empty array
 %%====================================================================
 
-copilot_status(Opts) ->
-    Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "status"],
-    Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
-    case run_cli(Cli, Args, [], Timeout) of
-        {ok, 0, Lines} ->
+copilot_status(_Opts) ->
+    case os:getenv("COPILOT_GITHUB_TOKEN") of
+        false ->
+            case os:getenv("GH_TOKEN") of
+                false ->
+                    case os:getenv("GITHUB_TOKEN") of
+                        false ->
+                            check_copilot_config();
+                        _Key ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => true,
+                               method => env,
+                               details => #{source => <<"GITHUB_TOKEN env">>}}}
+                    end;
+                _Key ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => true,
+                       method => env,
+                       details => #{source => <<"GH_TOKEN env">>}}}
+            end;
+        _Key ->
             {ok,
              #{backend => copilot,
                authenticated => true,
-               method => cli,
-               raw_output => join_lines(Lines)}};
-        {ok, _N, Lines} ->
+               method => env,
+               details => #{source => <<"COPILOT_GITHUB_TOKEN env">>}}}
+    end.
+
+%% Check for Copilot CLI credentials at ~/.copilot/config.json.
+%% The copilot CLI stores login state in a JSON file with a
+%% `logged_in_users` array.  A non-empty array means at least one
+%% GitHub account is authenticated.
+check_copilot_config() ->
+    Home = os:getenv("HOME", "/tmp"),
+    ConfigPath = filename:join([Home, ".copilot", "config.json"]),
+    case file:read_file(ConfigPath) of
+        {ok, Bin} ->
+            try json:decode(Bin) of
+                #{<<"logged_in_users">> := Users} when is_list(Users), Users =/= [] ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => true,
+                       method => config_file,
+                       details => #{source => <<"~/.copilot/config.json">>,
+                                    accounts => length(Users)}}};
+                _ ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 <<"~/.copilot/config.json exists but contains "
+                                   "no logged-in users.">>}}}
+            catch
+                _:_ ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 <<"~/.copilot/config.json exists but could "
+                                   "not be parsed.">>}}}
+            end;
+        {error, enoent} ->
             {ok,
              #{backend => copilot,
                authenticated => false,
-               method => cli,
-               raw_output => join_lines(Lines)}};
-        {error, _} = Err ->
-            Err
+               method => config_file,
+               details =>
+                   #{hint =>
+                         <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
+                           "or ~/.copilot/config.json found.  Run `copilot "
+                           "auth login` to authenticate.">>}}}
     end.
 
 copilot_login(Opts, VaultEnv) ->
