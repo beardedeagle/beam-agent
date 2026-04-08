@@ -29,10 +29,19 @@ setup() ->
     ok = beam_agent_session_store_core:clear().
 
 %% Call restore_session while trapping exits from the linked session
-%% engine process that crashes because no real CLI binary is available.
+%% engine process.  On machines with real CLI binaries installed,
+%% start_session may succeed ({ok, Pid}) rather than crash — both
+%% outcomes prove that restore_session built valid opts and delegated.
 safe_restore(SessionId, Opts) ->
     OldFlag = process_flag(trap_exit, true),
     Result = beam_agent:restore_session(SessionId, Opts),
+    case Result of
+        {ok, Pid} when is_pid(Pid) ->
+            %% Session started successfully — stop it to avoid leaks.
+            catch beam_agent:stop_session(Pid);
+        _ ->
+            ok
+    end,
     flush_exits(),
     process_flag(trap_exit, OldFlag),
     Result.
@@ -93,12 +102,16 @@ restore_reaches_start_session_test() ->
         model => <<"claude-sonnet-4-6">>,
         cwd => <<"/tmp/test">>
     }),
-    %% start_session fails (no real CLI binary), but the error must NOT
-    %% be from restore_session validation — proving opts were built and
-    %% start_session was actually invoked.
-    {error, Reason} = safe_restore(SId, #{}),
-    ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason).
+    %% On machines without real CLI binaries, start_session fails — but
+    %% the error must NOT be from restore_session validation.
+    %% On machines with the CLI installed, start_session succeeds.
+    %% Both outcomes prove opts were built and start_session was invoked.
+    case safe_restore(SId, #{}) of
+        {ok, Pid} when is_pid(Pid) -> ok;
+        {error, Reason} ->
+            ?assertNotMatch({session_not_found, _}, Reason),
+            ?assertNotMatch({missing_backend, _}, Reason)
+    end.
 
 %%====================================================================
 %% Caller opts override stored metadata
@@ -114,12 +127,12 @@ caller_opts_override_test() ->
     }),
     %% Override backend and model; the call should still pass our
     %% validation and reach start_session.
-    {error, Reason} = safe_restore(SId, #{
-        backend => gemini,
-        model => <<"override-model">>
-    }),
-    ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason).
+    case safe_restore(SId, #{backend => gemini, model => <<"override-model">>}) of
+        {ok, Pid} when is_pid(Pid) -> ok;
+        {error, Reason} ->
+            ?assertNotMatch({session_not_found, _}, Reason),
+            ?assertNotMatch({missing_backend, _}, Reason)
+    end.
 
 %%====================================================================
 %% Caller-supplied backend fills missing adapter
@@ -133,8 +146,11 @@ caller_backend_fills_gap_test() ->
     }),
     %% Stored metadata has no adapter, but caller provides backend.
     %% Should NOT get missing_backend.
-    {error, Reason} = safe_restore(SId, #{backend => claude}),
-    ?assertNotMatch({missing_backend, _}, Reason).
+    case safe_restore(SId, #{backend => claude}) of
+        {ok, Pid} when is_pid(Pid) -> ok;
+        {error, Reason} ->
+            ?assertNotMatch({missing_backend, _}, Reason)
+    end.
 
 %%====================================================================
 %% Empty/blank metadata fields are ignored
@@ -150,6 +166,9 @@ blank_metadata_fields_ignored_test() ->
     }),
     %% Empty model and cwd should not appear in the built opts.
     %% The call reaches start_session (error is not from our layer).
-    {error, Reason} = safe_restore(SId, #{}),
-    ?assertNotMatch({session_not_found, _}, Reason),
-    ?assertNotMatch({missing_backend, _}, Reason).
+    case safe_restore(SId, #{}) of
+        {ok, Pid} when is_pid(Pid) -> ok;
+        {error, Reason} ->
+            ?assertNotMatch({session_not_found, _}, Reason),
+            ?assertNotMatch({missing_backend, _}, Reason)
+    end.
