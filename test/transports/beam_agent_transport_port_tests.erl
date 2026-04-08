@@ -20,3 +20,17 @@ not_found_returns_error_test() ->
 missing_option_returns_error_test() ->
     ?assertEqual({error, {missing_option, executable}},
                  beam_agent_transport_port:start(#{})).
+
+%% Positive path — a bare name in $PATH resolves and starts a port.
+bare_name_resolves_via_path_test() ->
+    {ok, Port} = beam_agent_transport_port:start(
+        #{executable => "sh", args => ["-c", "exit 0"]}
+    ),
+    %% Drain the exit_status message to keep the mailbox clean.
+    receive
+        {Port, {exit_status, _}} -> ok
+    after
+        5000 -> ok
+    end,
+    catch port_close(Port),
+    ok.
