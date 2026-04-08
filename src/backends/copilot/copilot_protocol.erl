@@ -609,31 +609,28 @@ encode_error_response(Id, Code, Message, Data) ->
             <<"data">> => Data}}.
 -spec build_cli_args(map()) -> [string()].
 build_cli_args(Opts) ->
-    Base = ["server", "--stdio"],
+    Base = ["--acp"],
     WithLogLevel =
         case maps:get(log_level, Opts, undefined) of
             undefined ->
                 Base;
             Level when is_binary(Level) ->
-                Base ++ ["--log-level", binary_to_list(Level)];
+                ["--log-level", binary_to_list(Level) | Base];
             Level when is_atom(Level) ->
-                Base ++ ["--log-level", atom_to_list(Level)];
+                ["--log-level", atom_to_list(Level) | Base];
             Level when is_list(Level) ->
-                Base ++ ["--log-level", Level]
+                ["--log-level", Level | Base]
         end,
-    WithProtocol =
-        WithLogLevel ++ ["--sdk-protocol-version", integer_to_list(3)],
     case maps:get(cli_args, Opts, undefined) of
         undefined ->
-            WithProtocol;
+            WithLogLevel;
         UserArgs when is_list(UserArgs) ->
-            ["server" | UserExtra] = WithProtocol,
             ExtraStrings =
-                [ 
+                [
                  ensure_list(A) ||
                      A <- UserArgs
-                ],
-            ["server" | ExtraStrings ++ UserExtra]
+                 ],
+            WithLogLevel ++ ExtraStrings
     end.
 -spec build_env(map()) -> [{string(), string()}].
 build_env(Opts) ->

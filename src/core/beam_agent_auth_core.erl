@@ -14,7 +14,7 @@ Each backend dispatches to its native CLI or API:
 
   - **claude** — `claude auth status | login | logout`
   - **codex**  — `codex login status`, `codex login [--with-api-key KEY]`
-  - **copilot** — `copilot auth status`, `copilot auth login | logout`
+  - **copilot** — env vars / `~/.copilot/config.json`, `copilot login | logout`
   - **opencode** — REST via `opencode_http` (`/auth` endpoints)
   - **gemini** — PTY-interactive; checks env keys / `~/.gemini/oauth_creds.json`
 
@@ -51,7 +51,7 @@ for Claude) rather than passing the secret on the command line — avoiding
 `/proc` exposure on Linux.
 """).
 
--export([status/2, login/2, login/3, logout/2, resolve_cli/2, strip_ansi/1,
+-export([status/2, login/2, login/3, logout/2, resolve_cli/2, run_capture_cli/3, strip_ansi/1,
          hash_executable/1, from_vault/1, sanitize_for_agent/1]).
 
     %% Utility — exposed for external callers (e.g. account_core fallback)
@@ -61,7 +61,8 @@ for Claude) rather than passing the secret on the command line — avoiding
 -ifdef(TEST).
 
 -export([validate_base_url/1, verify_executable_safety/1, resolve_symlinks/1,
-         compute_file_hash/1, is_localhost/1, scrub_env/1]).
+         compute_file_hash/1, is_localhost/1, scrub_env/1, home_dir/0,
+         check_copilot_config/0]).
 
 -endif.
 
@@ -252,7 +253,7 @@ logout(gemini, Opts) ->
 
 claude_status(Opts) ->
     Cli = resolve_cli(claude, Opts),
-    Args = ["auth", "status", "--output", "json"],
+    Args = ["auth", "status", "--json"],
     Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
     case run_cli(Cli, Args, [], Timeout) of
         {ok, 0, Lines} ->
@@ -384,42 +385,172 @@ codex_logout(Opts) ->
     end.
 
 %%====================================================================
-%% Copilot — `copilot auth status`, `copilot auth login|logout`
+%% Copilot — file/env-based auth detection, `copilot login|logout`
+%%
+%% The copilot CLI has no `auth status` command.  Auth state is detected
+%% by checking environment variables and the config file that the CLI
+%% itself reads:
+%%
+%%   1. COPILOT_GITHUB_TOKEN env var (explicit override)
+%%   2. GH_TOKEN env var (GitHub CLI token, accepted by copilot)
+%%   3. GITHUB_TOKEN env var (CI/Actions token, accepted by copilot)
+%%   4. ~/.copilot/config.json — `logged_in_users` non-empty array
 %%====================================================================
 
-copilot_status(Opts) ->
-    Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "status"],
-    Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
-    case run_cli(Cli, Args, [], Timeout) of
-        {ok, 0, Lines} ->
-            {ok,
-             #{backend => copilot,
-               authenticated => true,
-               method => cli,
-               raw_output => join_lines(Lines)}};
-        {ok, _N, Lines} ->
+copilot_status(_Opts) ->
+    %% Check env vars in copilot CLI precedence order.
+    check_copilot_env([
+        {<<"COPILOT_GITHUB_TOKEN">>, "COPILOT_GITHUB_TOKEN"},
+        {<<"GH_TOKEN">>,            "GH_TOKEN"},
+        {<<"GITHUB_TOKEN">>,        "GITHUB_TOKEN"}
+    ]).
+
+check_copilot_env([]) ->
+    check_copilot_config();
+check_copilot_env([{Label, Var} | Rest]) ->
+    case os:getenv(Var) of
+        false ->
+            check_copilot_env(Rest);
+        "" ->
+            check_copilot_env(Rest);
+        Value ->
+            validate_copilot_token(list_to_binary(Value), Label)
+    end.
+
+%% Validate the token type.  The copilot CLI explicitly rejects classic
+%% personal access tokens (ghp_).  Supported types:
+%%   - github_pat_  (fine-grained PAT with "Copilot Requests" permission)
+%%   - gho_         (OAuth token from copilot CLI or gh CLI app)
+%%   - ghs_         (GitHub Actions server-to-server token)
+validate_copilot_token(<<"github_pat_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
+validate_copilot_token(<<"gho_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
+validate_copilot_token(<<"ghs_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
+validate_copilot_token(<<"ghp_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => false,
+       method => env,
+       details => #{source => Source,
+                    hint => <<"Classic personal access tokens (ghp_) are not "
+                              "supported by Copilot.  Use a fine-grained PAT "
+                              "(github_pat_) with the 'Copilot Requests' "
+                              "permission, or run `copilot login`.">>}}};
+validate_copilot_token(_Token, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => false,
+       method => env,
+       details => #{source => Source,
+                    hint => <<"Unsupported GitHub token format for Copilot. "
+                              "Use a fine-grained PAT (github_pat_) with the "
+                              "'Copilot Requests' permission, a gho_ token, a "
+                              "ghs_ token, or run `copilot login`.">>}}}.
+
+%% Check for Copilot CLI credentials at ~/.copilot/config.json.
+%% The copilot CLI stores login state in a JSON file with a
+%% `logged_in_users` array.  A non-empty array means at least one
+%% GitHub account is authenticated.
+check_copilot_config() ->
+    case home_dir() of
+        undefined ->
             {ok,
              #{backend => copilot,
                authenticated => false,
-               method => cli,
-               raw_output => join_lines(Lines)}};
-        {error, _} = Err ->
-            Err
+               method => config_file,
+               details =>
+                   #{hint =>
+                         <<"HOME is not set, so ~/.copilot/config.json cannot "
+                           "be consulted safely.">>}}};
+        Home ->
+            ConfigPath = filename:join([Home, ".copilot", "config.json"]),
+            case file:read_file(ConfigPath) of
+                {ok, Bin} ->
+                    try json:decode(Bin) of
+                        #{<<"logged_in_users">> := Users} when is_list(Users), Users =/= [] ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => true,
+                               method => config_file,
+                               details => #{source => <<"~/.copilot/config.json">>,
+                                            accounts => length(Users)}}};
+                        _ ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => false,
+                               method => config_file,
+                               details =>
+                                   #{hint =>
+                                         <<"~/.copilot/config.json exists but contains "
+                                           "no logged-in users.">>}}}
+                    catch
+                        _:_ ->
+                            {ok,
+                             #{backend => copilot,
+                               authenticated => false,
+                               method => config_file,
+                               details =>
+                                   #{hint =>
+                                         <<"~/.copilot/config.json exists but could "
+                                           "not be parsed.">>}}}
+                    end;
+                {error, enoent} ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 <<"No COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, "
+                                   "or ~/.copilot/config.json found.  Run `copilot "
+                                   "login` to authenticate.">>}}};
+                {error, Reason} ->
+                    {ok,
+                     #{backend => copilot,
+                       authenticated => false,
+                       method => config_file,
+                       details =>
+                           #{hint =>
+                                 iolist_to_binary(
+                                     io_lib:format(
+                                         "Could not read ~~/.copilot/config.json (~s): ~p. "
+                                         "Run `copilot login` to authenticate or fix the "
+                                         "config path permissions.",
+                                         [ConfigPath, Reason]))}}}
+            end
     end.
 
 copilot_login(Opts, VaultEnv) ->
     Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "login"],
     Timeout = maps:get(timeout, Opts, ?LOGIN_TIMEOUT),
-    case run_cli(Cli, Args, [], VaultEnv, Timeout) of
-        {ok, 0, Lines} ->
+    case run_copilot_auth_command(Cli,
+                                  ["login"],
+                                  ["auth", "login"],
+                                  [],
+                                  VaultEnv,
+                                  Timeout,
+                                  login) of
+        {ok, Lines} ->
             {ok,
              #{backend => copilot,
                outcome => authenticated,
                method => cli,
                raw_output => join_lines(Lines)}};
-        {ok, _N, Lines} ->
+        {error, {command_failed, Lines}} ->
             {ok,
              #{backend => copilot,
                outcome => failed,
@@ -432,12 +563,16 @@ copilot_login(Opts, VaultEnv) ->
 
 copilot_logout(Opts) ->
     Cli = resolve_cli(copilot, Opts),
-    Args = ["auth", "logout"],
     Timeout = maps:get(timeout, Opts, ?LOGOUT_TIMEOUT),
-    case run_cli(Cli, Args, [], Timeout) of
-        {ok, 0, _Lines} ->
+    case run_copilot_auth_command(Cli,
+                                  ["logout"],
+                                  ["auth", "logout"],
+                                  [],
+                                  Timeout,
+                                  logout) of
+        {ok, _Lines} ->
             ok;
-        {ok, _N, Lines} ->
+        {error, {command_failed, Lines}} ->
             {error, {logout_failed, join_lines(Lines)}};
         {error, _} = Err ->
             Err
@@ -568,25 +703,36 @@ gemini_status(Opts) ->
 %% with gcloud ADC.  Consumer Gemini subscription auth uses a dedicated
 %% OAuth Client ID that gcloud tokens cannot satisfy.
 check_gemini_oauth_creds(_Opts) ->
-    Home = os:getenv("HOME", "/tmp"),
-    CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
-    case filelib:is_regular(CredsPath) of
-        true ->
-            {ok,
-             #{backend => gemini,
-               authenticated => true,
-               method => manual,
-               details => #{source => <<"Gemini CLI OAuth">>, path => list_to_binary(CredsPath)}}};
-        false ->
+    case home_dir() of
+        undefined ->
             {ok,
              #{backend => gemini,
                authenticated => false,
                method => manual,
                details =>
                    #{hint =>
-                         <<"No GEMINI_API_KEY, GOOGLE_API_KEY, or Gemini CLI "
-                           "OAuth credentials found.  Run the gemini CLI to "
-                           "authenticate via browser OAuth.">>}}}
+                         <<"HOME is not set, so Gemini CLI OAuth credentials "
+                           "cannot be consulted safely.">>}}};
+        Home ->
+            CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
+            case filelib:is_regular(CredsPath) of
+                true ->
+                    {ok,
+                     #{backend => gemini,
+                       authenticated => true,
+                       method => manual,
+                       details => #{source => <<"Gemini CLI OAuth">>, path => list_to_binary(CredsPath)}}};
+                false ->
+                    {ok,
+                     #{backend => gemini,
+                       authenticated => false,
+                       method => manual,
+                       details =>
+                           #{hint =>
+                                 <<"No GEMINI_API_KEY, GOOGLE_API_KEY, or Gemini CLI "
+                                   "OAuth credentials found.  Run the gemini CLI to "
+                                   "authenticate via browser OAuth.">>}}}
+            end
     end.
 
 %% Login via the `gemini` CLI's own OAuth flow.
@@ -651,17 +797,35 @@ gemini_login(Opts, _VaultEnv) ->
 %% file directly.
 %% (Verified from gemini-cli source: GEMINI_DIR='.gemini', OAUTH_FILE='oauth_creds.json')
 gemini_logout(_Opts) ->
-    Home = os:getenv("HOME", "/tmp"),
-    CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
-    case file:delete(CredsPath) of
-        ok ->
-            logger:info("Gemini logout: removed ~s", [CredsPath]),
+    case home_dir() of
+        undefined ->
             ok;
-        {error, enoent} ->
-            logger:info("Gemini logout: no credential file at ~s", [CredsPath]),
-            ok;
-        {error, Reason} ->
-            {error, {logout_failed, {CredsPath, Reason}}}
+        Home ->
+            CredsPath = filename:join([Home, ".gemini", "oauth_creds.json"]),
+            case file:delete(CredsPath) of
+                ok ->
+                    logger:info("Gemini logout: removed ~s", [CredsPath]),
+                    ok;
+                {error, enoent} ->
+                    logger:info("Gemini logout: no credential file at ~s", [CredsPath]),
+                    ok;
+                {error, Reason} ->
+                    {error, {logout_failed, {CredsPath, Reason}}}
+            end
+    end.
+
+-spec home_dir() -> string() | undefined.
+home_dir() ->
+    case os:getenv("HOME") of
+        false ->
+            undefined;
+        Home ->
+            case string:trim(Home) of
+                "" ->
+                    undefined;
+                TrimmedHome ->
+                    TrimmedHome
+            end
     end.
 
 %%--------------------------------------------------------------------
@@ -1250,6 +1414,126 @@ run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
             run_port(ExePath, Args, InternalEnv ++ VaultVars, Timeout)
     end.
 
+-doc("""
+Execute a CLI command with the same executable and environment hardening as
+the auth flows, returning captured stdout/stderr lines only when the command
+exits successfully.
+""").
+-spec run_capture_cli(string(), [string()], pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_cli(Program, Args, Timeout) ->
+    case run_cli(Program, Args, [], Timeout) of
+        {ok, 0, Lines} ->
+            {ok, Lines};
+        {ok, ExitCode, Lines} ->
+            {error, {cli_exit, ExitCode, Lines}};
+        {error, _} = Err ->
+            Err
+    end.
+
+run_copilot_auth_command(Program, PreferredArgs, LegacyArgs, InternalEnv, Timeout, Command) ->
+    case run_cli(Program, PreferredArgs, InternalEnv, Timeout) of
+        {ok, ExitCode, Lines} ->
+            maybe_retry_copilot_auth_command(Program,
+                                             ExitCode,
+                                             Lines,
+                                             LegacyArgs,
+                                             InternalEnv,
+                                             Timeout,
+                                             Command);
+        {error, _} = Err ->
+            Err
+    end.
+
+run_copilot_auth_command(Program,
+                         PreferredArgs,
+                         LegacyArgs,
+                         InternalEnv,
+                         VaultEnv,
+                         Timeout,
+                         Command) ->
+    case run_cli(Program, PreferredArgs, InternalEnv, VaultEnv, Timeout) of
+        {ok, ExitCode, Lines} ->
+            maybe_retry_copilot_auth_command(Program,
+                                             ExitCode,
+                                             Lines,
+                                             LegacyArgs,
+                                             InternalEnv,
+                                             VaultEnv,
+                                             Timeout,
+                                             Command);
+        {error, _} = Err ->
+            Err
+    end.
+
+maybe_retry_copilot_auth_command(Program,
+                                 ExitCode,
+                                 Lines,
+                                 LegacyArgs,
+                                 InternalEnv,
+                                 Timeout,
+                                 Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            case run_cli(Program, LegacyArgs, InternalEnv, Timeout) of
+                {ok, LegacyExit, LegacyLines} ->
+                    finalize_copilot_auth_command(LegacyExit, LegacyLines, Command);
+                {error, _} = Err ->
+                    Err
+            end;
+        false ->
+            finalize_copilot_auth_command(ExitCode, Lines, Command)
+    end.
+
+maybe_retry_copilot_auth_command(Program,
+                                 ExitCode,
+                                 Lines,
+                                 LegacyArgs,
+                                 InternalEnv,
+                                 VaultEnv,
+                                 Timeout,
+                                 Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            case run_cli(Program, LegacyArgs, InternalEnv, VaultEnv, Timeout) of
+                {ok, LegacyExit, LegacyLines} ->
+                    finalize_copilot_auth_command(LegacyExit, LegacyLines, Command);
+                {error, _} = Err ->
+                    Err
+            end;
+        false ->
+            finalize_copilot_auth_command(ExitCode, Lines, Command)
+    end.
+
+finalize_copilot_auth_command(0, Lines, _Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            {error, unsupported_copilot_auth_command()};
+        false ->
+            {ok, Lines}
+    end;
+finalize_copilot_auth_command(_ExitCode, Lines, _Command) ->
+    case copilot_top_level_help(Lines) of
+        true ->
+            {error, unsupported_copilot_auth_command()};
+        false ->
+            {error, {command_failed, Lines}}
+    end.
+
+-spec copilot_top_level_help([string()]) -> boolean().
+copilot_top_level_help([Line | _]) ->
+    string:trim(Line) =:= "Usage: copilot [options] [command]";
+copilot_top_level_help([]) ->
+    false.
+
+unsupported_copilot_auth_command() ->
+    {not_supported,
+     copilot,
+     auth,
+     <<"Installed Copilot CLI did not recognize either the top-level or "
+       "legacy auth commands. Upgrade the CLI and use `copilot login` "
+       "or `copilot logout`.">>}.
+
 -spec run_port(string(), [string()], [{string(), string()}], pos_integer()) ->
                   {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_port(ExePath, Args, AllEnv, Timeout) ->
@@ -1339,7 +1623,7 @@ the port and draining messages via `flush_port/1`.
   - Dangerous inherited env vars (LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.) are scrubbed
 """).
 
--dialyzer({nowarn_function, open_pty_port/3}).
+-dialyzer({nowarn_function, [open_pty_port/3, run_capture_cli/3]}).
 
 -spec open_pty_port(string(), [string()], [{string(), string()}]) ->
                        {ok, port()} |

@@ -120,6 +120,14 @@
          mcp_status/1,
          mcp_server_status_list/1]).
 
+-ifdef(TEST).
+-export([discover_models_from_claude_config/0,
+         discover_models_from_claude_config/1,
+         collect_claude_model_ids/1,
+         normalize_claude_model_id/1,
+         claude_config_path/0]).
+-endif.
+
 %% Universal core return shape; map() is intentional.
 -dialyzer({nowarn_function, [thread_realtime_start/2,
                              thread_realtime_append_audio/3,
@@ -221,7 +229,19 @@ supported_commands(Session) ->
     extract_init_field(Session, commands, slash_commands, []).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    case extract_init_field(Session, models, models, []) of
+        {ok, Models} when is_list(Models), Models =/= [] ->
+            {ok, Models};
+        {ok, _} ->
+            discover_models_from_claude_config();
+        {error, _} = Err ->
+            case discover_models_from_claude_config() of
+                {ok, Models} when Models =/= [] ->
+                    {ok, Models};
+                _ ->
+                    Err
+            end
+    end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
@@ -761,6 +781,86 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+-spec discover_models_from_claude_config() -> {ok, [map()]}.
+discover_models_from_claude_config() ->
+    case claude_config_path() of
+        undefined ->
+            {ok, []};
+        Path ->
+            discover_models_from_claude_config(Path)
+    end.
+
+-spec claude_config_path() -> file:filename_all() | undefined.
+claude_config_path() ->
+    case os:getenv("HOME") of
+        false ->
+            undefined;
+        Home ->
+            case string:trim(Home) of
+                "" ->
+                    undefined;
+                TrimmedHome ->
+                    filename:join([TrimmedHome, ".claude.json"])
+            end
+    end.
+
+-spec discover_models_from_claude_config(file:filename_all()) ->
+    {ok, [map()]}.
+discover_models_from_claude_config(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            try json:decode(Bin) of
+                Decoded ->
+                    ModelIds = ordsets:from_list(collect_claude_model_ids(Decoded)),
+                    {ok, [claude_model_entry(Id) || Id <- ModelIds]}
+            catch
+                _:_ ->
+                    {ok, []}
+            end;
+        {error, _} ->
+            {ok, []}
+    end.
+
+-spec collect_claude_model_ids(term()) -> [binary()].
+collect_claude_model_ids(#{<<"lastModelUsage">> := Usage} = Map)
+  when is_map(Usage) ->
+    usage_model_ids(Usage) ++
+        lists:flatmap(fun collect_claude_model_ids/1, maps:values(Map));
+collect_claude_model_ids(#{<<"model">> := Model} = Map) when is_binary(Model) ->
+    MaybeModel =
+        case normalize_claude_model_id(Model) of
+            <<"claude-", _/binary>> = ClaudeModel -> [ClaudeModel];
+            _ -> []
+        end,
+    MaybeModel ++ lists:flatmap(fun collect_claude_model_ids/1,
+                                maps:values(Map));
+collect_claude_model_ids(Map) when is_map(Map) ->
+    lists:flatmap(fun collect_claude_model_ids/1, maps:values(Map));
+collect_claude_model_ids(List) when is_list(List) ->
+    lists:flatmap(fun collect_claude_model_ids/1, List);
+collect_claude_model_ids(_) ->
+    [].
+
+-spec usage_model_ids(map()) -> [binary()].
+usage_model_ids(Usage) ->
+    [Normalized
+     || ModelId <- maps:keys(Usage),
+        is_binary(ModelId),
+        Normalized <- [normalize_claude_model_id(ModelId)],
+        case Normalized of
+            <<"claude-", _/binary>> -> true;
+            _ -> false
+        end].
+
+-spec normalize_claude_model_id(binary()) -> binary().
+normalize_claude_model_id(ModelId) when is_binary(ModelId) ->
+    hd(binary:split(ModelId, <<"[">>)).
+
+-spec claude_model_entry(binary()) -> map().
+claude_model_entry(ModelId) ->
+    #{<<"modelId">> => ModelId,
+      <<"name">> => ModelId}.
 
 %%====================================================================
 %% beam_agent_adapter callbacks

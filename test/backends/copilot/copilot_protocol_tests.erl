@@ -344,14 +344,19 @@ encode_error_response_with_data_test() ->
 
 build_cli_args_default_test() ->
     Args = copilot_protocol:build_cli_args(#{}),
-    ?assert(lists:member("server", Args)),
-    ?assert(lists:member("--stdio", Args)),
-    ?assert(lists:member("--sdk-protocol-version", Args)).
+    ?assert(lists:member("--acp", Args)),
+    ?assertNot(lists:member("server", Args)),
+    ?assertNot(lists:member("--stdio", Args)),
+    ?assertNot(lists:member("--sdk-protocol-version", Args)).
 
 build_cli_args_with_log_level_test() ->
     Args = copilot_protocol:build_cli_args(#{log_level => <<"debug">>}),
     ?assert(lists:member("--log-level", Args)),
     ?assert(lists:member("debug", Args)).
+
+build_cli_args_appends_user_args_after_required_transport_args_test() ->
+    Args = copilot_protocol:build_cli_args(#{cli_args => ["--foo", "bar"]}),
+    ?assertEqual(["--acp", "--foo", "bar"], Args).
 
 build_env_default_test() ->
     Env = copilot_protocol:build_env(#{}),

@@ -157,6 +157,10 @@ beam_agent_catalog_core     beam_agent_registry
     file_status_impl/0, file_status_impl/1
 ]).
 
+-ifdef(TEST).
+-export([normalize_model_list_result/1, maybe_fallback_model_list/2]).
+-endif.
+
 -export_type([file_search_result/0, file_entry/0, file_search_opts/0]).
 
 %% Internal helpers: specs are deliberately broader than current call sites.
@@ -164,7 +168,9 @@ beam_agent_catalog_core     beam_agent_registry
     file_find_text/2, file_find_text/3,
     file_find_symbols/2,
     file_read_impl/2,
-    file_resolve_glob/3
+    file_resolve_glob/3,
+    maybe_fallback_model_list/2,
+    prefer_model_fallback/2
 ]}).
 
 %%--------------------------------------------------------------------
@@ -290,7 +296,10 @@ Returns {ok, List} of model maps, or {error, Reason} on failure.
 """.
 -spec model_list(pid()) -> {ok, list()} | {error, term()}.
 model_list(Session) ->
-    beam_agent_core:native_or(Session, model_list, [], fun() -> supported_models(Session) end).
+    normalize_model_list_result(
+        maybe_fallback_model_list(
+            beam_agent_core:native_or(Session, model_list, [], fun() -> supported_models(Session) end),
+            fun() -> supported_models(Session) end)).
 
 -doc """
 List models available for a session with optional filter criteria.
@@ -308,7 +317,57 @@ on failure.
 """.
 -spec model_list(pid(), map()) -> {ok, list()} | {error, term()}.
 model_list(Session, Opts) ->
-    beam_agent_core:native_or(Session, model_list, [Opts], fun() -> supported_models(Session) end).
+    normalize_model_list_result(
+        maybe_fallback_model_list(
+            beam_agent_core:native_or(Session, model_list, [Opts], fun() -> supported_models(Session) end),
+            fun() -> supported_models(Session) end)).
+
+-spec maybe_fallback_model_list({ok, term()} | {error, term()},
+                                fun(() -> {ok, term()} | {error, term()})) ->
+    {ok, term()} | {error, term()}.
+maybe_fallback_model_list({error, session_error} = Err, Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, reconnecting} = Err, Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, timeout} = Err, Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, {timeout, _}} = Err, Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, {session_error, _}} = Err, Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list(Result, _Fallback) ->
+    Result.
+
+-spec prefer_model_fallback({error, term()},
+                            fun(() -> {ok, term()} | {error, term()})) ->
+    {ok, term()} | {error, term()}.
+prefer_model_fallback(Err, Fallback) ->
+    try Fallback() of
+        {ok, _} = Ok ->
+            Ok;
+        {error, _} ->
+            Err
+    catch
+        _:_ ->
+            Err
+    end.
+
+-spec normalize_model_list_result({ok, term()} | {error, term()}) ->
+    {ok, list()} | {error, term()}.
+normalize_model_list_result({ok, #{data := Models}}) when is_list(Models) ->
+    {ok, Models};
+normalize_model_list_result({ok, #{<<"data">> := Models}}) when is_list(Models) ->
+    {ok, Models};
+normalize_model_list_result({ok, #{models := Models}}) when is_list(Models) ->
+    {ok, Models};
+normalize_model_list_result({ok, #{<<"models">> := Models}}) when is_list(Models) ->
+    {ok, Models};
+normalize_model_list_result({ok, Models}) when is_list(Models) ->
+    {ok, Models};
+normalize_model_list_result({error, _} = Err) ->
+    Err;
+normalize_model_list_result({ok, Other}) ->
+    {error, {unexpected_model_list_shape, Other}}.
 
 %%--------------------------------------------------------------------
 %% List Functions

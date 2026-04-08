@@ -37,7 +37,7 @@ beam_agent_auth (public — this module)
   └─ beam_agent_auth_core (dispatch + one-shot port runner)
        ├─ claude:   `claude auth status|login|logout`
        ├─ codex:    `codex login status`, `codex login [--with-api-key]`
-       ├─ copilot:  `copilot auth status|login|logout`
+       ├─ copilot:  env/config status, `copilot login|logout`
        ├─ opencode: REST via httpc (localhost-only)
        └─ gemini:   env checks / PTY-interactive OAuth
 ```

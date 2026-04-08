@@ -1120,7 +1120,8 @@ build_init_request(Opts, McpRegistry, HookConfig) ->
 
 -spec build_cli_args(map(), string() | undefined) -> [string()].
 build_cli_args(Opts, McpConfigPath) ->
-    Base = ["--output-format", "stream-json",
+    Base = ["--print",
+            "--output-format", "stream-json",
             "--input-format", "stream-json",
             "--verbose"],
     lists:append([Base,
