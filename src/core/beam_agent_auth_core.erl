@@ -252,7 +252,7 @@ logout(gemini, Opts) ->
 
 claude_status(Opts) ->
     Cli = resolve_cli(claude, Opts),
-    Args = ["auth", "status", "--output", "json"],
+    Args = ["auth", "status", "--json"],
     Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
     case run_cli(Cli, Args, [], Timeout) of
         {ok, 0, Lines} ->
