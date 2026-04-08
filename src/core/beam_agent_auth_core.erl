@@ -422,6 +422,24 @@ check_copilot_env([{Label, Var} | Rest]) ->
 %%   - github_pat_  (fine-grained PAT with "Copilot Requests" permission)
 %%   - gho_         (OAuth token from copilot CLI or gh CLI app)
 %%   - ghs_         (GitHub Actions server-to-server token)
+validate_copilot_token(<<"github_pat_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
+validate_copilot_token(<<"gho_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
+validate_copilot_token(<<"ghs_", _/binary>>, Source) ->
+    {ok,
+     #{backend => copilot,
+       authenticated => true,
+       method => env,
+       details => #{source => Source}}};
 validate_copilot_token(<<"ghp_", _/binary>>, Source) ->
     {ok,
      #{backend => copilot,
@@ -435,9 +453,13 @@ validate_copilot_token(<<"ghp_", _/binary>>, Source) ->
 validate_copilot_token(_Token, Source) ->
     {ok,
      #{backend => copilot,
-       authenticated => true,
+       authenticated => false,
        method => env,
-       details => #{source => Source}}}.
+       details => #{source => Source,
+                    hint => <<"Unsupported GitHub token format for Copilot. "
+                              "Use a fine-grained PAT (github_pat_) with the "
+                              "'Copilot Requests' permission, a gho_ token, a "
+                              "ghs_ token, or run `copilot login`.">>}}}.
 
 %% Check for Copilot CLI credentials at ~/.copilot/config.json.
 %% The copilot CLI stores login state in a JSON file with a

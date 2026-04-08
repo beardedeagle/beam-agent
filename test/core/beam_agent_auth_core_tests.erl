@@ -365,6 +365,32 @@ copilot_config_read_error_is_unauthenticated_test() ->
         rm_rf(TmpDir)
     end.
 
+copilot_status_accepts_fine_grained_pat_env_test() ->
+    with_env_value(
+        "COPILOT_GITHUB_TOKEN",
+        "github_pat_test_token",
+        fun() ->
+            with_env_unset(
+                "HOME",
+                fun() ->
+                    {ok, Status} = beam_agent_auth_core:status(copilot, #{}),
+                    ?assertEqual(true, maps:get(authenticated, Status))
+                end)
+        end).
+
+copilot_status_rejects_unknown_token_prefix_test() ->
+    with_env_value(
+        "COPILOT_GITHUB_TOKEN",
+        "bogus_token_value",
+        fun() ->
+            with_env_unset(
+                "HOME",
+                fun() ->
+                    {ok, Status} = beam_agent_auth_core:status(copilot, #{}),
+                    ?assertEqual(false, maps:get(authenticated, Status))
+                end)
+        end).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
