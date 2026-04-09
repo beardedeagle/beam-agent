@@ -124,6 +124,8 @@
 -export([discover_models_from_claude_config/0,
          discover_models_from_claude_config/1,
          collect_claude_model_ids/1,
+         discoverable_claude_model_ids/1,
+         expand_claude_model_entries/1,
          normalize_claude_model_id/1,
          claude_config_path/0]).
 -endif.
@@ -231,7 +233,7 @@ supported_commands(Session) ->
 supported_models(Session) ->
     case extract_init_field(Session, models, models, []) of
         {ok, Models} when is_list(Models), Models =/= [] ->
-            {ok, Models};
+            {ok, expand_claude_model_entries(Models)};
         {ok, _} ->
             discover_models_from_claude_config();
         {error, _} = Err ->
@@ -813,7 +815,7 @@ discover_models_from_claude_config(Path) ->
             try json:decode(Bin) of
                 Decoded ->
                     ModelIds = ordsets:from_list(collect_claude_model_ids(Decoded)),
-                    {ok, [claude_model_entry(Id) || Id <- ModelIds]}
+                    {ok, expand_claude_model_entries([claude_model_entry(Id) || Id <- ModelIds])}
             catch
                 _:_ ->
                     {ok, []}
@@ -828,11 +830,7 @@ collect_claude_model_ids(#{<<"lastModelUsage">> := Usage} = Map)
     usage_model_ids(Usage) ++
         lists:flatmap(fun collect_claude_model_ids/1, maps:values(Map));
 collect_claude_model_ids(#{<<"model">> := Model} = Map) when is_binary(Model) ->
-    MaybeModel =
-        case normalize_claude_model_id(Model) of
-            <<"claude-", _/binary>> = ClaudeModel -> [ClaudeModel];
-            _ -> []
-        end,
+    MaybeModel = discoverable_claude_model_ids(Model),
     MaybeModel ++ lists:flatmap(fun collect_claude_model_ids/1,
                                 maps:values(Map));
 collect_claude_model_ids(Map) when is_map(Map) ->
@@ -844,11 +842,11 @@ collect_claude_model_ids(_) ->
 
 -spec usage_model_ids(map()) -> [binary()].
 usage_model_ids(Usage) ->
-    [Normalized
+    [Model
      || ModelId <- maps:keys(Usage),
         is_binary(ModelId),
-        Normalized <- [normalize_claude_model_id(ModelId)],
-        case Normalized of
+        Model <- discoverable_claude_model_ids(ModelId),
+        case Model of
             <<"claude-", _/binary>> -> true;
             _ -> false
         end].
@@ -856,6 +854,99 @@ usage_model_ids(Usage) ->
 -spec normalize_claude_model_id(binary()) -> binary().
 normalize_claude_model_id(ModelId) when is_binary(ModelId) ->
     hd(binary:split(ModelId, <<"[">>)).
+
+-spec discoverable_claude_model_ids(binary()) -> [binary()].
+discoverable_claude_model_ids(ModelId) when is_binary(ModelId) ->
+    BaseModelId = normalize_claude_model_id(ModelId),
+    case supports_context_variant(BaseModelId) of
+        true ->
+            ordsets:from_list([BaseModelId, context_variant_model_id(BaseModelId)]);
+        false when BaseModelId =:= <<>> ->
+            [];
+        false ->
+            [BaseModelId]
+    end.
+
+-spec supports_context_variant(binary()) -> boolean().
+supports_context_variant(<<"claude-sonnet-4-6">>) -> true;
+supports_context_variant(<<"claude-opus-4-6">>) -> true;
+supports_context_variant(_) -> false.
+
+-spec expand_claude_model_entries([map()]) -> [map()].
+expand_claude_model_entries(Models) when is_list(Models) ->
+    lists:reverse(
+      lists:foldl(
+        fun expand_claude_model_entry/2,
+        [],
+        Models)).
+
+-spec expand_claude_model_entry(map(), [map()]) -> [map()].
+expand_claude_model_entry(Model, Acc) when is_map(Model) ->
+    case claude_model_entry_ids(Model) of
+        [] ->
+            [Model | Acc];
+        ModelIds ->
+            lists:foldl(
+              fun(ModelId, InnerAcc) ->
+                  put_unique_claude_model_entry(clone_claude_model_entry(Model, ModelId), InnerAcc)
+              end,
+              Acc,
+              ModelIds)
+    end;
+expand_claude_model_entry(Model, Acc) ->
+    [Model | Acc].
+
+-spec put_unique_claude_model_entry(map(), [map()]) -> [map()].
+put_unique_claude_model_entry(Model, Acc) ->
+    case claude_model_entry_id(Model) of
+        undefined ->
+            [Model | Acc];
+        ModelId ->
+            case lists:any(
+                   fun(Existing) ->
+                       claude_model_entry_id(Existing) =:= ModelId
+                   end,
+                   Acc) of
+                true -> Acc;
+                false -> [Model | Acc]
+            end
+    end.
+
+-spec claude_model_entry_ids(map()) -> [binary()].
+claude_model_entry_ids(Model) when is_map(Model) ->
+    case claude_model_entry_id(Model) of
+        undefined -> [];
+        ModelId -> discoverable_claude_model_ids(ModelId)
+    end.
+
+-spec claude_model_entry_id(map()) -> binary() | undefined.
+claude_model_entry_id(#{<<"modelId">> := ModelId}) when is_binary(ModelId) ->
+    ModelId;
+claude_model_entry_id(#{modelId := ModelId}) when is_binary(ModelId) ->
+    ModelId;
+claude_model_entry_id(#{model_id := ModelId}) when is_binary(ModelId) ->
+    ModelId;
+claude_model_entry_id(_) ->
+    undefined.
+
+-spec clone_claude_model_entry(map(), binary()) -> map().
+clone_claude_model_entry(Model, ModelId) when is_map(Model), is_binary(ModelId) ->
+    Model1 =
+        case Model of
+            #{<<"modelId">> := _} -> Model#{<<"modelId">> => ModelId};
+            #{modelId := _} -> Model#{modelId => ModelId};
+            #{model_id := _} -> Model#{model_id => ModelId};
+            _ -> Model
+        end,
+    case Model1 of
+        #{<<"name">> := _} -> Model1#{<<"name">> => ModelId};
+        #{name := _} -> Model1#{name => ModelId};
+        _ -> Model1
+    end.
+
+-spec context_variant_model_id(binary()) -> binary().
+context_variant_model_id(BaseModelId) when is_binary(BaseModelId) ->
+    <<BaseModelId/binary, "[1m]">>.
 
 -spec claude_model_entry(binary()) -> map().
 claude_model_entry(ModelId) ->
