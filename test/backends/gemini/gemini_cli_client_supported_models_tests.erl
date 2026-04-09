@@ -48,30 +48,51 @@ wait_for_supported_models_clamps_sleep_to_remaining_timeout_test() ->
     Elapsed = erlang:monotonic_time(millisecond) - Start,
     ?assert(Elapsed < 99).
 
+wait_for_supported_models_bounds_internal_calls_by_remaining_budget_test() ->
+    {ok, Session} =
+        start_fake_session(
+          [#{init_response => #{<<"models">> => []}}],
+          [initializing],
+          200),
+    Start = erlang:monotonic_time(millisecond),
+    Result = gemini_cli_client:wait_for_supported_models(Session, 20, 100),
+    Elapsed = erlang:monotonic_time(millisecond) - Start,
+    ?assertEqual({error, timeout}, Result),
+    stop_fake_session(Session),
+    ?assert(Elapsed < 180).
+
 callback_mode() ->
     handle_event_function.
 
-init(#{session_infos := SessionInfos, healths := Healths}) ->
+init(#{session_infos := SessionInfos, healths := Healths} = Args) ->
     {ok, running,
      #{session_infos => SessionInfos,
        last_session_info => last_or_default(SessionInfos, #{}),
        healths => Healths,
+       delay_ms => maps:get(delay_ms, Args, 0),
        last_health => last_or_default(Healths, ready)}}.
 
 handle_event({call, From}, session_info, running, State) ->
     {SessionInfo, NextState} =
         next_sequence_value(session_infos, last_session_info, State),
+    maybe_delay_reply(State),
     {keep_state, NextState, [{reply, From, {ok, SessionInfo}}]};
 handle_event({call, From}, health, running, State) ->
     {Health, NextState} =
         next_sequence_value(healths, last_health, State),
+    maybe_delay_reply(State),
     {keep_state, NextState, [{reply, From, Health}]};
 handle_event(_EventType, _EventContent, running, State) ->
     {keep_state, State}.
 
 start_fake_session(SessionInfos, Healths) ->
+    start_fake_session(SessionInfos, Healths, 0).
+
+start_fake_session(SessionInfos, Healths, DelayMs) ->
     gen_statem:start_link(?MODULE,
-                          #{session_infos => SessionInfos, healths => Healths},
+                          #{session_infos => SessionInfos,
+                            healths => Healths,
+                            delay_ms => DelayMs},
                           []).
 
 stop_fake_session(Session) ->
@@ -89,3 +110,8 @@ last_or_default([], Default) ->
     Default;
 last_or_default(Values, _Default) ->
     lists:last(Values).
+
+maybe_delay_reply(#{delay_ms := DelayMs}) when is_integer(DelayMs), DelayMs > 0 ->
+    timer:sleep(DelayMs);
+maybe_delay_reply(_) ->
+    ok.

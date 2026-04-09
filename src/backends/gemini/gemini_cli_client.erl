@@ -744,53 +744,121 @@ extract_from_system_info(Info, Key, Default) ->
 
 -spec wait_for_supported_models(pid(), non_neg_integer(), non_neg_integer()) ->
                                    {ok, list()} | {error, term()}.
-wait_for_supported_models(Session, 0, _RetryMs) ->
-    case extract_init_field(Session, models, models, []) of
-        {ok, Models} when is_list(Models) ->
-            {ok, Models};
-        {ok, Other} ->
-            {error, {unexpected_models_shape, Other}};
-        {error, _} = Err ->
-            Err
-    end;
 wait_for_supported_models(Session, RemainingMs, RetryMs) ->
-    case extract_init_field(Session, models, models, []) of
+    DeadlineMs = erlang:monotonic_time(millisecond) + RemainingMs,
+    wait_for_supported_models_until(Session, DeadlineMs, RetryMs).
+
+-spec wait_for_supported_models_until(pid(), integer(), non_neg_integer()) ->
+                                         {ok, list()} | {error, term()}.
+wait_for_supported_models_until(Session, DeadlineMs, RetryMs) ->
+    case extract_init_field_with_deadline(Session, models, models, [], DeadlineMs) of
         {ok, Models} when is_list(Models), Models =/= [] ->
             {ok, Models};
         {ok, []} = Empty ->
-            maybe_retry_supported_models(Session, RemainingMs, RetryMs, Empty);
+            maybe_retry_supported_models(Session, DeadlineMs, RetryMs, Empty);
         {ok, Other} ->
             maybe_retry_supported_models(
               Session,
-              RemainingMs,
+              DeadlineMs,
               RetryMs,
               {error, {unexpected_models_shape, Other}});
         {error, _} = Err ->
-            maybe_retry_supported_models(Session, RemainingMs, RetryMs, Err)
+            maybe_retry_supported_models(Session, DeadlineMs, RetryMs, Err)
     end.
 
--spec maybe_retry_supported_models(pid(), non_neg_integer(), non_neg_integer(),
+-spec maybe_retry_supported_models(pid(), integer(), non_neg_integer(),
                                    {ok, []} | {error, term()}) ->
                                       {ok, list()} | {error, term()}.
-maybe_retry_supported_models(_Session, 0, _RetryMs, Result) ->
-    Result;
-maybe_retry_supported_models(Session, RemainingMs, RetryMs, Result) ->
-    case health(Session) of
+maybe_retry_supported_models(Session, DeadlineMs, RetryMs, Result) ->
+    case remaining_before_deadline(DeadlineMs) of
+        0 ->
+            Result;
+        _ ->
+            maybe_retry_supported_models_with_budget(
+              Session,
+              DeadlineMs,
+              RetryMs,
+              Result)
+    end.
+
+-spec maybe_retry_supported_models_with_budget(pid(), integer(), non_neg_integer(),
+                                               {ok, []} | {error, term()}) ->
+                                                  {ok, list()} | {error, term()}.
+maybe_retry_supported_models_with_budget(Session, DeadlineMs, RetryMs, Result) ->
+    case health_with_deadline(Session, DeadlineMs) of
         connecting ->
-            retry_supported_models(Session, RemainingMs, RetryMs);
+            retry_supported_models(Session, DeadlineMs, RetryMs);
         initializing ->
-            retry_supported_models(Session, RemainingMs, RetryMs);
+            retry_supported_models(Session, DeadlineMs, RetryMs);
         _ ->
             Result
     end.
 
--spec retry_supported_models(pid(), non_neg_integer(), non_neg_integer()) ->
+-spec retry_supported_models(pid(), integer(), non_neg_integer()) ->
                                 {ok, list()} | {error, term()}.
-retry_supported_models(Session, RemainingMs, RetryMs)
-  when is_integer(RemainingMs), is_integer(RetryMs) ->
+retry_supported_models(Session, DeadlineMs, RetryMs)
+  when is_integer(DeadlineMs), is_integer(RetryMs) ->
+    RemainingMs = remaining_before_deadline(DeadlineMs),
     SleepMs = erlang:min(RemainingMs, RetryMs),
     timer:sleep(SleepMs),
-    wait_for_supported_models(Session, RemainingMs - SleepMs, RetryMs).
+    wait_for_supported_models_until(Session, DeadlineMs, RetryMs).
+
+-spec extract_init_field_with_deadline(pid() | binary(), atom(), atom(), term(), integer()) ->
+                                          {ok, term()} | {error, term()}.
+extract_init_field_with_deadline(Session, IRKey, SIKey, Default, DeadlineMs) ->
+    case session_info_with_deadline(Session, DeadlineMs) of
+        {ok, Info} ->
+            case maps:find(init_response, Info) of
+                {ok, IR} when is_map(IR) ->
+                    IRKeyBin = atom_to_binary(IRKey),
+                    case maps:find(IRKeyBin, IR) of
+                        {ok, Val} ->
+                            {ok, Val};
+                        error ->
+                            extract_from_system_info(Info, SIKey, Default)
+                    end;
+                _ ->
+                    extract_from_system_info(Info, SIKey, Default)
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec session_info_with_deadline(pid() | binary(), integer()) ->
+                                    {ok, map()} | {error, term()}.
+session_info_with_deadline(Session, DeadlineMs) when is_pid(Session) ->
+    call_session_with_deadline(Session, session_info, DeadlineMs);
+session_info_with_deadline(SessionId, _DeadlineMs) when is_binary(SessionId) ->
+    beam_agent_core:session_info(SessionId).
+
+-spec health_with_deadline(pid(), integer()) ->
+                              ready | connecting | initializing | active_query | error |
+                              {error, term()}.
+health_with_deadline(Session, DeadlineMs) ->
+    call_session_with_deadline(Session, health, DeadlineMs).
+
+-spec call_session_with_deadline(pid(), term(), integer()) -> term() | {error, term()}.
+call_session_with_deadline(Session, Request, DeadlineMs) ->
+    TimeoutMs = call_timeout_for_deadline(DeadlineMs),
+    try gen_statem:call(Session, Request, TimeoutMs) of
+        Result ->
+            Result
+    catch
+        exit:{timeout, _} ->
+            {error, timeout};
+        exit:{noproc, _} ->
+            {error, noproc};
+        exit:Reason ->
+            {error, Reason}
+    end.
+
+-spec call_timeout_for_deadline(integer()) -> pos_integer().
+call_timeout_for_deadline(DeadlineMs) ->
+    erlang:max(1, remaining_before_deadline(DeadlineMs)).
+
+-spec remaining_before_deadline(integer()) -> non_neg_integer().
+remaining_before_deadline(DeadlineMs) ->
+    erlang:max(DeadlineMs - erlang:monotonic_time(millisecond), 0).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
