@@ -449,6 +449,70 @@ opencode_credential_count_handles_binary_lines_test() ->
             <<"Google api">>
         ])).
 
+opencode_status_retries_auth_list_via_login_shell_when_cli_not_on_path_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        _CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"list\" ]; then\n",
+             "  printf '%s\\n' 'OpenAI oauth'\n",
+             "  exit 0\n",
+             "fi\n",
+             "exit 1\n"]),
+        os:putenv("PATH", ""),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                with_env_value(
+                    "SHELL",
+                    ShellPath,
+                    fun() ->
+                        {ok, Status} =
+                            beam_agent_auth_core:status(
+                                opencode,
+                                #{base_url => "http://localhost:1"}),
+                        ?assertEqual(true, maps:get(authenticated, Status)),
+                        ?assertEqual(cli, maps:get(method, Status)),
+                        ?assertEqual(1, maps:get(credential_count, maps:get(details, Status)))
+                    end)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+opencode_status_reports_cli_probe_failures_distinctly_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'permission denied'\n",
+             "exit 2\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(false, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status)),
+                Details = maps:get(details, Status),
+                ?assertEqual(cli_exit, maps:get(failure, Details)),
+                ?assertEqual(2, maps:get(exit_code, Details))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
 run_capture_cli_respects_cwd_option_test() ->
     TmpDir = make_tmp_dir(),
     try

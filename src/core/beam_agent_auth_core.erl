@@ -631,7 +631,7 @@ opencode_local_auth_status(Opts) ->
 opencode_cli_auth_status(Opts) ->
     Cli = resolve_cli(opencode, Opts),
     Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
-    case run_capture_cli(Cli, ["auth", "list"], Timeout) of
+    case run_opencode_auth_list(Cli, Timeout) of
         {ok, Lines} ->
             case opencode_credential_count(Lines) of
                 Count when Count > 0 ->
@@ -653,7 +653,7 @@ opencode_cli_auth_status(Opts) ->
                                    "not set, and `opencode auth list` reported "
                                    "no configured credentials.">>}}}
             end;
-        {error, {cli_exit, _ExitCode, Lines}} ->
+        {error, {cli_exit, ExitCode, Lines}} ->
             case opencode_credential_count(Lines) of
                 Count when Count > 0 ->
                     {ok,
@@ -664,13 +664,24 @@ opencode_cli_auth_status(Opts) ->
                            #{source => <<"opencode auth list">>,
                              credential_count => Count}}};
                 0 ->
-                    opencode_missing_auth_status()
+                    opencode_probe_failed_status(Cli, {error, {cli_exit, ExitCode, Lines}})
             end;
-        {error, _Reason} ->
-            opencode_missing_auth_status()
+        {error, Reason} ->
+            opencode_probe_failed_status(Cli, {error, Reason})
     end.
 
-opencode_missing_auth_status() ->
+-spec run_opencode_auth_list(string(), pos_integer()) ->
+          {ok, [string()]} | {error, term()}.
+run_opencode_auth_list(Cli, Timeout) ->
+    case run_capture_cli(Cli, ["auth", "list"], Timeout) of
+        {error, {cli_not_found, _}} ->
+            run_capture_login_shell(Cli, ["auth", "list"], Timeout);
+        Other ->
+            Other
+    end.
+
+-spec opencode_probe_failed_status(string(), {error, term()}) -> {ok, map()}.
+opencode_probe_failed_status(Cli, {error, {cli_not_found, _}}) ->
     {ok,
      #{backend => opencode,
        authenticated => false,
@@ -678,7 +689,33 @@ opencode_missing_auth_status() ->
        details =>
            #{hint =>
                  <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
-                   "and no configured OpenCode CLI credentials were found.">>}}}.
+                   "and the OpenCode CLI could not be found via PATH or the login shell.">>,
+             source => <<"opencode auth list">>,
+             cli => list_to_binary(Cli),
+             failure => cli_not_found}}};
+opencode_probe_failed_status(_Cli, {error, {cli_exit, ExitCode, _Lines}}) ->
+    {ok,
+     #{backend => opencode,
+       authenticated => false,
+       method => cli,
+       details =>
+           #{hint =>
+                 <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
+                   "and `opencode auth list` failed before credentials could be read.">>,
+             source => <<"opencode auth list">>,
+             failure => cli_exit,
+             exit_code => ExitCode}}};
+opencode_probe_failed_status(_Cli, {error, Reason}) ->
+    {ok,
+     #{backend => opencode,
+       authenticated => false,
+       method => cli,
+       details =>
+           #{hint =>
+                 <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
+                   "and the OpenCode CLI probe failed.">>,
+             source => <<"opencode auth list">>,
+             failure => list_to_binary(io_lib:format("~0p", [Reason]))}}}.
 
 -spec opencode_credential_count([string() | binary()]) -> non_neg_integer().
 opencode_credential_count(Lines) ->
