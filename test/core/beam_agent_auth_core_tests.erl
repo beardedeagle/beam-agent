@@ -439,6 +439,16 @@ opencode_status_rejects_empty_cli_auth_list_test() ->
         rm_rf(TmpDir)
     end.
 
+opencode_credential_count_handles_binary_lines_test() ->
+    ?assertEqual(
+        2,
+        beam_agent_auth_core:opencode_credential_count([
+            <<"Credentials ~/.local/share/opencode/auth.json">>,
+            <<"">>,
+            <<"OpenAI oauth">>,
+            <<"Google api">>
+        ])).
+
 run_capture_cli_respects_cwd_option_test() ->
     TmpDir = make_tmp_dir(),
     try
@@ -525,6 +535,26 @@ login_shell_args_adjust_for_sh_family_test() ->
                  beam_agent_auth_core:login_shell_args("/bin/sh", "echo ok")),
     ?assertEqual(["-l", "-i", "-c", "echo ok"],
                  beam_agent_auth_core:login_shell_args("/bin/zsh", "echo ok")).
+
+login_shell_program_resolves_shell_basename_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        os:putenv("PATH", TmpDir),
+        with_env_value(
+            "SHELL",
+            "bash",
+            fun() ->
+                ?assertEqual({ok, BashPath}, beam_agent_auth_core:login_shell_program())
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
 
 %%====================================================================
 %% Helpers

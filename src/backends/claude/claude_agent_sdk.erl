@@ -830,7 +830,13 @@ collect_claude_model_ids(#{<<"lastModelUsage">> := Usage} = Map)
     usage_model_ids(Usage) ++
         lists:flatmap(fun collect_claude_model_ids/1, maps:values(Map));
 collect_claude_model_ids(#{<<"model">> := Model} = Map) when is_binary(Model) ->
-    MaybeModel = discoverable_claude_model_ids(Model),
+    MaybeModel =
+        case Model of
+            <<"claude-", _/binary>> ->
+                discoverable_claude_model_ids(Model);
+            _ ->
+                []
+        end,
     MaybeModel ++ lists:flatmap(fun collect_claude_model_ids/1,
                                 maps:values(Map));
 collect_claude_model_ids(Map) when is_map(Map) ->

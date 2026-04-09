@@ -63,7 +63,7 @@ for Claude) rather than passing the secret on the command line — avoiding
 
 -export([validate_base_url/1, verify_executable_safety/1, resolve_symlinks/1,
          compute_file_hash/1, is_localhost/1, scrub_env/1, home_dir/0,
-         check_copilot_config/0, login_shell_program/0,
+         check_copilot_config/0, opencode_credential_count/1, login_shell_program/0,
          fallback_login_shell/0, login_shell_args/2]).
 
 -endif.
@@ -683,9 +683,9 @@ opencode_missing_auth_status() ->
 -spec opencode_credential_count([string()]) -> non_neg_integer().
 opencode_credential_count(Lines) ->
     Sanitized =
-        [string:trim(strip_ansi(Line))
+        [binary_to_list(string:trim(strip_ansi(unicode:characters_to_binary(Line))))
          || Line <- Lines,
-            string:trim(strip_ansi(Line)) =/= []],
+            string:trim(strip_ansi(unicode:characters_to_binary(Line))) =/= <<>>],
     case lists:filtermap(fun opencode_count_line/1, Sanitized) of
         [Count | _] ->
             Count;
@@ -1876,8 +1876,26 @@ login_shell_program() ->
         [] ->
             fallback_login_shell();
         Shell ->
-            {ok, Shell}
+            {ok, resolve_login_shell(normalize_shell_string(Shell))}
     end.
+
+-spec resolve_login_shell(string()) -> string().
+resolve_login_shell(Shell) ->
+    case has_path_separator(Shell) of
+        true ->
+            Shell;
+        false ->
+            case os:find_executable(Shell) of
+                false ->
+                    Shell;
+                ResolvedShell ->
+                    ResolvedShell
+            end
+    end.
+
+-spec has_path_separator(string()) -> boolean().
+has_path_separator(Path) ->
+    lists:member($/, Path) orelse lists:member($\\, Path).
 
 -spec fallback_login_shell() -> {ok, string()} | {error, {shell_not_found, string()}}.
 fallback_login_shell() ->
