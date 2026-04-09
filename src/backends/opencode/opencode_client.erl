@@ -184,10 +184,10 @@
             {thread_realtime_append_text, 3},
             {thread_realtime_stop, 2},
             {review_start, 2},
-            {with_adapter_source, 2},
-            {maybe_include_thread_read, 4},
-            {discover_cli_models, 1},
-            {run_model_cli, 2}]}).
+             {with_adapter_source, 2},
+             {maybe_include_thread_read, 4},
+             {discover_cli_models, 1},
+             {run_model_cli, 3}]}).
 -dialyzer({no_underspecs,
            [{send_control, 3},
             {fork_session, 2},
@@ -1022,20 +1022,30 @@ cli_or_init_models(Session) ->
             extract_init_field(Session, models, models, [])
     end.
 
--spec session_cli_opts(pid()) -> #{cli_path := string() | binary()}.
+-spec session_cli_opts(pid()) -> #{cli_path := string() | binary(),
+                                   cli_path_explicit := boolean()}.
 session_cli_opts(Session) ->
     case session_info(Session) of
         {ok, Info} ->
-            #{cli_path => maps:get(cli_path, Info, "opencode")};
+            case maps:find(cli_path, Info) of
+                {ok, CliPath} ->
+                    #{cli_path => CliPath,
+                      cli_path_explicit => true};
+                error ->
+                    #{cli_path => "opencode",
+                      cli_path_explicit => false}
+            end;
         {error, _} ->
-            #{cli_path => "opencode"}
+            #{cli_path => "opencode",
+              cli_path_explicit => false}
     end.
 
--spec discover_cli_models(#{cli_path := string() | binary()}) ->
+-spec discover_cli_models(#{cli_path := string() | binary(), _ => _}) ->
     {ok, [discovered_model()]} | {error, term()}.
 discover_cli_models(Opts) when is_map(Opts) ->
     Cli = beam_agent_auth_core:resolve_cli(opencode, Opts),
-    case run_model_cli(Cli, ["models"]) of
+    ExplicitCliPath = maps:get(cli_path_explicit, Opts, maps:is_key(cli_path, Opts)),
+    case run_model_cli(Cli, ["models"], ExplicitCliPath) of
         {ok, Lines} ->
             {ok, parse_cli_model_lines(Lines)};
         {error, _} = Err ->
@@ -1061,15 +1071,12 @@ model_entry(ModelId) ->
     #{<<"modelId">> => ModelId,
       <<"name">> => ModelId}.
 
--spec run_model_cli(string(), [string(), ...]) ->
+-spec run_model_cli(string(), [string(), ...], boolean()) ->
     {ok, [string()]} | {error, term()}.
-run_model_cli(Program, Args) ->
-    case beam_agent_auth_core:run_capture_cli(Program, Args, 60000) of
-        {error, {cli_not_found, _}} ->
-            beam_agent_auth_core:run_capture_login_shell(Program, Args, 60000);
-        Result ->
-            Result
-    end.
+run_model_cli(Program, Args, true) ->
+    beam_agent_auth_core:run_capture_cli(Program, Args, 60000);
+run_model_cli(Program, Args, false) ->
+    beam_agent_auth_core:run_capture_login_shell(Program, Args, 60000).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->

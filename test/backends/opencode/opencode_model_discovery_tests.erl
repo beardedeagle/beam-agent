@@ -62,6 +62,41 @@ discover_cli_models_with_explicit_cli_path_does_not_require_login_shell_test() -
         rm_rf(TmpDir)
     end.
 
+discover_cli_models_uses_login_shell_first_for_default_bare_command_test() ->
+    TmpDir = make_tmp_dir(),
+    ShellBinDir = filename:join(TmpDir, "shell-bin"),
+    PathBinDir = filename:join(TmpDir, "path-bin"),
+    PreviousPath = os:getenv("PATH"),
+    try
+        ok = filelib:ensure_dir(filename:join(ShellBinDir, "placeholder")),
+        ok = filelib:ensure_dir(filename:join(PathBinDir, "placeholder")),
+        _ShellCli = write_fake_opencode_named(ShellBinDir, "opencode", "shell-first/good-model"),
+        _PathCli = write_fake_opencode_named(PathBinDir, "opencode", "path-visible/wrong-model"),
+        ShellPath = write_fake_shell_with_path(TmpDir, ShellBinDir),
+        os:putenv("PATH", PathBinDir),
+        with_env_value(
+            "SHELL",
+            ShellPath,
+            fun() ->
+                {ok, Models} =
+                    opencode_client:discover_cli_models(
+                        #{cli_path => "opencode",
+                          cli_path_explicit => false}),
+                ?assertEqual(
+                    [
+                        #{<<"modelId">> => <<"shell-first/good-model">>,
+                          <<"name">> => <<"shell-first/good-model">>}
+                    ],
+                    Models)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
 write_fake_opencode(Dir) ->
     Path = filename:join(Dir, "opencode"),
     ok = file:write_file(
@@ -72,6 +107,38 @@ write_fake_opencode(Dir) ->
           "  printf '%s\\n' 'anthropic/claude-sonnet-4-6'\n"
           "  exit 0\n"
           "fi\n"
+          "exit 1\n">>),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_fake_opencode_named(Dir, Name, ModelId) ->
+    Path = filename:join(Dir, Name),
+    ok = file:write_file(
+        Path,
+        iolist_to_binary(
+            ["#!/bin/sh\n",
+             "if [ \"$1\" = \"models\" ]; then\n",
+             "  printf '%s\\n' '", ModelId, "'\n",
+             "  exit 0\n",
+             "fi\n",
+             "exit 1\n"])),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_fake_shell_with_path(Dir, ShellBinDir) ->
+    Path = filename:join(Dir, "fake-shell"),
+    ok = file:write_file(
+        Path,
+        <<"#!/bin/sh\n"
+          "PATH=\"", (list_to_binary(ShellBinDir))/binary, ":$PATH\"\n"
+          "export PATH\n"
+          "while [ $# -gt 0 ]; do\n"
+          "  if [ \"$1\" = \"-c\" ]; then\n"
+          "    shift\n"
+          "    exec /bin/sh -c \"$1\"\n"
+          "  fi\n"
+          "  shift\n"
+          "done\n"
           "exit 1\n">>),
     ok = file:change_mode(Path, 8#755),
     Path.
