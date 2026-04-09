@@ -680,7 +680,7 @@ opencode_missing_auth_status() ->
                  <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
                    "and no configured OpenCode CLI credentials were found.">>}}}.
 
--spec opencode_credential_count([string()]) -> non_neg_integer().
+-spec opencode_credential_count([string() | binary()]) -> non_neg_integer().
 opencode_credential_count(Lines) ->
     Sanitized =
         [binary_to_list(string:trim(strip_ansi(unicode:characters_to_binary(Line))))
@@ -1864,20 +1864,30 @@ login_shell_program() ->
         [] ->
             fallback_login_shell();
         Shell ->
-            {ok, resolve_login_shell(normalize_shell_string(Shell))}
+            case resolve_login_shell(normalize_shell_string(Shell)) of
+                {ok, ResolvedShell} ->
+                    {ok, ResolvedShell};
+                error ->
+                    fallback_login_shell()
+            end
     end.
 
--spec resolve_login_shell(string()) -> string().
+-spec resolve_login_shell(string()) -> {ok, string()} | error.
 resolve_login_shell(Shell) ->
     case has_path_separator(Shell) of
         true ->
-            Shell;
+            case filelib:is_regular(Shell) of
+                true ->
+                    {ok, Shell};
+                false ->
+                    error
+            end;
         false ->
             case os:find_executable(Shell) of
                 false ->
-                    Shell;
+                    error;
                 ResolvedShell ->
-                    ResolvedShell
+                    {ok, ResolvedShell}
             end
     end.
 

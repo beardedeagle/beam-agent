@@ -556,6 +556,26 @@ login_shell_program_resolves_shell_basename_test() ->
         rm_rf(TmpDir)
     end.
 
+login_shell_program_falls_back_when_shell_env_is_unusable_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        os:putenv("PATH", TmpDir),
+        with_env_value(
+            "SHELL",
+            "definitely-not-a-shell",
+            fun() ->
+                ?assertEqual({ok, BashPath}, beam_agent_auth_core:login_shell_program())
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
 %%====================================================================
 %% Helpers
 %%====================================================================
