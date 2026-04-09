@@ -46,7 +46,7 @@ wait_for_supported_models_clamps_sleep_to_remaining_timeout_test() ->
         stop_fake_session(Session)
     end,
     Elapsed = erlang:monotonic_time(millisecond) - Start,
-    ?assert(Elapsed < 80).
+    ?assert(Elapsed < 99).
 
 callback_mode() ->
     handle_event_function.

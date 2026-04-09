@@ -745,7 +745,14 @@ extract_from_system_info(Info, Key, Default) ->
 -spec wait_for_supported_models(pid(), non_neg_integer(), non_neg_integer()) ->
                                    {ok, list()} | {error, term()}.
 wait_for_supported_models(Session, 0, _RetryMs) ->
-    extract_init_field(Session, models, models, []);
+    case extract_init_field(Session, models, models, []) of
+        {ok, Models} when is_list(Models) ->
+            {ok, Models};
+        {ok, Other} ->
+            {error, {unexpected_models_shape, Other}};
+        {error, _} = Err ->
+            Err
+    end;
 wait_for_supported_models(Session, RemainingMs, RetryMs) ->
     case extract_init_field(Session, models, models, []) of
         {ok, Models} when is_list(Models), Models =/= [] ->
