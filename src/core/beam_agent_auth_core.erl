@@ -2061,7 +2061,7 @@ resolved_shell_family(ShellPath, Depth, Default) ->
 
 -spec profile_sourced_command(string()) -> string().
 profile_sourced_command(Command) ->
-    Profile = "$HOME/.profile",
+    Profile = "\"$HOME/.profile\"",
     "[ -f " ++ Profile ++ " ] && . " ++ Profile ++ " >/dev/null 2>&1; " ++ Command.
 
 -spec normalize_shell_string(string() | binary()) -> string().

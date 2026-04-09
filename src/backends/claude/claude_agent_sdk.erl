@@ -815,7 +815,7 @@ discover_models_from_claude_config(Path) ->
             try json:decode(Bin) of
                 Decoded ->
                     ModelIds = ordsets:from_list(collect_claude_model_ids(Decoded)),
-                    {ok, expand_claude_model_entries([claude_model_entry(Id) || Id <- ModelIds])}
+                    {ok, [claude_model_entry(Id) || Id <- ModelIds]}
             catch
                 _:_ ->
                     {ok, []}
