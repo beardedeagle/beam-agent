@@ -73,7 +73,8 @@
             {rewind_files, 2},
             {server_health, 1},
             {extract_init_field, 4},
-            {extract_from_system_info, 3}]}).
+            {extract_from_system_info, 3},
+            {wait_for_supported_models, 3}]}).
 -export([start_session/1,
          stop/1,
          child_spec/1,
@@ -164,6 +165,9 @@
          submit_feedback/2,
          turn_respond/3,
          server_health/1]).
+
+-define(SUPPORTED_MODELS_TIMEOUT_MS, 5_000).
+-define(SUPPORTED_MODELS_RETRY_MS, 100).
 -spec start_session(beam_agent_core:session_opts()) ->
                        {ok, pid()} | {error, term()}.
 start_session(Opts) ->
@@ -623,7 +627,7 @@ external_agent_config_import(Session, Opts) when is_map(Opts) ->
     beam_agent_config:external_agent_config_import(Session, Opts).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    extract_init_field(Session, models, models, []).
+    wait_for_supported_models(Session, ?SUPPORTED_MODELS_TIMEOUT_MS, ?SUPPORTED_MODELS_RETRY_MS).
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
     extract_init_field(Session, agents, agents, []).
@@ -733,6 +737,42 @@ extract_from_system_info(Info, Key, Default) ->
         _ ->
             {ok, Default}
     end.
+
+-spec wait_for_supported_models(pid(), non_neg_integer(), non_neg_integer()) ->
+                                   {ok, list()} | {error, term()}.
+wait_for_supported_models(Session, 0, _RetryMs) ->
+    extract_init_field(Session, models, models, []);
+wait_for_supported_models(Session, RemainingMs, RetryMs) ->
+    case extract_init_field(Session, models, models, []) of
+        {ok, Models} when is_list(Models), Models =/= [] ->
+            {ok, Models};
+        {ok, []} = Empty ->
+            maybe_retry_supported_models(Session, RemainingMs, RetryMs, Empty);
+        {error, _} = Err ->
+            maybe_retry_supported_models(Session, RemainingMs, RetryMs, Err)
+    end.
+
+-spec maybe_retry_supported_models(pid(), non_neg_integer(), non_neg_integer(),
+                                   {ok, []} | {error, term()}) ->
+                                      {ok, list()} | {error, term()}.
+maybe_retry_supported_models(_Session, 0, _RetryMs, Result) ->
+    Result;
+maybe_retry_supported_models(Session, RemainingMs, RetryMs, Result) ->
+    case health(Session) of
+        connecting ->
+            retry_supported_models(Session, RemainingMs, RetryMs);
+        initializing ->
+            retry_supported_models(Session, RemainingMs, RetryMs);
+        _ ->
+            Result
+    end.
+
+-spec retry_supported_models(pid(), non_neg_integer(), non_neg_integer()) ->
+                                {ok, list()} | {error, term()}.
+retry_supported_models(Session, RemainingMs, RetryMs)
+  when is_integer(RemainingMs), is_integer(RetryMs) ->
+    timer:sleep(RetryMs),
+    wait_for_supported_models(Session, erlang:max(RemainingMs - RetryMs, 0), RetryMs).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
