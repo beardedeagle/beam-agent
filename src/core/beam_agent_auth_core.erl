@@ -1575,8 +1575,9 @@ run_capture_cli(Program, Args, Timeout, RunOpts) when is_map(RunOpts) ->
 
 -doc("""
 Execute a command through the user's login shell using the shell configured
-in `SHELL`, preserving the same startup semantics as an interactive shell
-invocation while still capturing output with BeamAgent's hardened runner.
+in `SHELL`, preserving login-shell startup behavior as implemented by
+BeamAgent's hardened runner while still capturing output. This does not
+imply interactive-shell initialization such as sourcing `.bashrc`.
 """).
 -spec run_capture_login_shell(cli_program(), [string()], pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
