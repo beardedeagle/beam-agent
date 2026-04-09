@@ -166,6 +166,10 @@
          turn_respond/3,
          server_health/1]).
 
+-ifdef(TEST).
+-export([wait_for_supported_models/3]).
+-endif.
+
 -define(SUPPORTED_MODELS_TIMEOUT_MS, 5_000).
 -define(SUPPORTED_MODELS_RETRY_MS, 100).
 -spec start_session(beam_agent_core:session_opts()) ->
@@ -748,6 +752,12 @@ wait_for_supported_models(Session, RemainingMs, RetryMs) ->
             {ok, Models};
         {ok, []} = Empty ->
             maybe_retry_supported_models(Session, RemainingMs, RetryMs, Empty);
+        {ok, Other} ->
+            maybe_retry_supported_models(
+              Session,
+              RemainingMs,
+              RetryMs,
+              {error, {unexpected_models_shape, Other}});
         {error, _} = Err ->
             maybe_retry_supported_models(Session, RemainingMs, RetryMs, Err)
     end.
@@ -771,8 +781,9 @@ maybe_retry_supported_models(Session, RemainingMs, RetryMs, Result) ->
                                 {ok, list()} | {error, term()}.
 retry_supported_models(Session, RemainingMs, RetryMs)
   when is_integer(RemainingMs), is_integer(RetryMs) ->
-    timer:sleep(RetryMs),
-    wait_for_supported_models(Session, erlang:max(RemainingMs - RetryMs, 0), RetryMs).
+    SleepMs = erlang:min(RemainingMs, RetryMs),
+    timer:sleep(SleepMs),
+    wait_for_supported_models(Session, RemainingMs - SleepMs, RetryMs).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
