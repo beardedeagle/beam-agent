@@ -1022,29 +1022,25 @@ cli_or_init_models(Session) ->
             extract_init_field(Session, models, models, [])
     end.
 
--spec session_cli_opts(pid()) -> #{cli_path := string() | binary(),
-                                   cli_path_explicit := boolean()}.
+-spec session_cli_opts(pid()) -> map().
 session_cli_opts(Session) ->
     case session_info(Session) of
         {ok, Info} ->
             case maps:find(cli_path, Info) of
                 {ok, CliPath} ->
-                    #{cli_path => CliPath,
-                      cli_path_explicit => true};
+                    #{cli_path => CliPath};
                 error ->
-                    #{cli_path => "opencode",
-                      cli_path_explicit => false}
+                    #{}
             end;
         {error, _} ->
-            #{cli_path => "opencode",
-              cli_path_explicit => false}
+            #{}
     end.
 
--spec discover_cli_models(#{cli_path := string() | binary(), _ => _}) ->
+-spec discover_cli_models(map()) ->
     {ok, [discovered_model()]} | {error, term()}.
 discover_cli_models(Opts) when is_map(Opts) ->
     Cli = beam_agent_auth_core:resolve_cli(opencode, Opts),
-    ExplicitCliPath = maps:get(cli_path_explicit, Opts, maps:is_key(cli_path, Opts)),
+    ExplicitCliPath = maps:is_key(cli_path, Opts),
     case run_model_cli(Cli, ["models"], ExplicitCliPath) of
         {ok, Lines} ->
             {ok, parse_cli_model_lines(Lines)};

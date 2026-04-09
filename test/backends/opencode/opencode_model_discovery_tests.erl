@@ -80,8 +80,7 @@ discover_cli_models_uses_login_shell_first_for_default_bare_command_test() ->
             fun() ->
                 {ok, Models} =
                     opencode_client:discover_cli_models(
-                        #{cli_path => "opencode",
-                          cli_path_explicit => false}),
+                        #{}),
                 ?assertEqual(
                     [
                         #{<<"modelId">> => <<"shell-first/good-model">>,
