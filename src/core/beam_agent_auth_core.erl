@@ -64,7 +64,7 @@ for Claude) rather than passing the secret on the command line — avoiding
 -export([validate_base_url/1, verify_executable_safety/1, resolve_symlinks/1,
          compute_file_hash/1, is_localhost/1, scrub_env/1, home_dir/0,
          check_copilot_config/0, opencode_credential_count/1, login_shell_program/0,
-         fallback_login_shell/0, login_shell_args/2]).
+         fallback_login_shell/0, login_shell_args/2, shell_command_executable/1]).
 
 -endif.
 
@@ -1721,6 +1721,7 @@ collect_output(Port, Acc, LineBuf, Timeout) ->
                         [] -> FinalAcc;
                         _  -> [lists:flatten(lists:reverse(FinalLineBuf)) | FinalAcc]
                     end),
+            flush_port(Port),
             log_cli_result(ExitCode, Lines),
             {ok, ExitCode, Lines}
     after Timeout ->
@@ -1739,6 +1740,8 @@ collect_remaining_output(Port, Acc, LineBuf) ->
             collect_remaining_output(Port, [CompletedLine | Acc], []);
         {Port, {data, {noeol, Line}}} ->
             collect_remaining_output(Port, Acc, [Line | LineBuf]);
+        {Port, closed} ->
+            collect_remaining_output(Port, Acc, LineBuf);
         {Port, {exit_status, _}} ->
             collect_remaining_output(Port, Acc, LineBuf)
     after 0 ->
@@ -1918,10 +1921,10 @@ find_login_shell([Candidate | Rest]) ->
 
 -spec shell_command_executable(string()) -> {ok, string()} | {error, term()}.
 shell_command_executable(ProgramStr) ->
-    case string:find(ProgramStr, "/") of
-        nomatch ->
+    case has_path_separator(ProgramStr) of
+        false ->
             {ok, ProgramStr};
-        _ ->
+        true ->
             Path0 =
                 case filename:pathtype(ProgramStr) of
                     relative ->

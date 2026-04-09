@@ -576,6 +576,14 @@ login_shell_program_falls_back_when_shell_env_is_unusable_test() ->
         rm_rf(TmpDir)
     end.
 
+shell_command_executable_treats_backslash_paths_as_explicit_test() ->
+    %% A backslash-separated path should be treated as an explicit path rather
+    %% than a bare program name, even on non-Windows hosts.
+    ?assertEqual(
+        {error, {cli_not_found, "C:\\tools\\opencode.exe"}},
+        beam_agent_auth_core:shell_command_executable("C:\\tools\\opencode.exe")
+    ).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
