@@ -63,7 +63,8 @@ for Claude) rather than passing the secret on the command line — avoiding
 
 -export([validate_base_url/1, verify_executable_safety/1, resolve_symlinks/1,
          compute_file_hash/1, is_localhost/1, scrub_env/1, home_dir/0,
-         check_copilot_config/0]).
+         check_copilot_config/0, login_shell_program/0,
+         fallback_login_shell/0, login_shell_args/2]).
 
 -endif.
 
@@ -89,6 +90,8 @@ for Claude) rather than passing the secret on the command line — avoiding
       api_key => binary(),
       timeout => pos_integer(),
       base_url => string() | binary()}.
+
+-type cli_program() :: string() | binary().
 
     %% OpenCode-specific
 
@@ -1462,12 +1465,12 @@ All invocations are logged for operational visibility.
   - Executable permissions are verified (not world-writable)
 """).
 
--spec run_cli(string(), [string()], [{string(), string()}], pos_integer()) ->
+-spec run_cli(cli_program(), [string()], [{string(), string()}], pos_integer()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, Timeout) ->
     run_cli_with_opts(Program, Args, InternalEnv, Timeout, #{}).
 
--spec run_cli_with_opts(string(), [string()], [{string(), string()}], pos_integer(), map()) ->
+-spec run_cli_with_opts(cli_program(), [string()], [{string(), string()}], pos_integer(), map()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli_with_opts(Program, Args, InternalEnv, Timeout, RunOpts) ->
     ProgramStr =
@@ -1491,12 +1494,12 @@ run_cli_with_opts(Program, Args, InternalEnv, Timeout, RunOpts) ->
 %% Internal: run_cli with merged VaultEnv from Vault.
 %% InternalEnv is validated against the allowlist; VaultEnv is unwrapped
 %% from its opaque wrapper and merged — bypasses the allowlist.
--spec run_cli(string(), [string()], [{string(), string()}], vault_env(), pos_integer()) ->
+-spec run_cli(cli_program(), [string()], [{string(), string()}], vault_env(), pos_integer()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
     run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout, #{}).
 
--spec run_cli(string(), [string()], [{string(), string()}], vault_env(), pos_integer(), map()) ->
+-spec run_cli(cli_program(), [string()], [{string(), string()}], vault_env(), pos_integer(), map()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout, RunOpts) ->
     ProgramStr =
@@ -1522,12 +1525,12 @@ Execute a CLI command with the same executable and environment hardening as
 the auth flows, returning captured stdout/stderr lines only when the command
 exits successfully.
 """).
--spec run_capture_cli(string(), [string()], pos_integer()) ->
+-spec run_capture_cli(cli_program(), [string()], pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_cli(Program, Args, Timeout) ->
     run_capture_cli(Program, Args, Timeout, #{}).
 
--spec run_capture_cli(string(), [string()], pos_integer(), map()) ->
+-spec run_capture_cli(cli_program(), [string()], pos_integer(), map()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_cli(Program, Args, Timeout, RunOpts) when is_map(RunOpts) ->
     case run_cli_with_opts(Program, Args, [], Timeout, RunOpts) of
@@ -1544,7 +1547,7 @@ Execute a command through the user's login shell using the shell configured
 in `SHELL`, preserving the same startup semantics as an interactive shell
 invocation while still capturing output with BeamAgent's hardened runner.
 """).
--spec run_capture_login_shell(string(), [string()], pos_integer()) ->
+-spec run_capture_login_shell(cli_program(), [string()], pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_login_shell(Program, Args, Timeout) ->
     ProgramStr =
@@ -1554,19 +1557,11 @@ run_capture_login_shell(Program, Args, Timeout) ->
             L when is_list(L) ->
                 L
         end,
-    case os:find_executable(ProgramStr) of
-        false ->
-            {error, {cli_not_found, ProgramStr}};
-        ExePath ->
-            verify_executable_safety(ExePath),
-            case login_shell_program() of
-                {ok, Shell} ->
-                    verify_executable_safety(Shell),
-                    ShellProgram =
-                        case string:find(ProgramStr, "/") of
-                            nomatch -> ProgramStr;
-                            _ -> ExePath
-                        end,
+    case login_shell_program() of
+        {ok, Shell} ->
+            verify_executable_safety(Shell),
+            case shell_command_executable(ProgramStr) of
+                {ok, ShellProgram} ->
                     Command = login_shell_command_string(ShellProgram, Args),
                     case run_capture_login_shell_with_best_runner(Shell, Command, Timeout) of
                         {ok, Lines} ->
@@ -1576,7 +1571,9 @@ run_capture_login_shell(Program, Args, Timeout) ->
                     end;
                 {error, _} = Err ->
                     Err
-            end
+            end;
+        {error, _} = Err ->
+            Err
     end.
 
 run_copilot_auth_command(Program, PreferredArgs, LegacyArgs, InternalEnv, Timeout, Command) ->
@@ -1745,12 +1742,6 @@ collect_output(Port, Acc, LineBuf, Timeout) ->
         {error, timeout}
     end.
 
--spec shell_output_lines(binary()) -> [string()].
-shell_output_lines(Buffer) ->
-    [binary_to_list(strip_ansi(Line))
-     || Line <- binary:split(Buffer, <<"\n">>, [global]),
-        strip_ansi(Line) =/= <<>>].
-
 -spec collect_remaining_output(port(), [string()], [string()]) ->
                         {[string()], [string()]}.
 collect_remaining_output(Port, Acc, LineBuf) ->
@@ -1890,11 +1881,45 @@ login_shell_program() ->
 
 -spec fallback_login_shell() -> {ok, string()} | {error, {shell_not_found, string()}}.
 fallback_login_shell() ->
-    case os:find_executable("sh") of
+    Candidates = ["bash", "zsh", "ksh", "mksh", "fish", "sh"],
+    case find_login_shell(Candidates) of
+        {ok, Shell} ->
+            {ok, Shell};
         false ->
-            {error, {shell_not_found, "sh"}};
+            {error, {shell_not_found, "bash/zsh/ksh/mksh/fish/sh"}}
+    end.
+
+-spec find_login_shell([string()]) -> {ok, string()} | false.
+find_login_shell([]) ->
+    false;
+find_login_shell([Candidate | Rest]) ->
+    case os:find_executable(Candidate) of
+        false ->
+            find_login_shell(Rest);
         Shell ->
             {ok, Shell}
+    end.
+
+-spec shell_command_executable(string()) -> {ok, string()} | {error, term()}.
+shell_command_executable(ProgramStr) ->
+    case string:find(ProgramStr, "/") of
+        nomatch ->
+            {ok, ProgramStr};
+        _ ->
+            Path0 =
+                case filename:pathtype(ProgramStr) of
+                    relative ->
+                        filename:absname(ProgramStr);
+                    _ ->
+                        ProgramStr
+                end,
+            case filelib:is_regular(Path0) of
+                true ->
+                    verify_executable_safety(Path0),
+                    {ok, Path0};
+                false ->
+                    {error, {cli_not_found, ProgramStr}}
+            end
     end.
 
 -spec login_shell_command_string(string(), [string()]) -> string().
@@ -1902,6 +1927,88 @@ login_shell_command_string(Exe, Args) ->
     ExeStr = normalize_shell_string(Exe),
     ArgStrs = [normalize_shell_string(A) || A <- Args],
     pty_command_string(ExeStr, ArgStrs).
+
+-spec login_shell_args(string(), string()) -> [string()].
+login_shell_args(Shell, Command) ->
+    ShellPath = normalize_shell_string(Shell),
+    case shell_mode(ShellPath) of
+        interactive_login ->
+            ["-l", "-i", "-c", Command];
+        login_only ->
+            ["-l", "-c", Command];
+        profile_sourced ->
+            ["-c", profile_sourced_command(Command)];
+        plain ->
+            ["-c", Command]
+    end.
+
+-type shell_mode() :: interactive_login | login_only | profile_sourced | plain.
+
+-spec shell_mode(string()) -> shell_mode().
+shell_mode(ShellPath) ->
+    case shell_family(ShellPath) of
+        bash -> interactive_login;
+        zsh -> interactive_login;
+        ksh -> interactive_login;
+        mksh -> interactive_login;
+        fish -> interactive_login;
+        sh -> profile_sourced;
+        dash -> profile_sourced;
+        busybox -> profile_sourced;
+        ash -> profile_sourced;
+        _ -> plain
+    end.
+
+-spec shell_family(string()) -> atom().
+shell_family(ShellPath) ->
+    Base = string:lowercase(filename:basename(ShellPath)),
+    case Base of
+        "sh" ->
+            resolved_shell_family(ShellPath, 4, sh);
+        "bash" -> bash;
+        "zsh" -> zsh;
+        "ksh" -> ksh;
+        "mksh" -> mksh;
+        "fish" -> fish;
+        "dash" -> dash;
+        "ash" -> ash;
+        "busybox" -> busybox;
+        _ -> unknown
+    end.
+
+-spec resolved_shell_family(string(), non_neg_integer(), atom()) -> atom().
+resolved_shell_family(_ShellPath, 0, Default) ->
+    Default;
+resolved_shell_family(ShellPath, Depth, Default) ->
+    case file:read_link(ShellPath) of
+        {ok, Target0} ->
+            Target =
+                case filename:pathtype(Target0) of
+                    relative ->
+                        filename:join(filename:dirname(ShellPath), Target0);
+                    _ ->
+                        Target0
+                end,
+            case string:lowercase(filename:basename(Target)) of
+                "bash" -> bash;
+                "zsh" -> zsh;
+                "ksh" -> ksh;
+                "mksh" -> mksh;
+                "fish" -> fish;
+                "dash" -> dash;
+                "ash" -> ash;
+                "busybox" -> busybox;
+                "sh" -> resolved_shell_family(Target, Depth - 1, Default);
+                _ -> Default
+            end;
+        _ ->
+            Default
+    end.
+
+-spec profile_sourced_command(string()) -> string().
+profile_sourced_command(Command) ->
+    Profile = "$HOME/.profile",
+    "[ -f " ++ Profile ++ " ] && . " ++ Profile ++ " >/dev/null 2>&1; " ++ Command.
 
 -spec normalize_shell_string(string() | binary()) -> string().
 normalize_shell_string(B) when is_binary(B) ->
@@ -1927,34 +2034,12 @@ shell_startup_line(Line) ->
 -spec run_capture_login_shell_with_best_runner(string(), string(), pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_login_shell_with_best_runner(Shell, Command, Timeout) ->
-    case code:ensure_loaded('Elixir.System') of
-        {module, 'Elixir.System'} ->
-            run_capture_login_shell_via_system_cmd(Shell, Command, Timeout);
-        _ ->
-            run_capture_login_shell_via_port(Shell, Command, Timeout)
-    end.
-
--spec run_capture_login_shell_via_system_cmd(string(), string(), pos_integer()) ->
-                         {ok, [string()]} | {error, term()}.
-run_capture_login_shell_via_system_cmd(Shell, Command, Timeout) ->
-    ShellBin = unicode:characters_to_binary(Shell),
-    ArgBins = [<<"-lic">>, unicode:characters_to_binary(Command)],
-    _ = Timeout,
-    Opts = [{stderr_to_stdout, true}],
-    try 'Elixir.System':cmd(ShellBin, ArgBins, Opts) of
-        {Output, 0} ->
-            {ok, shell_output_lines(iolist_to_binary(Output))};
-        {Output, ExitCode} ->
-            {error, {cli_exit, ExitCode, shell_output_lines(iolist_to_binary(Output))}}
-    catch
-        Class:Reason ->
-            {error, {system_cmd_error, {Class, Reason}}}
-    end.
+    run_capture_login_shell_via_port(Shell, Command, Timeout).
 
 -spec run_capture_login_shell_via_port(string(), string(), pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_login_shell_via_port(Shell, Command, Timeout) ->
-    case run_capture_cli(Shell, ["-l", "-i", "-c", Command], Timeout) of
+    case run_capture_cli(Shell, login_shell_args(Shell, Command), Timeout) of
         {ok, Lines} ->
             {ok, Lines};
         {error, _} = Err ->

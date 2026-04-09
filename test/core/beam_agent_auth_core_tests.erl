@@ -480,6 +480,52 @@ run_capture_login_shell_uses_configured_shell_test() ->
         rm_rf(TmpDir)
     end.
 
+run_capture_login_shell_resolves_bare_program_via_shell_path_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        _CliPath = write_fake_cli(
+            TmpDir,
+            "probe-cli",
+            ["printf '%s\\n' 'probe-from-shell-path'\n"]),
+        ?assertEqual(false, os:find_executable("probe-cli")),
+        with_env_value(
+            "SHELL",
+            ShellPath,
+            fun() ->
+                {ok, Lines} =
+                    beam_agent_auth_core:run_capture_login_shell(
+                        "probe-cli",
+                        [],
+                        5000),
+                ?assertEqual(["probe-from-shell-path"], Lines)
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+fallback_login_shell_prefers_compatible_shell_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        _ShPath = write_named_executable(TmpDir, "sh"),
+        os:putenv("PATH", TmpDir),
+        ?assertEqual({ok, BashPath}, beam_agent_auth_core:fallback_login_shell())
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+login_shell_args_adjust_for_sh_family_test() ->
+    ?assertEqual(["-c", "[ -f $HOME/.profile ] && . $HOME/.profile >/dev/null 2>&1; echo ok"],
+                 beam_agent_auth_core:login_shell_args("/bin/sh", "echo ok")),
+    ?assertEqual(["-l", "-i", "-c", "echo ok"],
+                 beam_agent_auth_core:login_shell_args("/bin/zsh", "echo ok")).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -512,6 +558,8 @@ write_fake_shell(Dir) ->
     ok = file:write_file(
         Path,
         <<"#!/bin/sh\n"
+          "PATH=\"", (list_to_binary(Dir))/binary, ":$PATH\"\n"
+          "export PATH\n"
           "while [ $# -gt 0 ]; do\n"
           "  if [ \"$1\" = \"-c\" ]; then\n"
           "    shift\n"
@@ -520,6 +568,14 @@ write_fake_shell(Dir) ->
           "  shift\n"
           "done\n"
           "exit 1\n">>),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_named_executable(Dir, Name) ->
+    Path = filename:join(Dir, Name),
+    ok = file:write_file(
+        Path,
+        <<"#!/bin/sh\nexit 0\n">>),
     ok = file:change_mode(Path, 8#755),
     Path.
 
