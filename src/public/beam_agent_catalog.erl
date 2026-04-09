@@ -335,6 +335,12 @@ maybe_fallback_model_list({error, {timeout, _}} = Err, Fallback) ->
     prefer_model_fallback(Err, Fallback);
 maybe_fallback_model_list({error, {session_error, _}} = Err, Fallback) ->
     prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, {native_call_failed, _Kind, {timeout, _}}} = Err,
+                          Fallback) ->
+    prefer_model_fallback(Err, Fallback);
+maybe_fallback_model_list({error, {native_call_failed, _Kind, {session_error, _}}} = Err,
+                          Fallback) ->
+    prefer_model_fallback(Err, Fallback);
 maybe_fallback_model_list(Result, _Fallback) ->
     Result.
 

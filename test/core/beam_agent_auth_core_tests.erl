@@ -391,6 +391,95 @@ copilot_status_rejects_unknown_token_prefix_test() ->
                 end)
         end).
 
+opencode_status_accepts_cli_auth_list_credentials_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'Credentials ~/.local/share/opencode/auth.json'\n",
+             "printf '%s\\n' 'Anthropic oauth'\n",
+             "printf '%s\\n' 'OpenAI oauth'\n",
+             "printf '%s\\n' '2 credentials'\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(true, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+opencode_status_rejects_empty_cli_auth_list_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'Credentials ~/.local/share/opencode/auth.json'\n",
+             "printf '%s\\n' '0 credentials'\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(false, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+run_capture_cli_respects_cwd_option_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "pwd-probe",
+            ["pwd\n"]),
+        {ok, [Pwd]} =
+            beam_agent_auth_core:run_capture_cli(
+                CliPath,
+                [],
+                5000,
+                #{cwd => TmpDir}),
+        ?assertEqual(TmpDir, string:trim(Pwd))
+    after
+        rm_rf(TmpDir)
+    end.
+
+run_capture_login_shell_uses_configured_shell_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        CliPath = write_fake_cli(
+            TmpDir,
+            "probe-cli",
+            ["printf '%s\\n' 'probe-ok'\n"]),
+        with_env_value(
+            "SHELL",
+            ShellPath,
+            fun() ->
+                {ok, Lines} =
+                    beam_agent_auth_core:run_capture_login_shell(
+                        CliPath,
+                        [],
+                        5000),
+                ?assertEqual(["probe-ok"], Lines)
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -415,6 +504,22 @@ write_fake_cli(Dir, Name, BodyLines) ->
     Path = filename:join(Dir, Name),
     ok = file:write_file(Path,
                          iolist_to_binary(["#!/bin/sh\n" | BodyLines])),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_fake_shell(Dir) ->
+    Path = filename:join(Dir, "fake-shell"),
+    ok = file:write_file(
+        Path,
+        <<"#!/bin/sh\n"
+          "while [ $# -gt 0 ]; do\n"
+          "  if [ \"$1\" = \"-c\" ]; then\n"
+          "    shift\n"
+          "    exec /bin/sh -c \"$1\"\n"
+          "  fi\n"
+          "  shift\n"
+          "done\n"
+          "exit 1\n">>),
     ok = file:change_mode(Path, 8#755),
     Path.
 

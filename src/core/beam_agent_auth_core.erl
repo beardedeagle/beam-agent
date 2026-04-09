@@ -51,7 +51,8 @@ for Claude) rather than passing the secret on the command line — avoiding
 `/proc` exposure on Linux.
 """).
 
--export([status/2, login/2, login/3, logout/2, resolve_cli/2, run_capture_cli/3, strip_ansi/1,
+-export([status/2, login/2, login/3, logout/2, resolve_cli/2, run_capture_cli/3, run_capture_cli/4,
+         run_capture_login_shell/3, strip_ansi/1,
          hash_executable/1, from_vault/1, sanitize_for_agent/1]).
 
     %% Utility — exposed for external callers (e.g. account_core fallback)
@@ -582,8 +583,10 @@ copilot_logout(Opts) ->
 %% OpenCode — REST API via httpc + env fallback
 %%====================================================================
 
-%% OpenCode connects to a running server via HTTP.  For session-independent
-%% auth we probe the server health endpoint; if unreachable we check env.
+%% OpenCode connects to a running server via HTTP. For session-independent
+%% auth we first probe the server provider endpoint; if unreachable we
+%% check explicit environment credentials and finally the CLI-managed
+%% credential store exposed by `opencode auth list`.
 -define(OPENCODE_DEFAULT_URL, "http://localhost:4096").
 
 opencode_status(Opts) ->
@@ -606,28 +609,104 @@ opencode_status(Opts) ->
         {ok, Code, Body} ->
             {error, {unexpected_status, Code, Body}};
         {error, _Reason} ->
-            %% Server not reachable — check env vars
-            opencode_env_status()
+            %% Server not reachable — check local auth state
+            opencode_local_auth_status(Opts)
     end.
 
-opencode_env_status() ->
+opencode_local_auth_status(Opts) ->
     case os:getenv("OPENAI_API_KEY") of
         false ->
-            {ok,
-             #{backend => opencode,
-               authenticated => false,
-               method => env,
-               details =>
-                   #{hint =>
-                         <<"OpenCode server unreachable and OPENAI_API_KEY "
-                           "not set. Start the OpenCode server or set the "
-                           "environment variable.">>}}};
+            opencode_cli_auth_status(Opts);
         _Key ->
             {ok,
              #{backend => opencode,
                authenticated => true,
                method => env,
                details => #{source => <<"OPENAI_API_KEY env">>}}}
+    end.
+
+opencode_cli_auth_status(Opts) ->
+    Cli = resolve_cli(opencode, Opts),
+    Timeout = maps:get(timeout, Opts, ?STATUS_TIMEOUT),
+    case run_capture_cli(Cli, ["auth", "list"], Timeout) of
+        {ok, Lines} ->
+            case opencode_credential_count(Lines) of
+                Count when Count > 0 ->
+                    {ok,
+                     #{backend => opencode,
+                       authenticated => true,
+                       method => cli,
+                       details =>
+                           #{source => <<"opencode auth list">>,
+                             credential_count => Count}}};
+                0 ->
+                    {ok,
+                     #{backend => opencode,
+                       authenticated => false,
+                       method => cli,
+                       details =>
+                           #{hint =>
+                                 <<"OpenCode server unreachable, OPENAI_API_KEY "
+                                   "not set, and `opencode auth list` reported "
+                                   "no configured credentials.">>}}}
+            end;
+        {error, {cli_exit, _ExitCode, Lines}} ->
+            case opencode_credential_count(Lines) of
+                Count when Count > 0 ->
+                    {ok,
+                     #{backend => opencode,
+                       authenticated => true,
+                       method => cli,
+                       details =>
+                           #{source => <<"opencode auth list">>,
+                             credential_count => Count}}};
+                0 ->
+                    opencode_missing_auth_status()
+            end;
+        {error, _Reason} ->
+            opencode_missing_auth_status()
+    end.
+
+opencode_missing_auth_status() ->
+    {ok,
+     #{backend => opencode,
+       authenticated => false,
+       method => cli,
+       details =>
+           #{hint =>
+                 <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
+                   "and no configured OpenCode CLI credentials were found.">>}}}.
+
+-spec opencode_credential_count([string()]) -> non_neg_integer().
+opencode_credential_count(Lines) ->
+    Sanitized =
+        [string:trim(strip_ansi(Line))
+         || Line <- Lines,
+            string:trim(strip_ansi(Line)) =/= []],
+    case lists:filtermap(fun opencode_count_line/1, Sanitized) of
+        [Count | _] ->
+            Count;
+        [] ->
+            length([Line || Line <- Sanitized,
+                            opencode_auth_entry(Line)])
+    end.
+
+-spec opencode_count_line(string()) -> false | {true, non_neg_integer()}.
+opencode_count_line(Line) ->
+    case re:run(Line, "([0-9]+) credentials", [{capture, [1], list}]) of
+        {match, [Count]} ->
+            {true, list_to_integer(Count)};
+        nomatch ->
+            false
+    end.
+
+-spec opencode_auth_entry(string()) -> boolean().
+opencode_auth_entry(Line) ->
+    case re:run(Line, "(oauth|api)$", [caseless]) of
+        {match, _} ->
+            not lists:member($/, Line);
+        nomatch ->
+            false
     end.
 
 opencode_login(#{api_key := Key} = Opts, _VaultEnv) when is_binary(Key) ->
@@ -1386,15 +1465,27 @@ All invocations are logged for operational visibility.
 -spec run_cli(string(), [string()], [{string(), string()}], pos_integer()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, Timeout) ->
+    run_cli_with_opts(Program, Args, InternalEnv, Timeout, #{}).
+
+-spec run_cli_with_opts(string(), [string()], [{string(), string()}], pos_integer(), map()) ->
+                 {ok, non_neg_integer(), [string()]} | {error, term()}.
+run_cli_with_opts(Program, Args, InternalEnv, Timeout, RunOpts) ->
+    ProgramStr =
+        case Program of
+            B when is_binary(B) ->
+                binary_to_list(B);
+            L when is_list(L) ->
+                L
+        end,
     validate_env(InternalEnv),
-    case os:find_executable(Program) of
+    case os:find_executable(ProgramStr) of
         false ->
-            logger:warning("Auth CLI not found: ~s", [Program]),
-            {error, {cli_not_found, Program}};
+            logger:warning("Auth CLI not found: ~s", [ProgramStr]),
+            {error, {cli_not_found, ProgramStr}};
         ExePath ->
             verify_executable_safety(ExePath),
-            logger:info("Auth CLI exec: ~s ~s", [Program, args_summary(Args)]),
-            run_port(ExePath, Args, InternalEnv, Timeout)
+            logger:info("Auth CLI exec: ~s ~s", [ProgramStr, args_summary(Args)]),
+            run_port(ExePath, Args, InternalEnv, Timeout, RunOpts)
     end.
 
 %% Internal: run_cli with merged VaultEnv from Vault.
@@ -1403,15 +1494,27 @@ run_cli(Program, Args, InternalEnv, Timeout) ->
 -spec run_cli(string(), [string()], [{string(), string()}], vault_env(), pos_integer()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
+    run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout, #{}).
+
+-spec run_cli(string(), [string()], [{string(), string()}], vault_env(), pos_integer(), map()) ->
+                 {ok, non_neg_integer(), [string()]} | {error, term()}.
+run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout, RunOpts) ->
+    ProgramStr =
+        case Program of
+            B when is_binary(B) ->
+                binary_to_list(B);
+            L when is_list(L) ->
+                L
+        end,
     validate_env(InternalEnv),
-    case os:find_executable(Program) of
+    case os:find_executable(ProgramStr) of
         false ->
-            logger:warning("Auth CLI not found: ~s", [Program]),
-            {error, {cli_not_found, Program}};
+            logger:warning("Auth CLI not found: ~s", [ProgramStr]),
+            {error, {cli_not_found, ProgramStr}};
         ExePath ->
             verify_executable_safety(ExePath),
-            logger:info("Auth CLI exec: ~s ~s", [Program, args_summary(Args)]),
-            run_port(ExePath, Args, InternalEnv ++ VaultVars, Timeout)
+            logger:info("Auth CLI exec: ~s ~s", [ProgramStr, args_summary(Args)]),
+            run_port(ExePath, Args, InternalEnv ++ VaultVars, Timeout, RunOpts)
     end.
 
 -doc("""
@@ -1422,13 +1525,58 @@ exits successfully.
 -spec run_capture_cli(string(), [string()], pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_cli(Program, Args, Timeout) ->
-    case run_cli(Program, Args, [], Timeout) of
+    run_capture_cli(Program, Args, Timeout, #{}).
+
+-spec run_capture_cli(string(), [string()], pos_integer(), map()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_cli(Program, Args, Timeout, RunOpts) when is_map(RunOpts) ->
+    case run_cli_with_opts(Program, Args, [], Timeout, RunOpts) of
         {ok, 0, Lines} ->
             {ok, Lines};
         {ok, ExitCode, Lines} ->
             {error, {cli_exit, ExitCode, Lines}};
         {error, _} = Err ->
             Err
+    end.
+
+-doc("""
+Execute a command through the user's login shell using the shell configured
+in `SHELL`, preserving the same startup semantics as an interactive shell
+invocation while still capturing output with BeamAgent's hardened runner.
+""").
+-spec run_capture_login_shell(string(), [string()], pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_login_shell(Program, Args, Timeout) ->
+    ProgramStr =
+        case Program of
+            B when is_binary(B) ->
+                binary_to_list(B);
+            L when is_list(L) ->
+                L
+        end,
+    case os:find_executable(ProgramStr) of
+        false ->
+            {error, {cli_not_found, ProgramStr}};
+        ExePath ->
+            verify_executable_safety(ExePath),
+            case login_shell_program() of
+                {ok, Shell} ->
+                    verify_executable_safety(Shell),
+                    ShellProgram =
+                        case string:find(ProgramStr, "/") of
+                            nomatch -> ProgramStr;
+                            _ -> ExePath
+                        end,
+                    Command = login_shell_command_string(ShellProgram, Args),
+                    case run_capture_login_shell_with_best_runner(Shell, Command, Timeout) of
+                        {ok, Lines} ->
+                            {ok, strip_shell_startup_lines(Lines)};
+                        {error, _} = Err ->
+                            Err
+                    end;
+                {error, _} = Err ->
+                    Err
+            end
     end.
 
 run_copilot_auth_command(Program, PreferredArgs, LegacyArgs, InternalEnv, Timeout, Command) ->
@@ -1534,16 +1682,25 @@ unsupported_copilot_auth_command() ->
        "legacy auth commands. Upgrade the CLI and use `copilot login` "
        "or `copilot logout`.">>}.
 
--spec run_port(string(), [string()], [{string(), string()}], pos_integer()) ->
+-spec run_port(string(), [string()], [{string(), string()}], pos_integer(), map()) ->
                   {ok, non_neg_integer(), [string()]} | {error, term()}.
-run_port(ExePath, Args, AllEnv, Timeout) ->
+run_port(ExePath, Args, AllEnv, Timeout, RunOpts) ->
+    CwdOpt =
+        case maps:get(cwd, RunOpts, undefined) of
+            Cwd when is_list(Cwd), Cwd =/= [] ->
+                [{cd, Cwd}];
+            Cwd when is_binary(Cwd), byte_size(Cwd) > 0 ->
+                [{cd, binary_to_list(Cwd)}];
+            _ ->
+                []
+        end,
     PortOpts =
         [{args, Args},
          {env, scrub_env(AllEnv)},
          exit_status,
          stderr_to_stdout,
          {line, ?LINE_LENGTH},
-         hide],
+         hide] ++ CwdOpt,
     try
         Port = open_port({spawn_executable, ExePath}, PortOpts),
         collect_output(Port, [], Timeout)
@@ -1572,12 +1729,13 @@ collect_output(Port, Acc, LineBuf, Timeout) ->
         {Port, {data, {noeol, Line}}} ->
             collect_output(Port, Acc, [Line | LineBuf], Timeout);
         {Port, {exit_status, ExitCode}} ->
-            flush_port(Port),
-            FinalAcc = case LineBuf of
-                [] -> Acc;
-                _  -> [lists:flatten(lists:reverse(LineBuf)) | Acc]
-            end,
-            Lines = lists:reverse(FinalAcc),
+            {FinalAcc, FinalLineBuf} = collect_remaining_output(Port, Acc, LineBuf),
+            Lines =
+                lists:reverse(
+                    case FinalLineBuf of
+                        [] -> FinalAcc;
+                        _  -> [lists:flatten(lists:reverse(FinalLineBuf)) | FinalAcc]
+                    end),
             log_cli_result(ExitCode, Lines),
             {ok, ExitCode, Lines}
     after Timeout ->
@@ -1585,6 +1743,27 @@ collect_output(Port, Acc, LineBuf, Timeout) ->
         flush_port(Port),
         logger:warning("Auth CLI timed out after ~bms", [Timeout]),
         {error, timeout}
+    end.
+
+-spec shell_output_lines(binary()) -> [string()].
+shell_output_lines(Buffer) ->
+    [binary_to_list(strip_ansi(Line))
+     || Line <- binary:split(Buffer, <<"\n">>, [global]),
+        strip_ansi(Line) =/= <<>>].
+
+-spec collect_remaining_output(port(), [string()], [string()]) ->
+                        {[string()], [string()]}.
+collect_remaining_output(Port, Acc, LineBuf) ->
+    receive
+        {Port, {data, {eol, Line}}} ->
+            CompletedLine = lists:flatten(lists:reverse([Line | LineBuf])),
+            collect_remaining_output(Port, [CompletedLine | Acc], []);
+        {Port, {data, {noeol, Line}}} ->
+            collect_remaining_output(Port, Acc, [Line | LineBuf]);
+        {Port, {exit_status, _}} ->
+            collect_remaining_output(Port, Acc, LineBuf)
+    after 0 ->
+        {Acc, LineBuf}
     end.
 
 %% Drain any pending messages from a closed port.
@@ -1697,6 +1876,90 @@ find_pty_wrapper() ->
 pty_command_string(Exe, Args) ->
     Parts = [shell_escape(Exe) | [shell_escape(A) || A <- Args]],
     string:join(Parts, " ").
+
+-spec login_shell_program() -> {ok, string()} | {error, {shell_not_found, string()}}.
+login_shell_program() ->
+    case os:getenv("SHELL") of
+        false ->
+            fallback_login_shell();
+        [] ->
+            fallback_login_shell();
+        Shell ->
+            {ok, Shell}
+    end.
+
+-spec fallback_login_shell() -> {ok, string()} | {error, {shell_not_found, string()}}.
+fallback_login_shell() ->
+    case os:find_executable("sh") of
+        false ->
+            {error, {shell_not_found, "sh"}};
+        Shell ->
+            {ok, Shell}
+    end.
+
+-spec login_shell_command_string(string(), [string()]) -> string().
+login_shell_command_string(Exe, Args) ->
+    ExeStr = normalize_shell_string(Exe),
+    ArgStrs = [normalize_shell_string(A) || A <- Args],
+    pty_command_string(ExeStr, ArgStrs).
+
+-spec normalize_shell_string(string() | binary()) -> string().
+normalize_shell_string(B) when is_binary(B) ->
+    binary_to_list(B);
+normalize_shell_string(L) when is_list(L) ->
+    L.
+
+-spec strip_shell_startup_lines([string()]) -> [string()].
+strip_shell_startup_lines(Lines) ->
+    [Clean
+     || Line <- Lines,
+        Clean0 <- [string:trim(binary_to_list(strip_ansi(unicode:characters_to_binary(Line))))],
+        Clean <- [Clean0],
+        Clean =/= [],
+        not shell_startup_line(Clean)].
+
+-spec shell_startup_line(string()) -> boolean().
+shell_startup_line(Line) ->
+    lists:prefix("ShellIntegrationVersion=", Line) orelse
+    lists:prefix("CurrentDir=", Line) orelse
+    lists:prefix("RemoteHost=", Line).
+
+-spec run_capture_login_shell_with_best_runner(string(), string(), pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_login_shell_with_best_runner(Shell, Command, Timeout) ->
+    case code:ensure_loaded('Elixir.System') of
+        {module, 'Elixir.System'} ->
+            run_capture_login_shell_via_system_cmd(Shell, Command, Timeout);
+        _ ->
+            run_capture_login_shell_via_port(Shell, Command, Timeout)
+    end.
+
+-spec run_capture_login_shell_via_system_cmd(string(), string(), pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_login_shell_via_system_cmd(Shell, Command, Timeout) ->
+    ShellBin = unicode:characters_to_binary(Shell),
+    ArgBins = [<<"-lic">>, unicode:characters_to_binary(Command)],
+    _ = Timeout,
+    Opts = [{stderr_to_stdout, true}],
+    try 'Elixir.System':cmd(ShellBin, ArgBins, Opts) of
+        {Output, 0} ->
+            {ok, shell_output_lines(iolist_to_binary(Output))};
+        {Output, ExitCode} ->
+            {error, {cli_exit, ExitCode, shell_output_lines(iolist_to_binary(Output))}}
+    catch
+        Class:Reason ->
+            {error, {system_cmd_error, {Class, Reason}}}
+    end.
+
+-spec run_capture_login_shell_via_port(string(), string(), pos_integer()) ->
+                         {ok, [string()]} | {error, term()}.
+run_capture_login_shell_via_port(Shell, Command, Timeout) ->
+    case run_capture_cli(Shell, ["-l", "-i", "-c", Command], Timeout) of
+        {ok, Lines} ->
+            {ok, Lines};
+        {error, _} = Err ->
+            Err
+    end.
 
 %% Shell-escape a string for safe inclusion in `sh -c '...'`.
 %% Uses POSIX single-quoting with escaped embedded single-quotes.

@@ -38,7 +38,7 @@ beam_agent_auth (public — this module)
        ├─ claude:   `claude auth status|login|logout`
        ├─ codex:    `codex login status`, `codex login [--with-api-key]`
        ├─ copilot:  env/config status, `copilot login|logout`
-       ├─ opencode: REST via httpc (localhost-only)
+       ├─ opencode: provider endpoint, env, or `opencode auth list`
        └─ gemini:   env checks / PTY-interactive OAuth
 ```
 """.
@@ -88,6 +88,7 @@ Options:
   - `cli_path` — override the CLI binary location
   - `timeout`  — override the default 10 s timeout
   - `base_url` — OpenCode server URL (localhost only, default `http://localhost:4096`)
+                 used for provider-endpoint auth probing before local CLI/env fallback
 
 ```erlang
 {ok, #{authenticated := Auth}} = beam_agent_auth:status(claude).

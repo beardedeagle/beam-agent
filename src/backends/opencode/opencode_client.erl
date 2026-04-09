@@ -891,22 +891,30 @@ supported_commands(Session) ->
     extract_init_field(Session, commands, slash_commands, []).
 -spec supported_models(pid()) -> {ok, list()} | {error, term()}.
 supported_models(Session) ->
-    %% Opencode does not populate models during init. Query the
-    %% provider endpoint which returns the full model catalog.
-    case provider_list(Session) of
-        {ok, #{<<"models">> := Models}} when is_list(Models) ->
+    %% Prefer the CLI-backed model catalog because it reflects the local
+    %% Opencode provider wiring even when the session transport is unhealthy
+    %% or the HTTP provider endpoint only exposes a partial view.
+    case cli_or_init_models(Session) of
+        {ok, Models} when is_list(Models), Models =/= [] ->
             {ok, Models};
-        {ok, #{<<"providers">> := Provs}} when is_list(Provs) ->
-            %% Flatten models across all providers into a single list.
-            Models = lists:flatmap(
-                fun(#{<<"models">> := Ms}) when is_list(Ms) -> Ms;
-                   (_) -> []
-                end, Provs),
-            {ok, Models};
-        {ok, _} ->
-            cli_or_init_models(Session);
-        {error, _} ->
-            cli_or_init_models(Session)
+        _ ->
+            %% Fall back to the provider endpoint when the CLI path does not
+            %% yield any models (for example if the binary is unavailable).
+            case provider_list(Session) of
+                {ok, #{<<"models">> := Models}} when is_list(Models) ->
+                    {ok, Models};
+                {ok, #{<<"providers">> := Provs}} when is_list(Provs) ->
+                    %% Flatten models across all providers into a single list.
+                    Models = lists:flatmap(
+                        fun(#{<<"models">> := Ms}) when is_list(Ms) -> Ms;
+                           (_) -> []
+                        end, Provs),
+                    {ok, Models};
+                {ok, _} ->
+                    extract_init_field(Session, models, models, []);
+                {error, _} ->
+                    extract_init_field(Session, models, models, [])
+            end
     end.
 -spec supported_agents(pid()) -> {ok, list()} | {error, term()}.
 supported_agents(Session) ->
@@ -1056,7 +1064,7 @@ model_entry(ModelId) ->
 -spec run_model_cli(string(), [string(), ...]) ->
     {ok, [string()]} | {error, term()}.
 run_model_cli(Program, Args) ->
-    beam_agent_auth_core:run_capture_cli(Program, Args, 10000).
+    beam_agent_auth_core:run_capture_login_shell(Program, Args, 60000).
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->
