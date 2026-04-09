@@ -1064,7 +1064,12 @@ model_entry(ModelId) ->
 -spec run_model_cli(string(), [string(), ...]) ->
     {ok, [string()]} | {error, term()}.
 run_model_cli(Program, Args) ->
-    beam_agent_auth_core:run_capture_login_shell(Program, Args, 60000).
+    case beam_agent_auth_core:run_capture_cli(Program, Args, 60000) of
+        {error, {cli_not_found, _}} ->
+            beam_agent_auth_core:run_capture_login_shell(Program, Args, 60000);
+        Result ->
+            Result
+    end.
 
 -spec with_adapter_source(pid(), map()) -> session_view().
 with_adapter_source(_Session, Result) ->

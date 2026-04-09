@@ -715,7 +715,8 @@ opencode_probe_failed_status(_Cli, {error, Reason}) ->
                  <<"OpenCode server unreachable, OPENAI_API_KEY not set, "
                    "and the OpenCode CLI probe failed.">>,
              source => <<"opencode auth list">>,
-             failure => list_to_binary(io_lib:format("~0p", [Reason]))}}}.
+             failure => cli_probe_failed,
+             reason => list_to_binary(io_lib:format("~0p", [Reason]))}}}.
 
 -spec opencode_credential_count([string() | binary()]) -> non_neg_integer().
 opencode_credential_count(Lines) ->

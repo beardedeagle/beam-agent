@@ -513,6 +513,37 @@ opencode_status_reports_cli_probe_failures_distinctly_test() ->
         rm_rf(TmpDir)
     end.
 
+opencode_status_reports_generic_probe_failures_with_stable_failure_code_test() ->
+    PreviousPath = os:getenv("PATH"),
+    try
+        os:putenv("PATH", ""),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                with_env_value(
+                    "SHELL",
+                    "definitely-not-a-shell",
+                    fun() ->
+                        {ok, Status} =
+                            beam_agent_auth_core:status(
+                                opencode,
+                                #{base_url => "http://localhost:1"}),
+                        ?assertEqual(false, maps:get(authenticated, Status)),
+                        ?assertEqual(cli, maps:get(method, Status)),
+                        Details = maps:get(details, Status),
+                        ?assertEqual(cli_probe_failed, maps:get(failure, Details)),
+                        Reason = maps:get(reason, Details),
+                        ?assert(is_binary(Reason)),
+                        ?assertMatch({_, _}, binary:match(Reason, <<"shell_not_found">>))
+                    end)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end
+    end.
+
 run_capture_cli_respects_cwd_option_test() ->
     TmpDir = make_tmp_dir(),
     try

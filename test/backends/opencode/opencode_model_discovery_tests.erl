@@ -34,6 +34,34 @@ discover_cli_models_uses_opencode_models_command_test() ->
         rm_rf(TmpDir)
     end.
 
+discover_cli_models_with_explicit_cli_path_does_not_require_login_shell_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        CliPath = write_fake_opencode(TmpDir),
+        os:putenv("PATH", ""),
+        with_env_value(
+            "SHELL",
+            "definitely-not-a-shell",
+            fun() ->
+                {ok, Models} = opencode_client:discover_cli_models(#{cli_path => CliPath}),
+                ?assertEqual(
+                    [
+                        #{<<"modelId">> => <<"openai/gpt-5">>,
+                          <<"name">> => <<"openai/gpt-5">>},
+                        #{<<"modelId">> => <<"anthropic/claude-sonnet-4-6">>,
+                          <<"name">> => <<"anthropic/claude-sonnet-4-6">>}
+                    ],
+                    Models)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
 write_fake_opencode(Dir) ->
     Path = filename:join(Dir, "opencode"),
     ok = file:write_file(
@@ -70,4 +98,16 @@ rm_rf(Dir) ->
             file:del_dir(Dir);
         {error, _} ->
             ok
+    end.
+
+with_env_value(Name, Value, Fun) ->
+    Previous = os:getenv(Name),
+    os:putenv(Name, Value),
+    try
+        Fun()
+    after
+        case Previous of
+            false -> os:unsetenv(Name);
+            OldValue -> os:putenv(Name, OldValue)
+        end
     end.
