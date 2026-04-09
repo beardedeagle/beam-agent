@@ -1502,13 +1502,7 @@ run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout) ->
 -spec run_cli(cli_program(), [string()], [{string(), string()}], vault_env(), pos_integer(), map()) ->
                  {ok, non_neg_integer(), [string()]} | {error, term()}.
 run_cli(Program, Args, InternalEnv, {vault_env, VaultVars}, Timeout, RunOpts) ->
-    ProgramStr =
-        case Program of
-            B when is_binary(B) ->
-                binary_to_list(B);
-            L when is_list(L) ->
-                L
-        end,
+    ProgramStr = normalize_program(Program),
     validate_env(InternalEnv),
     case os:find_executable(ProgramStr) of
         false ->
@@ -1550,13 +1544,7 @@ invocation while still capturing output with BeamAgent's hardened runner.
 -spec run_capture_login_shell(cli_program(), [string()], pos_integer()) ->
                          {ok, [string()]} | {error, term()}.
 run_capture_login_shell(Program, Args, Timeout) ->
-    ProgramStr =
-        case Program of
-            B when is_binary(B) ->
-                binary_to_list(B);
-            L when is_list(L) ->
-                L
-        end,
+    ProgramStr = normalize_program(Program),
     case login_shell_program() of
         {ok, Shell} ->
             verify_executable_safety(Shell),
@@ -1950,8 +1938,6 @@ login_shell_command_string(Exe, Args) ->
 login_shell_args(Shell, Command) ->
     ShellPath = normalize_shell_string(Shell),
     case shell_mode(ShellPath) of
-        interactive_login ->
-            ["-l", "-i", "-c", Command];
         login_only ->
             ["-l", "-c", Command];
         profile_sourced ->
@@ -1960,16 +1946,16 @@ login_shell_args(Shell, Command) ->
             ["-c", Command]
     end.
 
--type shell_mode() :: interactive_login | login_only | profile_sourced | plain.
+-type shell_mode() :: login_only | profile_sourced | plain.
 
 -spec shell_mode(string()) -> shell_mode().
 shell_mode(ShellPath) ->
     case shell_family(ShellPath) of
-        bash -> interactive_login;
-        zsh -> interactive_login;
-        ksh -> interactive_login;
-        mksh -> interactive_login;
-        fish -> interactive_login;
+        bash -> login_only;
+        zsh -> login_only;
+        ksh -> login_only;
+        mksh -> login_only;
+        fish -> login_only;
         sh -> profile_sourced;
         dash -> profile_sourced;
         busybox -> profile_sourced;
@@ -2032,6 +2018,12 @@ profile_sourced_command(Command) ->
 normalize_shell_string(B) when is_binary(B) ->
     binary_to_list(B);
 normalize_shell_string(L) when is_list(L) ->
+    L.
+
+-spec normalize_program(cli_program()) -> string().
+normalize_program(B) when is_binary(B) ->
+    binary_to_list(B);
+normalize_program(L) when is_list(L) ->
     L.
 
 -spec strip_shell_startup_lines([string()]) -> [string()].

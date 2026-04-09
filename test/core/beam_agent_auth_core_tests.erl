@@ -533,7 +533,7 @@ fallback_login_shell_prefers_compatible_shell_test() ->
 login_shell_args_adjust_for_sh_family_test() ->
     ?assertEqual(["-c", "[ -f $HOME/.profile ] && . $HOME/.profile >/dev/null 2>&1; echo ok"],
                  beam_agent_auth_core:login_shell_args("/bin/sh", "echo ok")),
-    ?assertEqual(["-l", "-i", "-c", "echo ok"],
+    ?assertEqual(["-l", "-c", "echo ok"],
                  beam_agent_auth_core:login_shell_args("/bin/zsh", "echo ok")).
 
 login_shell_program_resolves_shell_basename_test() ->
