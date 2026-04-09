@@ -14,7 +14,7 @@ discover_models_from_claude_config_test() ->
                 }
             },
             <<"workspace">> => #{
-                <<"model">> => <<"claude-haiku-4-5-20251001[1m]">>
+                <<"model">> => <<"claude-haiku-4-5-20251001">>
             }
         },
         ok = file:write_file(ConfigPath, json:encode(Config)),
@@ -23,7 +23,9 @@ discover_models_from_claude_config_test() ->
         ?assertEqual(
             ordsets:from_list([
                 <<"claude-haiku-4-5-20251001">>,
+                <<"claude-opus-4-6[1m]">>,
                 <<"claude-opus-4-6">>,
+                <<"claude-sonnet-4-6[1m]">>,
                 <<"claude-sonnet-4-6">>
             ]),
             ModelIds)
@@ -31,10 +33,47 @@ discover_models_from_claude_config_test() ->
         rm_rf(TmpDir)
     end.
 
-normalize_claude_model_id_strips_context_suffix_test() ->
+normalize_claude_model_id_returns_base_model_test() ->
     ?assertEqual(<<"claude-sonnet-4-6">>,
                  claude_agent_sdk:normalize_claude_model_id(
                      <<"claude-sonnet-4-6[1m]">>)).
+
+discoverable_claude_model_ids_expand_known_context_variants_test() ->
+    ?assertEqual(
+        ordsets:from_list([<<"claude-sonnet-4-6">>, <<"claude-sonnet-4-6[1m]">>]),
+        ordsets:from_list(
+            claude_agent_sdk:discoverable_claude_model_ids(<<"claude-sonnet-4-6">>)
+        )),
+    ?assertEqual(
+        ordsets:from_list([<<"claude-opus-4-6">>, <<"claude-opus-4-6[1m]">>]),
+        ordsets:from_list(
+            claude_agent_sdk:discoverable_claude_model_ids(<<"claude-opus-4-6[1m]">>)
+        )),
+    ?assertEqual(
+        [<<"claude-haiku-4-5-20251001">>],
+        claude_agent_sdk:discoverable_claude_model_ids(<<"claude-haiku-4-5-20251001">>)
+    ).
+
+expand_claude_model_entries_add_known_context_variants_test() ->
+    Expanded =
+        claude_agent_sdk:expand_claude_model_entries([
+            #{<<"modelId">> => <<"claude-sonnet-4-6">>,
+              <<"name">> => <<"claude-sonnet-4-6">>},
+            #{<<"modelId">> => <<"claude-opus-4-6">>,
+              <<"name">> => <<"claude-opus-4-6">>},
+            #{<<"modelId">> => <<"claude-haiku-4-5-20251001">>,
+              <<"name">> => <<"claude-haiku-4-5-20251001">>}
+        ]),
+    ModelIds = ordsets:from_list([maps:get(<<"modelId">>, M) || M <- Expanded]),
+    ?assertEqual(
+        ordsets:from_list([
+            <<"claude-haiku-4-5-20251001">>,
+            <<"claude-opus-4-6">>,
+            <<"claude-opus-4-6[1m]">>,
+            <<"claude-sonnet-4-6">>,
+            <<"claude-sonnet-4-6[1m]">>
+        ]),
+        ModelIds).
 
 claude_config_path_without_home_returns_undefined_test() ->
     with_env_unset(

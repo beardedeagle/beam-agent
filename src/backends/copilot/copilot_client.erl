@@ -544,6 +544,17 @@ supported_models(Session) ->
     %% Query the CLI via the native models.list RPC command. If the ACP
     %% transport cannot answer, fall back to a direct non-interactive CLI
     %% probe so model discovery still works.
+    case health(Session) of
+        ready ->
+            supported_models_from_native_or_prompt(Session);
+        active_query ->
+            supported_models_from_native_or_prompt(Session);
+        _ ->
+            prompt_or_init_models(Session)
+    end.
+
+-spec supported_models_from_native_or_prompt(pid()) -> {ok, list()} | {error, term()}.
+supported_models_from_native_or_prompt(Session) ->
     case catch model_list(Session) of
         {ok, #{<<"models">> := Models}} when is_list(Models) ->
             {ok, Models};
@@ -1248,7 +1259,19 @@ model_entry(ModelId) ->
 -spec run_model_cli(string(), [string(), ...]) ->
     {ok, [string()]} | {error, term()}.
 run_model_cli(Program, Args) ->
-    beam_agent_auth_core:run_capture_cli(Program, Args, 30000).
+    beam_agent_auth_core:run_capture_cli(Program, Args, 60000,
+                                         neutral_probe_run_opts()).
+
+-spec neutral_probe_run_opts() -> map().
+neutral_probe_run_opts() ->
+    case os:getenv("HOME") of
+        false ->
+            #{};
+        [] ->
+            #{};
+        Home ->
+            #{cwd => Home}
+    end.
 
 %%====================================================================
 %% beam_agent_adapter callbacks

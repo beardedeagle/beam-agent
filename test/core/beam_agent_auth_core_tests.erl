@@ -391,6 +391,294 @@ copilot_status_rejects_unknown_token_prefix_test() ->
                 end)
         end).
 
+opencode_status_accepts_cli_auth_list_credentials_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'Credentials ~/.local/share/opencode/auth.json'\n",
+             "printf '%s\\n' 'Anthropic oauth'\n",
+             "printf '%s\\n' 'OpenAI oauth'\n",
+             "printf '%s\\n' '2 credentials'\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(true, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+opencode_status_rejects_empty_cli_auth_list_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'Credentials ~/.local/share/opencode/auth.json'\n",
+             "printf '%s\\n' '0 credentials'\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(false, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+opencode_credential_count_handles_binary_lines_test() ->
+    ?assertEqual(
+        2,
+        beam_agent_auth_core:opencode_credential_count([
+            <<"Credentials ~/.local/share/opencode/auth.json">>,
+            <<"">>,
+            <<"OpenAI oauth">>,
+            <<"Google api">>
+        ])).
+
+opencode_status_retries_auth_list_via_login_shell_when_cli_not_on_path_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        _CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"list\" ]; then\n",
+             "  printf '%s\\n' 'OpenAI oauth'\n",
+             "  exit 0\n",
+             "fi\n",
+             "exit 1\n"]),
+        os:putenv("PATH", ""),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                with_env_value(
+                    "SHELL",
+                    ShellPath,
+                    fun() ->
+                        {ok, Status} =
+                            beam_agent_auth_core:status(
+                                opencode,
+                                #{base_url => "http://localhost:1"}),
+                        ?assertEqual(true, maps:get(authenticated, Status)),
+                        ?assertEqual(cli, maps:get(method, Status)),
+                        ?assertEqual(1, maps:get(credential_count, maps:get(details, Status)))
+                    end)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+opencode_status_reports_cli_probe_failures_distinctly_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "opencode",
+            ["printf '%s\\n' 'permission denied'\n",
+             "exit 2\n"]),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                {ok, Status} =
+                    beam_agent_auth_core:status(
+                        opencode,
+                        #{cli_path => CliPath,
+                          base_url => "http://localhost:1"}),
+                ?assertEqual(false, maps:get(authenticated, Status)),
+                ?assertEqual(cli, maps:get(method, Status)),
+                Details = maps:get(details, Status),
+                ?assertEqual(cli_exit, maps:get(failure, Details)),
+                ?assertEqual(2, maps:get(exit_code, Details))
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+opencode_status_reports_generic_probe_failures_with_stable_failure_code_test() ->
+    PreviousPath = os:getenv("PATH"),
+    try
+        os:putenv("PATH", ""),
+        with_env_unset(
+            "OPENAI_API_KEY",
+            fun() ->
+                with_env_value(
+                    "SHELL",
+                    "definitely-not-a-shell",
+                    fun() ->
+                        {ok, Status} =
+                            beam_agent_auth_core:status(
+                                opencode,
+                                #{base_url => "http://localhost:1"}),
+                        ?assertEqual(false, maps:get(authenticated, Status)),
+                        ?assertEqual(cli, maps:get(method, Status)),
+                        Details = maps:get(details, Status),
+                        ?assertEqual(cli_probe_failed, maps:get(failure, Details)),
+                        Reason = maps:get(reason, Details),
+                        ?assert(is_binary(Reason)),
+                        ?assertMatch({_, _}, binary:match(Reason, <<"shell_not_found">>))
+                    end)
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end
+    end.
+
+run_capture_cli_respects_cwd_option_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        CliPath = write_fake_cli(
+            TmpDir,
+            "pwd-probe",
+            ["pwd\n"]),
+        {ok, [Pwd]} =
+            beam_agent_auth_core:run_capture_cli(
+                CliPath,
+                [],
+                5000,
+                #{cwd => TmpDir}),
+        ?assertEqual(TmpDir, string:trim(Pwd))
+    after
+        rm_rf(TmpDir)
+    end.
+
+run_capture_login_shell_uses_configured_shell_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        CliPath = write_fake_cli(
+            TmpDir,
+            "probe-cli",
+            ["printf '%s\\n' 'probe-ok'\n"]),
+        with_env_value(
+            "SHELL",
+            ShellPath,
+            fun() ->
+                {ok, Lines} =
+                    beam_agent_auth_core:run_capture_login_shell(
+                        CliPath,
+                        [],
+                        5000),
+                ?assertEqual(["probe-ok"], Lines)
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+run_capture_login_shell_resolves_bare_program_via_shell_path_test() ->
+    TmpDir = make_tmp_dir(),
+    try
+        ShellPath = write_fake_shell(TmpDir),
+        _CliPath = write_fake_cli(
+            TmpDir,
+            "probe-cli",
+            ["printf '%s\\n' 'probe-from-shell-path'\n"]),
+        ?assertEqual(false, os:find_executable("probe-cli")),
+        with_env_value(
+            "SHELL",
+            ShellPath,
+            fun() ->
+                {ok, Lines} =
+                    beam_agent_auth_core:run_capture_login_shell(
+                        "probe-cli",
+                        [],
+                        5000),
+                ?assertEqual(["probe-from-shell-path"], Lines)
+            end)
+    after
+        rm_rf(TmpDir)
+    end.
+
+fallback_login_shell_prefers_compatible_shell_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        _ShPath = write_named_executable(TmpDir, "sh"),
+        os:putenv("PATH", TmpDir),
+        ?assertEqual({ok, BashPath}, beam_agent_auth_core:fallback_login_shell())
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+login_shell_args_adjust_for_sh_family_test() ->
+    ?assertEqual(["-c", "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\" >/dev/null 2>&1; echo ok"],
+                 beam_agent_auth_core:login_shell_args("/bin/sh", "echo ok")),
+    ?assertEqual(["-l", "-c", "echo ok"],
+                 beam_agent_auth_core:login_shell_args("/bin/zsh", "echo ok")).
+
+login_shell_program_resolves_shell_basename_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        os:putenv("PATH", TmpDir),
+        with_env_value(
+            "SHELL",
+            "bash",
+            fun() ->
+                ?assertEqual({ok, BashPath}, beam_agent_auth_core:login_shell_program())
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+login_shell_program_falls_back_when_shell_env_is_unusable_test() ->
+    TmpDir = make_tmp_dir(),
+    PreviousPath = os:getenv("PATH"),
+    try
+        BashPath = write_named_executable(TmpDir, "bash"),
+        os:putenv("PATH", TmpDir),
+        with_env_value(
+            "SHELL",
+            "definitely-not-a-shell",
+            fun() ->
+                ?assertEqual({ok, BashPath}, beam_agent_auth_core:login_shell_program())
+            end)
+    after
+        case PreviousPath of
+            false -> os:unsetenv("PATH");
+            Value -> os:putenv("PATH", Value)
+        end,
+        rm_rf(TmpDir)
+    end.
+
+shell_command_executable_treats_backslash_paths_as_explicit_test() ->
+    %% A backslash-separated path should be treated as an explicit path rather
+    %% than a bare program name, even on non-Windows hosts.
+    ?assertEqual(
+        {error, {cli_not_found, "C:\\tools\\opencode.exe"}},
+        beam_agent_auth_core:shell_command_executable("C:\\tools\\opencode.exe")
+    ).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -415,6 +703,32 @@ write_fake_cli(Dir, Name, BodyLines) ->
     Path = filename:join(Dir, Name),
     ok = file:write_file(Path,
                          iolist_to_binary(["#!/bin/sh\n" | BodyLines])),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_fake_shell(Dir) ->
+    Path = filename:join(Dir, "fake-shell"),
+    ok = file:write_file(
+        Path,
+        <<"#!/bin/sh\n"
+          "PATH=\"", (list_to_binary(Dir))/binary, ":$PATH\"\n"
+          "export PATH\n"
+          "while [ $# -gt 0 ]; do\n"
+          "  if [ \"$1\" = \"-c\" ]; then\n"
+          "    shift\n"
+          "    exec /bin/sh -c \"$1\"\n"
+          "  fi\n"
+          "  shift\n"
+          "done\n"
+          "exit 1\n">>),
+    ok = file:change_mode(Path, 8#755),
+    Path.
+
+write_named_executable(Dir, Name) ->
+    Path = filename:join(Dir, Name),
+    ok = file:write_file(
+        Path,
+        <<"#!/bin/sh\nexit 0\n">>),
     ok = file:change_mode(Path, 8#755),
     Path.
 

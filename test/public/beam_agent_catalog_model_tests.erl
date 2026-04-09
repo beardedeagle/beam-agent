@@ -46,3 +46,11 @@ maybe_fallback_model_list_keeps_native_error_when_fallback_exits_test() ->
         beam_agent_catalog:maybe_fallback_model_list(
             {error, session_error},
             fun() -> exit(timeout) end)).
+
+maybe_fallback_model_list_uses_supported_models_on_native_timeout_exit_test() ->
+    Models = [#{<<"modelId">> => <<"gpt-5">>}],
+    ?assertEqual(
+        {ok, #{<<"models">> => Models}},
+        beam_agent_catalog:maybe_fallback_model_list(
+            {error, {native_call_failed, exit, {timeout, probe_timeout}}},
+            fun() -> {ok, #{<<"models">> => Models}} end)).
